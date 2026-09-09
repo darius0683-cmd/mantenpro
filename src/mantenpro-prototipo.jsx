@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
   CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut,
-  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History
+  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend
@@ -502,6 +502,586 @@ function LocationFormModal({ branches, defaultBranchId, onClose, onSave, saving 
   );
 }
 
+function ClientFormModal({ initial, onClose, onSave, saving }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [rnc, setRnc] = useState(initial?.rnc_cedula || "");
+  const [phone, setPhone] = useState(initial?.phone || "");
+  const [email, setEmail] = useState(initial?.email || "");
+  const [address, setAddress] = useState(initial?.address || "");
+
+  const submit = () => {
+    if (!name.trim()) return;
+    onSave({ name: name.trim(), rnc_cedula: rnc.trim() || null, phone: phone.trim() || null, email: email.trim() || null, address: address.trim() || null });
+  };
+
+  return (
+    <Modal title={initial ? "Editar cliente" : "Agregar cliente"} onClose={onClose} wide>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Nombre / razón social">
+          <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Supermercado La Ideal" />
+        </Field>
+        <Field label="RNC / Cédula">
+          <input className={inputClass} style={inputStyle} value={rnc} onChange={(e) => setRnc(e.target.value)} placeholder="Ej. 101-01234-5" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Teléfono">
+          <input className={inputClass} style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Ej. 809-555-1234" />
+        </Field>
+        <Field label="Correo">
+          <input className={inputClass} style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ej. contacto@cliente.com" />
+        </Field>
+      </div>
+      <Field label="Dirección">
+        <input className={inputClass} style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Ej. Av. 27 de Febrero, Santo Domingo" />
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar cliente"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+const fmtMoney = (n) => `RD$ ${Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const addMonths = (dateStr, months) => {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setMonth(d.getMonth() + Number(months || 0));
+  return d;
+};
+const daysBetween = (a, b) => Math.ceil((a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24));
+
+function ClientAssetFormModal({ clients, initial, onClose, onSave, saving, onRequestNewClient }) {
+  const [clientId, setClientId] = useState(initial?.client_id || clients[0]?.id || "");
+  const [name, setName] = useState(initial?.name || "");
+  const [brand, setBrand] = useState(initial?.brand || "");
+  const [model, setModel] = useState(initial?.model || "");
+  const [serial, setSerial] = useState(initial?.serial_number || "");
+  const [installDate, setInstallDate] = useState(initial?.install_date || new Date().toISOString().slice(0, 10));
+  const [warrantyMonths, setWarrantyMonths] = useState(initial?.warranty_months ?? 12);
+  const [notes, setNotes] = useState(initial?.notes || "");
+
+  const submit = () => {
+    if (!clientId || !name.trim() || !installDate) return;
+    onSave({
+      client_id: clientId, name: name.trim(), brand: brand.trim() || null, model: model.trim() || null,
+      serial_number: serial.trim() || null, install_date: installDate, warranty_months: Number(warrantyMonths) || 0, notes: notes.trim() || null,
+    });
+  };
+
+  return (
+    <Modal title={initial ? "Editar activo instalado" : "Agregar activo instalado"} onClose={onClose} wide>
+      <Field label="Cliente">
+        <div className="flex gap-2">
+          <select className={inputClass} style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}>
+            <option value="">Selecciona uno</option>
+            {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <button type="button" onClick={onRequestNewClient} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
+        </div>
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Nombre / identificador del activo">
+          <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Aire Split 24000 BTU" />
+        </Field>
+        <Field label="Número de serie">
+          <input className={inputClass} style={inputStyle} value={serial} onChange={(e) => setSerial(e.target.value)} placeholder="Ej. LC2504679408" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Marca">
+          <input className={inputClass} style={inputStyle} value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Ej. Danfoss" />
+        </Field>
+        <Field label="Modelo">
+          <input className={inputClass} style={inputStyle} value={model} onChange={(e) => setModel(e.target.value)} placeholder="Ej. SH120A3ALC" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Fecha de instalación">
+          <input type="date" className={inputClass} style={inputStyle} value={installDate} onChange={(e) => setInstallDate(e.target.value)} />
+        </Field>
+        <Field label="Garantía (meses)">
+          <input type="number" className={inputClass} style={inputStyle} value={warrantyMonths} onChange={(e) => setWarrantyMonths(e.target.value)} placeholder="Ej. 12" />
+        </Field>
+      </div>
+      <Field label="Notas (opcional)">
+        <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Detalles de la instalación" />
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar activo"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ProductFormModal({ initial, existingProducts, onClose, onSave, saving }) {
+  const [sku, setSku] = useState(initial?.sku || "");
+  const [skuManual, setSkuManual] = useState(!!initial?.sku);
+  const [category, setCategory] = useState(initial?.category || "");
+  const [name, setName] = useState(initial?.name || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [unit, setUnit] = useState(initial?.unit || "unidad");
+  const [costPrice, setCostPrice] = useState(initial?.cost_price ?? "");
+  const [unitPrice, setUnitPrice] = useState(initial?.unit_price ?? "");
+  const [marginPct, setMarginPct] = useState(() => {
+    const c = Number(initial?.cost_price) || 0, u = Number(initial?.unit_price) || 0;
+    return c > 0 ? (((u - c) / c) * 100).toFixed(2) : "";
+  });
+  const [stockQty, setStockQty] = useState(initial?.stock_qty ?? "");
+  const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
+
+  const existingCategories = [...new Set((existingProducts || []).map((p) => p.category).filter(Boolean))];
+
+  const slugPrefix = (cat) => {
+    const clean = cat.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z]/g, "").toUpperCase();
+    return clean.slice(0, 3) || "GEN";
+  };
+  const generateSku = (cat) => {
+    if (!cat.trim()) return "";
+    const prefix = slugPrefix(cat.trim());
+    const count = (existingProducts || []).filter((p) => (p.category || "").trim().toLowerCase() === cat.trim().toLowerCase() && (!initial || p.id !== initial.id)).length;
+    return `${prefix}-${String(count + 1).padStart(3, "0")}`;
+  };
+
+  const onCategoryChange = (v) => {
+    setCategory(v);
+    if (!skuManual) setSku(generateSku(v));
+  };
+  const onSkuChange = (v) => {
+    setSku(v);
+    setSkuManual(true);
+  };
+  const regenerateSku = () => {
+    setSkuManual(false);
+    setSku(generateSku(category));
+  };
+
+  const priceFromMargin = (cost, margin) => {
+    const c = Number(cost) || 0, m = Number(margin) || 0;
+    return c > 0 || m !== 0 ? (c * (1 + m / 100)).toFixed(2) : "";
+  };
+  const marginFromPrice = (cost, price) => {
+    const c = Number(cost) || 0, p = Number(price) || 0;
+    return c > 0 ? (((p - c) / c) * 100).toFixed(2) : "";
+  };
+
+  const onCostChange = (v) => {
+    setCostPrice(v);
+    if (marginPct !== "") setUnitPrice(priceFromMargin(v, marginPct));
+  };
+  const onMarginChange = (v) => {
+    setMarginPct(v);
+    setUnitPrice(priceFromMargin(costPrice, v));
+  };
+  const onUnitPriceChange = (v) => {
+    setUnitPrice(v);
+    setMarginPct(marginFromPrice(costPrice, v));
+  };
+
+  const submit = () => {
+    if (!name.trim() || unitPrice === "") return;
+    onSave({
+      sku: sku.trim() || null,
+      category: category.trim() || null,
+      name: name.trim(),
+      description: description.trim() || null,
+      unit: unit.trim() || "unidad",
+      cost_price: Number(costPrice) || 0,
+      unit_price: Number(unitPrice) || 0,
+      stock_qty: Number(stockQty) || 0,
+      is_taxable: isTaxable,
+    });
+  };
+
+  return (
+    <Modal title={initial ? "Editar producto" : "Agregar producto"} onClose={onClose} wide>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Nombre del producto">
+          <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Filtro deshidratador" />
+        </Field>
+        <Field label="Categoría">
+          <input className={inputClass} style={inputStyle} value={category} onChange={(e) => onCategoryChange(e.target.value)} placeholder="Ej. Filtros, Refrigerantes, Eléctrico" list="product-categories" />
+          <datalist id="product-categories">
+            {existingCategories.map((c) => <option key={c} value={c} />)}
+          </datalist>
+        </Field>
+      </div>
+      <Field label="SKU / Código (se genera solo según la categoría)">
+        <div className="flex gap-2">
+          <input className={inputClass} style={inputStyle} value={sku} onChange={(e) => onSkuChange(e.target.value)} placeholder="Se genera automáticamente" />
+          <button type="button" onClick={regenerateSku} title="Regenerar a partir de la categoría" className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
+            <History size={14} />
+          </button>
+        </div>
+      </Field>
+      <Field label="Descripción (opcional)">
+        <input className={inputClass} style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Detalle breve" />
+      </Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Unidad">
+          <input className={inputClass} style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="unidad, gal, lb" />
+        </Field>
+        <Field label="Costo (RD$)">
+          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={costPrice} onChange={(e) => onCostChange(e.target.value)} placeholder="0.00" />
+        </Field>
+        <Field label="Cantidad en stock">
+          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="0" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3 items-end">
+        <Field label="% de ganancia sobre el costo">
+          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={marginPct} onChange={(e) => onMarginChange(e.target.value)} placeholder="Ej. 30" />
+        </Field>
+        <Field label="Precio de venta (RD$)">
+          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={unitPrice} onChange={(e) => onUnitPriceChange(e.target.value)} placeholder="0.00" />
+        </Field>
+      </div>
+      <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>
+        Escribe el % de ganancia y el precio se calcula solo — o edita el precio directamente y el % se ajusta.
+      </div>
+      <label className="flex items-center gap-2 text-sm mb-3" style={{ color: C.text }}>
+        <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} />
+        Aplica ITBIS (18%) al facturar
+      </label>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar producto"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function SupplierFormModal({ initial, onClose, onSave, saving }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [rnc, setRnc] = useState(initial?.rnc || "");
+  const [phone, setPhone] = useState(initial?.phone || "");
+  const [email, setEmail] = useState(initial?.email || "");
+
+  return (
+    <Modal title={initial ? "Editar proveedor" : "Agregar proveedor"} onClose={onClose}>
+      <Field label="Nombre / razón social">
+        <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Refrigeración Import SRL" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="RNC (opcional)">
+          <input className={inputClass} style={inputStyle} value={rnc} onChange={(e) => setRnc(e.target.value)} placeholder="Ej. 130-01234-6" />
+        </Field>
+        <Field label="Teléfono">
+          <input className={inputClass} style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Ej. 809-555-9876" />
+        </Field>
+      </div>
+      <Field label="Correo (opcional)">
+        <input className={inputClass} style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ej. ventas@proveedor.com" />
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={() => name.trim() && onSave({ name: name.trim(), rnc: rnc.trim() || null, phone: phone.trim() || null, email: email.trim() || null })} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onRequestNewSupplier }) {
+  const [supplierId, setSupplierId] = useState(suppliers[0]?.id || "");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [notes, setNotes] = useState("");
+  const [items, setItems] = useState([{ product_id: "", quantity: 1, unit_cost: 0 }]);
+
+  const updateItem = (i, patch) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const addItemRow = () => setItems((prev) => [...prev, { product_id: "", quantity: 1, unit_cost: 0 }]);
+  const removeItemRow = (i) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+
+  const onProductPick = (i, productId) => {
+    const prod = products.find((p) => p.id === productId);
+    updateItem(i, { product_id: productId, unit_cost: prod ? prod.cost_price : 0 });
+  };
+
+  const total = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
+
+  const submit = () => {
+    const validItems = items.filter((it) => it.product_id && Number(it.quantity) > 0);
+    if (!supplierId || validItems.length === 0) return;
+    onSave({ supplier_id: supplierId, invoice_number: invoiceNumber.trim() || null, purchase_date: purchaseDate, notes: notes.trim() || null, total }, validItems);
+  };
+
+  return (
+    <Modal title="Registrar compra" onClose={onClose} wide>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Proveedor">
+          <div className="flex gap-2">
+            <select className={inputClass} style={inputStyle} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">Selecciona uno</option>
+              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <button type="button" onClick={onRequestNewSupplier} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
+          </div>
+        </Field>
+        <Field label="No. de factura del proveedor (opcional)">
+          <input className={inputClass} style={inputStyle} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="Ej. F-00123" />
+        </Field>
+        <Field label="Fecha de compra">
+          <input type="date" className={inputClass} style={inputStyle} value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+        </Field>
+      </div>
+
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos comprados</div>
+      <div className="space-y-2 mb-3">
+        {items.map((it, i) => {
+          const prod = products.find((p) => p.id === it.product_id);
+          return (
+            <div key={i} className="grid grid-cols-12 gap-2 items-center">
+              <select className={`${inputClass} col-span-5`} style={inputStyle} value={it.product_id} onChange={(e) => onProductPick(i, e.target.value)}>
+                <option value="">Selecciona un producto</option>
+                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
+              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_cost} onChange={(e) => updateItem(i, { unit_cost: e.target.value })} placeholder="Costo unit." />
+              <div className="col-span-2 text-sm font-mono text-right" style={{ color: C.muted }}>{fmtMoney((Number(it.quantity) || 0) * (Number(it.unit_cost) || 0))}</div>
+              <button onClick={() => removeItemRow(i)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+              {prod && <div className="col-span-12 text-xs -mt-1" style={{ color: C.muted }}>Stock actual: {prod.stock_qty} {prod.unit}</div>}
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={addItemRow} className="flex items-center gap-2 text-sm mb-4" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+
+      <Field label="Notas (opcional)">
+        <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observaciones de la compra" />
+      </Field>
+
+      <div className="flex items-center justify-between mt-2 mb-4 px-3 py-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="text-sm" style={{ color: C.muted }}>Total de la compra</div>
+        <div className="text-lg font-mono font-bold" style={{ color: C.text }}>{fmtMoney(total)}</div>
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : "Registrar compra"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function PurchaseDetailModal({ purchase, items, supplierName, onClose }) {
+  return (
+    <Modal title={`Compra${purchase.invoice_number ? " · " + purchase.invoice_number : ""}`} onClose={onClose} wide>
+      <div className="grid grid-cols-3 gap-3 text-xs mb-4" style={{ color: C.muted }}>
+        <div>Proveedor<br /><span style={{ color: C.text }}>{supplierName}</span></div>
+        <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(purchase.purchase_date)}</span></div>
+        <div>Total<br /><span style={{ color: C.text }}>{fmtMoney(purchase.total)}</span></div>
+      </div>
+      <div className="space-y-1">
+        {items.map((it) => (
+          <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+            <div>{it.productName}</div>
+            <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_cost)} = {fmtMoney(it.subtotal)}</div>
+          </div>
+        ))}
+      </div>
+      {purchase.notes && <div className="text-xs mt-3" style={{ color: C.muted }}>Notas: <span style={{ color: C.text }}>{purchase.notes}</span></div>}
+      <div className="flex justify-end mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
+const NCF_TYPES = [
+  { code: "B01", label: "B01 · Crédito Fiscal" },
+  { code: "B02", label: "B02 · Consumo" },
+  { code: "B14", label: "B14 · Régimen Especial" },
+  { code: "B15", label: "B15 · Gubernamental" },
+];
+
+function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
+  const [ncfType, setNcfType] = useState(initial?.ncf_type || "B02");
+  const [rangeStart, setRangeStart] = useState(initial?.range_start ?? "");
+  const [rangeEnd, setRangeEnd] = useState(initial?.range_end ?? "");
+  const [expiration, setExpiration] = useState(initial?.expiration_date || "");
+
+  const submit = () => {
+    if (!rangeStart || !rangeEnd || Number(rangeEnd) < Number(rangeStart)) return;
+    onSave({
+      ncf_type: ncfType,
+      prefix: ncfType,
+      range_start: Number(rangeStart),
+      range_end: Number(rangeEnd),
+      next_number: initial?.next_number ?? Number(rangeStart),
+      expiration_date: expiration || null,
+    });
+  };
+
+  return (
+    <Modal title={initial ? "Editar secuencia NCF" : "Agregar secuencia NCF"} onClose={onClose}>
+      <Field label="Tipo de comprobante">
+        <select className={inputClass} style={inputStyle} value={ncfType} onChange={(e) => setNcfType(e.target.value)} disabled={!!initial}>
+          {NCF_TYPES.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+        </select>
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Desde el número">
+          <input type="number" className={inputClass} style={inputStyle} value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} placeholder="Ej. 1" disabled={!!initial} />
+        </Field>
+        <Field label="Hasta el número">
+          <input type="number" className={inputClass} style={inputStyle} value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} placeholder="Ej. 500" />
+        </Field>
+      </div>
+      <Field label="Fecha de vencimiento (opcional)">
+        <input type="date" className={inputClass} style={inputStyle} value={expiration} onChange={(e) => setExpiration(e.target.value)} />
+      </Field>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Estos rangos son los que la DGII te autorizó — cárgalos exactamente como aparecen en tu autorización.</div>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar secuencia"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function InvoiceFormModal({ clients, products, ncfSequences, onClose, onSave, saving, onRequestNewClient }) {
+  const [clientId, setClientId] = useState(clients[0]?.id || "");
+  const [sequenceId, setSequenceId] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [items, setItems] = useState([{ product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
+
+  const usableSequences = ncfSequences.filter((s) => s.active && s.next_number <= s.range_end);
+
+  const updateItem = (i, patch) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const addItemRow = () => setItems((prev) => [...prev, { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
+  const removeItemRow = (i) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+
+  const onProductPick = (i, productId) => {
+    const prod = products.find((p) => p.id === productId);
+    updateItem(i, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
+  };
+
+  const subtotal = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
+  const itbis = items.reduce((sum, it) => sum + (it.is_taxable ? (Number(it.quantity) || 0) * (Number(it.unit_price) || 0) * 0.18 : 0), 0);
+  const total = subtotal + itbis;
+
+  const submit = () => {
+    const validItems = items.filter((it) => it.description.trim() && Number(it.quantity) > 0);
+    if (!clientId || !sequenceId || validItems.length === 0) return;
+    onSave({ client_id: clientId, ncf_sequence_id: sequenceId, invoice_date: invoiceDate, subtotal, itbis, total }, validItems);
+  };
+
+  return (
+    <Modal title="Nueva factura" onClose={onClose} wide>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Cliente">
+          <div className="flex gap-2">
+            <select className={inputClass} style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}>
+              <option value="">Selecciona uno</option>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <button type="button" onClick={onRequestNewClient} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
+          </div>
+        </Field>
+        <Field label="Secuencia NCF">
+          <select className={inputClass} style={inputStyle} value={sequenceId} onChange={(e) => setSequenceId(e.target.value)}>
+            <option value="">Selecciona una</option>
+            {usableSequences.map((s) => (
+              <option key={s.id} value={s.id}>{s.ncf_type} · quedan {s.range_end - s.next_number + 1}</option>
+            ))}
+          </select>
+          {usableSequences.length === 0 && <div className="text-xs mt-1" style={{ color: C.red }}>No hay secuencias NCF disponibles — créala en "Secuencias NCF".</div>}
+        </Field>
+        <Field label="Fecha">
+          <input type="date" className={inputClass} style={inputStyle} value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+        </Field>
+      </div>
+
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
+      <div className="space-y-2 mb-3">
+        {items.map((it, i) => (
+          <div key={i} className="grid grid-cols-12 gap-2 items-center">
+            <select className={`${inputClass} col-span-4`} style={inputStyle} value={it.product_id} onChange={(e) => onProductPick(i, e.target.value)}>
+              <option value="">Servicio / producto libre</option>
+              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <input className={`${inputClass} col-span-3`} style={inputStyle} value={it.description} onChange={(e) => updateItem(i, { description: e.target.value })} placeholder="Descripción" />
+            <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
+            <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} placeholder="Precio" />
+            <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
+              <input type="checkbox" checked={it.is_taxable} onChange={(e) => updateItem(i, { is_taxable: e.target.checked })} /> ITBIS
+            </label>
+            <button onClick={() => removeItemRow(i)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+          </div>
+        ))}
+      </div>
+      <button onClick={addItemRow} className="flex items-center gap-2 text-sm mb-4" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+
+      <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS (18%)</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(total)}</span></div>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving || usableSequences.length === 0} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Emitiendo..." : "Emitir factura"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function InvoiceDetailModal({ invoice, items, clientName, companyName, onClose, onVoid }) {
+  const statusColor = invoice.status === "anulada" ? C.red : C.green;
+  return (
+    <Modal title={`Factura ${invoice.ncf}`} onClose={onClose} wide>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <div className="font-bold text-base" style={{ color: C.text }}>{companyName}</div>
+          <div className="text-xs" style={{ color: C.muted }}>NCF: <span className="font-mono">{invoice.ncf}</span></div>
+        </div>
+        <Pill label={invoice.status === "anulada" ? "Anulada" : "Emitida"} color={statusColor} />
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-xs mb-4" style={{ color: C.muted }}>
+        <div>Cliente<br /><span style={{ color: C.text }}>{clientName}</span></div>
+        <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(invoice.invoice_date)}</span></div>
+      </div>
+      <div className="space-y-1 mb-3">
+        {items.map((it) => (
+          <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+            <div>{it.description} {it.is_taxable && <span className="text-xs" style={{ color: C.muted }}>(ITBIS)</span>}</div>
+            <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(invoice.subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(invoice.itbis)}</span></div>
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(invoice.total)}</span></div>
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        {invoice.status !== "anulada" && (
+          <button onClick={() => onVoid(invoice)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>
+            <Ban size={14} /> Anular factura
+          </button>
+        )}
+        <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
 function InviteFormModal({ technicians, onClose, onSave, saving, generatedLink, onCloseAfterLink }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("tecnico");
@@ -664,6 +1244,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [orders, setOrders] = useState([]);
   const [profiles, setProfiles] = useState([]);
   const [invites, setInvites] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [clientAssets, setClientAssets] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [purchases, setPurchases] = useState([]);
+  const [ncfSequences, setNcfSequences] = useState([]);
+  const [invoices, setInvoices] = useState([]);
 
   const [branchFilter, setBranchFilter] = useState("all");
   const [view, setView] = useState("dashboard");
@@ -681,7 +1268,21 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [pendingLocationBranch, setPendingLocationBranch] = useState(null);
   const [showInvite, setShowInvite] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
-  const [historyFor, setHistoryFor] = useState(null); // { title, orders }
+  const [historyFor, setHistoryFor] = useState(null);
+  const [showAddClient, setShowAddClient] = useState(false);
+  const [editingClient, setEditingClient] = useState(null);
+  const [showAddAsset, setShowAddAsset] = useState(false);
+  const [editingAsset, setEditingAsset] = useState(null);
+  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [showAddSupplier, setShowAddSupplier] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState(null);
+  const [showAddPurchase, setShowAddPurchase] = useState(false);
+  const [purchaseDetail, setPurchaseDetail] = useState(null);
+  const [showAddNcf, setShowAddNcf] = useState(false);
+  const [editingNcf, setEditingNcf] = useState(null);
+  const [showAddInvoice, setShowAddInvoice] = useState(false);
+  const [invoiceDetail, setInvoiceDetail] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -690,7 +1291,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, profs, inv] = await Promise.all([
+    const [br, tech, eq, loc, ord, profs, inv, cli, prod, ast, sup, purch, ncf, invc] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
@@ -698,6 +1299,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       supabase.from("work_orders").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
       supabase.from("profiles").select("*").eq("company_id", companyId).order("created_at"),
       isAdmin ? supabase.from("invites").select("*").eq("company_id", companyId).eq("used", false).order("created_at") : Promise.resolve({ data: [] }),
+      supabase.from("clients").select("*").eq("company_id", companyId).order("name"),
+      supabase.from("products").select("*").eq("company_id", companyId).order("name"),
+      supabase.from("client_assets").select("*").eq("company_id", companyId).order("install_date"),
+      supabase.from("suppliers").select("*").eq("company_id", companyId).order("name"),
+      supabase.from("purchases").select("*").eq("company_id", companyId).order("purchase_date", { ascending: false }),
+      supabase.from("ncf_sequences").select("*").eq("company_id", companyId).order("created_at"),
+      supabase.from("invoices").select("*").eq("company_id", companyId).order("invoice_date", { ascending: false }),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -707,6 +1315,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setOrders(ord.data || []);
     setProfiles(profs.data || []);
     setInvites(inv.data || []);
+    setClients(cli.data || []);
+    setProducts(prod.data || []);
+    setClientAssets(ast.data || []);
+    setSuppliers(sup.data || []);
+    setPurchases(purch.data || []);
+    setNcfSequences(ncf.data || []);
+    setInvoices(invc.data || []);
     setLoadingScope(false);
   };
 
@@ -756,6 +1371,17 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     () => [...equipStats].sort((a, b) => b.correctivo - a.correctivo).slice(0, 8).map((eq) => ({ name: eq.name, Correctivos: eq.correctivo })),
     [equipStats]
   );
+
+  const activeWarrantyAssets = useMemo(() => {
+    const today = new Date();
+    return clientAssets
+      .map((a) => {
+        const end = addMonths(a.install_date, a.warranty_months);
+        return { ...a, warrantyEnd: end, daysLeft: daysBetween(end, today) };
+      })
+      .filter((a) => a.daysLeft >= 0)
+      .sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [clientAssets]);
 
   // ---- Órdenes ----
   const createOrder = async (payload) => {
@@ -833,6 +1459,247 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     const { error } = await supabase.from("branches").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); return; }
     loadAll();
+  };
+
+  // ---- Clientes ----
+  const saveClient = async (payload) => {
+    setSaving(true);
+    if (editingClient) {
+      const { data, error } = await supabase.from("clients").update(payload).eq("id", editingClient.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setClients((prev) => prev.map((c) => (c.id === data.id ? data : c)));
+      setEditingClient(null);
+    } else {
+      const { data, error } = await supabase.from("clients").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setClients((prev) => [...prev, data]);
+      setShowAddClient(false);
+    }
+  };
+
+  const deleteClient = async (id) => {
+    if (!window.confirm("¿Eliminar este cliente?")) return;
+    const { error } = await supabase.from("clients").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setClients((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  // ---- Activos instalados en clientes (garantía) ----
+  const saveClientAsset = async (payload) => {
+    setSaving(true);
+    if (editingAsset) {
+      const { data, error } = await supabase.from("client_assets").update(payload).eq("id", editingAsset.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setClientAssets((prev) => prev.map((a) => (a.id === data.id ? data : a)));
+      setEditingAsset(null);
+    } else {
+      const { data, error } = await supabase.from("client_assets").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setClientAssets((prev) => [...prev, data]);
+      setShowAddAsset(false);
+    }
+  };
+
+  const deleteClientAsset = async (id) => {
+    if (!window.confirm("¿Eliminar este activo instalado?")) return;
+    const { error } = await supabase.from("client_assets").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setClientAssets((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  // ---- Catálogo de productos ----
+  const saveProduct = async (payload) => {
+    setSaving(true);
+    if (editingProduct) {
+      const { data, error } = await supabase.from("products").update(payload).eq("id", editingProduct.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setProducts((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+      setEditingProduct(null);
+    } else {
+      const { data, error } = await supabase.from("products").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setProducts((prev) => [...prev, data]);
+      setShowAddProduct(false);
+    }
+  };
+
+  const deleteProduct = async (id) => {
+    if (!window.confirm("¿Eliminar este producto del catálogo?")) return;
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // ---- Proveedores ----
+  const saveSupplier = async (payload) => {
+    setSaving(true);
+    if (editingSupplier) {
+      const { data, error } = await supabase.from("suppliers").update(payload).eq("id", editingSupplier.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setSuppliers((prev) => prev.map((s) => (s.id === data.id ? data : s)));
+      setEditingSupplier(null);
+    } else {
+      const { data, error } = await supabase.from("suppliers").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setSuppliers((prev) => [...prev, data]);
+      setShowAddSupplier(false);
+    }
+  };
+
+  const deleteSupplier = async (id) => {
+    if (!window.confirm("¿Eliminar este proveedor?")) return;
+    const { error } = await supabase.from("suppliers").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setSuppliers((prev) => prev.filter((s) => s.id !== id));
+  };
+
+  // ---- Compras (registrar suma stock; eliminar lo resta de vuelta) ----
+  const createPurchase = async (payload, items) => {
+    setSaving(true);
+    const { data: purchase, error: purchaseError } = await supabase.from("purchases").insert({ ...payload, company_id: companyId }).select().single();
+    if (purchaseError) { setSaving(false); setErrorMsg(purchaseError.message); return; }
+
+    const itemRows = items.map((it) => ({
+      purchase_id: purchase.id,
+      product_id: it.product_id,
+      quantity: Number(it.quantity),
+      unit_cost: Number(it.unit_cost),
+      subtotal: Number(it.quantity) * Number(it.unit_cost),
+    }));
+    const { error: itemsError } = await supabase.from("purchase_items").insert(itemRows);
+    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
+
+    for (const row of itemRows) {
+      const prod = products.find((p) => p.id === row.product_id);
+      if (!prod) continue;
+      const newStock = Number(prod.stock_qty) + row.quantity;
+      await supabase.from("products").update({ stock_qty: newStock, cost_price: row.unit_cost }).eq("id", prod.id);
+    }
+
+    setSaving(false);
+    setShowAddSupplier(false);
+    setShowAddPurchase(false);
+    loadAll();
+  };
+
+  const deletePurchase = async (purchase) => {
+    if (!window.confirm("¿Eliminar esta compra? Se restará la cantidad comprada del inventario.")) return;
+    const { data: items } = await supabase.from("purchase_items").select("*").eq("purchase_id", purchase.id);
+    for (const it of items || []) {
+      const prod = products.find((p) => p.id === it.product_id);
+      if (!prod) continue;
+      const newStock = Math.max(0, Number(prod.stock_qty) - Number(it.quantity));
+      await supabase.from("products").update({ stock_qty: newStock }).eq("id", prod.id);
+    }
+    const { error } = await supabase.from("purchases").delete().eq("id", purchase.id);
+    if (error) { setErrorMsg(error.message); return; }
+    loadAll();
+  };
+
+  const openPurchaseDetail = async (purchase) => {
+    const { data: items } = await supabase.from("purchase_items").select("*").eq("purchase_id", purchase.id);
+    const withNames = (items || []).map((it) => ({ ...it, productName: products.find((p) => p.id === it.product_id)?.name || "Producto eliminado" }));
+    setPurchaseDetail({ purchase, items: withNames });
+  };
+
+  // ---- Secuencias NCF ----
+  const saveNcfSequence = async (payload) => {
+    setSaving(true);
+    if (editingNcf) {
+      const { data, error } = await supabase.from("ncf_sequences").update({ range_end: payload.range_end, expiration_date: payload.expiration_date }).eq("id", editingNcf.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setNcfSequences((prev) => prev.map((n) => (n.id === data.id ? data : n)));
+      setEditingNcf(null);
+    } else {
+      const { data, error } = await supabase.from("ncf_sequences").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setNcfSequences((prev) => [...prev, data]);
+      setShowAddNcf(false);
+    }
+  };
+
+  const toggleNcfActive = async (seq) => {
+    const { data, error } = await supabase.from("ncf_sequences").update({ active: !seq.active }).eq("id", seq.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setNcfSequences((prev) => prev.map((n) => (n.id === data.id ? data : n)));
+  };
+
+  const deleteNcfSequence = async (id) => {
+    if (!window.confirm("¿Eliminar esta secuencia NCF? Solo hazlo si no se ha usado ningún número todavía.")) return;
+    const { error } = await supabase.from("ncf_sequences").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setNcfSequences((prev) => prev.filter((n) => n.id !== id));
+  };
+
+  // ---- Facturación ----
+  const createInvoice = async (payload, items) => {
+    setSaving(true);
+    const { data: freshSeq, error: seqError } = await supabase.from("ncf_sequences").select("*").eq("id", payload.ncf_sequence_id).single();
+    if (seqError || !freshSeq || freshSeq.next_number > freshSeq.range_end) {
+      setSaving(false);
+      setErrorMsg("Esta secuencia NCF ya no tiene números disponibles.");
+      return;
+    }
+    const ncf = `${freshSeq.prefix}${String(freshSeq.next_number).padStart(8, "0")}`;
+
+    const { data: invoice, error: invError } = await supabase.from("invoices").insert({ ...payload, company_id: companyId, ncf, status: "emitida" }).select().single();
+    if (invError) { setSaving(false); setErrorMsg(invError.message); return; }
+
+    const itemRows = items.map((it) => ({
+      invoice_id: invoice.id,
+      product_id: it.product_id || null,
+      description: it.description,
+      quantity: Number(it.quantity),
+      unit_price: Number(it.unit_price),
+      is_taxable: it.is_taxable,
+      subtotal: Number(it.quantity) * Number(it.unit_price),
+    }));
+    const { error: itemsError } = await supabase.from("invoice_items").insert(itemRows);
+    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
+
+    await supabase.from("ncf_sequences").update({ next_number: freshSeq.next_number + 1 }).eq("id", freshSeq.id);
+
+    for (const row of itemRows) {
+      if (!row.product_id) continue;
+      const prod = products.find((p) => p.id === row.product_id);
+      if (!prod) continue;
+      const newStock = Math.max(0, Number(prod.stock_qty) - row.quantity);
+      await supabase.from("products").update({ stock_qty: newStock }).eq("id", prod.id);
+    }
+
+    setSaving(false);
+    setShowAddInvoice(false);
+    loadAll();
+  };
+
+  const voidInvoice = async (invoice) => {
+    if (!window.confirm("¿Anular esta factura? El número de NCF queda consumido igual, pero se restaurará el inventario.")) return;
+    const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id);
+    for (const it of items || []) {
+      if (!it.product_id) continue;
+      const prod = products.find((p) => p.id === it.product_id);
+      if (!prod) continue;
+      await supabase.from("products").update({ stock_qty: Number(prod.stock_qty) + Number(it.quantity) }).eq("id", prod.id);
+    }
+    const { error } = await supabase.from("invoices").update({ status: "anulada" }).eq("id", invoice.id);
+    if (error) { setErrorMsg(error.message); return; }
+    setInvoiceDetail(null);
+    loadAll();
+  };
+
+  const openInvoiceDetail = async (invoice) => {
+    const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id);
+    setInvoiceDetail({ invoice, items: items || [] });
   };
 
   // ---- Técnicos ----
@@ -913,11 +1780,17 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const NAV = [
     { key: "dashboard", label: "Panel", Icon: LayoutDashboard },
+    { section: "Departamento Técnico" },
     { key: "orders", label: "Órdenes de trabajo", Icon: ClipboardList },
-    ...(canManage ? [{ key: "equipment", label: "Equipos", Icon: Settings2 }] : []),
-    ...(canManage ? [{ key: "technicians", label: "Técnicos", Icon: Users }] : []),
-    ...(canManage ? [{ key: "branches", label: "Sucursales", Icon: Building2 }] : []),
-    ...(canManage ? [{ key: "reports", label: "Reportes", Icon: BarChart3 }] : []),
+    ...(canManage ? [
+      { key: "equipment", label: "Equipos", Icon: Settings2 },
+      { key: "technicians", label: "Técnicos", Icon: Users },
+      { key: "warranty", label: "Activos en Garantía", Icon: BadgeCheck },
+      { key: "reports", label: "Reportes", Icon: BarChart3 },
+    ] : []),
+    ...(canManage ? [{ section: "Comercial" }, { key: "clients", label: "Clientes", Icon: Users2 }, { key: "products", label: "Catálogo", Icon: Boxes }, { key: "suppliers", label: "Proveedores", Icon: Truck }, { key: "purchases", label: "Compras", Icon: ShoppingCart }, { key: "invoices", label: "Facturación", Icon: Receipt }] : []),
+    ...(canManage ? [{ section: "Administración" }, { key: "branches", label: "Sucursales", Icon: Building2 }] : []),
+    ...(isAdmin ? [{ key: "ncf", label: "Secuencias NCF", Icon: Hash }] : []),
     ...(isAdmin ? [{ key: "users", label: "Usuarios", Icon: ShieldCheck }] : []),
   ];
 
@@ -934,13 +1807,19 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           </div>
         </div>
         <nav className="flex-1 py-3">
-          {NAV.map(({ key, label, Icon }) => (
-            <button key={key} onClick={() => setView(key)} className="w-full flex items-center gap-3 px-5 py-2.5 text-sm text-left"
-              style={{ color: view === key ? C.text : C.muted, background: view === key ? C.panelAlt : "transparent", borderLeft: `2px solid ${view === key ? C.amber : "transparent"}` }}>
-              <Icon size={16} />
-              {label}
-            </button>
-          ))}
+          {NAV.map((item, i) =>
+            item.section ? (
+              <div key={`section-${i}`} className="px-5 pt-4 pb-1 text-[10px] uppercase tracking-wide" style={{ color: C.muted, borderTop: `1px solid ${C.border}`, marginTop: 8 }}>
+                {item.section}
+              </div>
+            ) : (
+              <button key={item.key} onClick={() => setView(item.key)} className="w-full flex items-center gap-3 px-5 py-2.5 text-sm text-left"
+                style={{ color: view === item.key ? C.text : C.muted, background: view === item.key ? C.panelAlt : "transparent", borderLeft: `2px solid ${view === item.key ? C.amber : "transparent"}` }}>
+                <item.Icon size={16} />
+                {item.label}
+              </button>
+            )
+          )}
         </nav>
         <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.border}` }}>
           <div className="text-xs truncate" style={{ color: C.muted }}>{session.user.email}</div>
@@ -1202,6 +2081,47 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && canManage && view === "warranty" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{activeWarrantyAssets.length} activos vigentes en garantía</div>
+                <button onClick={() => setShowAddAsset(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Agregar activo
+                </button>
+              </div>
+              <div className="text-xs mb-3" style={{ color: C.muted }}>
+                Los activos vencidos salen automáticamente de esta lista (siguen guardados, solo dejan de contar como "en garantía").
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Activo</div>
+                  <div className="col-span-3">Cliente</div>
+                  <div className="col-span-2">Instalado</div>
+                  <div className="col-span-2">Vence</div>
+                  <div className="col-span-2 text-right">Acciones</div>
+                </div>
+                {activeWarrantyAssets.map((a) => (
+                  <div key={a.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-3 min-w-0">
+                      <div className="truncate">{a.name}</div>
+                      <div className="text-xs truncate" style={{ color: C.muted }}>{[a.brand, a.model].filter(Boolean).join(" · ") || a.serial_number || ""}</div>
+                    </div>
+                    <div className="col-span-3 truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === a.client_id)?.name || "—"}</div>
+                    <div className="col-span-2 text-xs" style={{ color: C.muted }}>{fmtDate(a.install_date)}</div>
+                    <div className="col-span-2">
+                      <Pill label={a.daysLeft <= 30 ? `${a.daysLeft} días` : fmtDate(a.warrantyEnd.toISOString().slice(0, 10))} color={a.daysLeft <= 7 ? C.red : a.daysLeft <= 30 ? C.amber : C.green} />
+                    </div>
+                    <div className="col-span-2 flex items-center justify-end gap-2">
+                      <button onClick={() => setEditingAsset(a)} style={iconBtnStyle}><Pencil size={14} /></button>
+                      <button onClick={() => deleteClientAsset(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                ))}
+                {activeWarrantyAssets.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay activos vigentes en garantía en este momento.</div>}
+              </div>
+            </div>
+          )}
+
           {!loadingScope && canManage && view === "reports" && (
             <div>
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Desempeño por técnico</div>
@@ -1287,6 +2207,217 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && canManage && view === "clients" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{clients.length} clientes</div>
+                <button onClick={() => setShowAddClient(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Agregar cliente
+                </button>
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Cliente</div>
+                  <div className="col-span-2">RNC / Cédula</div>
+                  <div className="col-span-2">Teléfono</div>
+                  <div className="col-span-2">Correo</div>
+                  <div className="col-span-2">Dirección</div>
+                  <div className="col-span-1 text-right">Acciones</div>
+                </div>
+                {clients.map((c) => (
+                  <div key={c.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-3 truncate">{c.name}</div>
+                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.rnc_cedula || "—"}</div>
+                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.phone || "—"}</div>
+                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.email || "—"}</div>
+                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.address || "—"}</div>
+                    <div className="col-span-1 flex items-center justify-end gap-2">
+                      <button onClick={() => setEditingClient(c)} style={iconBtnStyle}><Pencil size={14} /></button>
+                      <button onClick={() => deleteClient(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                ))}
+                {clients.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay clientes registrados.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && canManage && view === "products" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{products.length} productos</div>
+                <button onClick={() => setShowAddProduct(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Agregar producto
+                </button>
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-4">Producto</div>
+                  <div className="col-span-2 text-right">Costo</div>
+                  <div className="col-span-2 text-right">Precio venta</div>
+                  <div className="col-span-2 text-right">Stock</div>
+                  <div className="col-span-2 text-right">Acciones</div>
+                </div>
+                {products.map((p) => (
+                  <div key={p.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-4 min-w-0">
+                      <div className="truncate">{p.name}</div>
+                      <div className="text-xs truncate" style={{ color: C.muted }}>
+                        {p.sku ? `SKU: ${p.sku}` : ""}{p.sku && p.category ? " · " : ""}{p.category || (!p.sku ? p.description || "—" : "")}
+                      </div>
+                    </div>
+                    <div className="col-span-2 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney(p.cost_price)}</div>
+                    <div className="col-span-2 text-right font-mono">{fmtMoney(p.unit_price)}</div>
+                    <div className="col-span-2 text-right font-mono" style={{ color: p.stock_qty <= 0 ? C.red : C.text }}>{p.stock_qty} {p.unit}</div>
+                    <div className="col-span-2 flex items-center justify-end gap-2">
+                      <button onClick={() => setEditingProduct(p)} style={iconBtnStyle}><Pencil size={14} /></button>
+                      <button onClick={() => deleteProduct(p.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                ))}
+                {products.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay productos en el catálogo.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && canManage && view === "suppliers" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{suppliers.length} proveedores</div>
+                <button onClick={() => setShowAddSupplier(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Agregar proveedor
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {suppliers.map((s) => (
+                  <div key={s.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold">{s.name}</div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setEditingSupplier(s)} style={iconBtnStyle}><Pencil size={13} /></button>
+                        <button onClick={() => deleteSupplier(s.id)} style={iconBtnStyle}><Trash2 size={13} /></button>
+                      </div>
+                    </div>
+                    <div className="text-xs mt-2 space-y-1" style={{ color: C.muted }}>
+                      {s.rnc && <div>RNC: <span style={{ color: C.text }}>{s.rnc}</span></div>}
+                      {s.phone && <div>Tel: <span style={{ color: C.text }}>{s.phone}</span></div>}
+                      {s.email && <div>{s.email}</div>}
+                    </div>
+                  </div>
+                ))}
+                {suppliers.length === 0 && <div className="text-sm" style={{ color: C.muted }}>Todavía no hay proveedores registrados.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && canManage && view === "purchases" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{purchases.length} compras registradas</div>
+                <button onClick={() => setShowAddPurchase(true)} disabled={products.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Registrar compra
+                </button>
+              </div>
+              {products.length === 0 && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un producto al catálogo antes de registrar una compra.</div>}
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Proveedor</div>
+                  <div className="col-span-2">Factura</div>
+                  <div className="col-span-2">Fecha</div>
+                  <div className="col-span-2 text-right">Total</div>
+                  <div className="col-span-3 text-right">Acciones</div>
+                </div>
+                {purchases.map((pu) => (
+                  <div key={pu.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
+                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
+                    <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
+                    <div className="col-span-2 text-right font-mono">{fmtMoney(pu.total)}</div>
+                    <div className="col-span-3 flex items-center justify-end gap-3">
+                      <button onClick={() => openPurchaseDetail(pu)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
+                      <button onClick={() => deletePurchase(pu)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                ))}
+                {purchases.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay compras registradas.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && isAdmin && view === "ncf" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{ncfSequences.length} secuencias configuradas</div>
+                <button onClick={() => setShowAddNcf(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Agregar secuencia
+                </button>
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-2">Tipo</div>
+                  <div className="col-span-3">Rango autorizado</div>
+                  <div className="col-span-2">Próximo número</div>
+                  <div className="col-span-2">Restantes</div>
+                  <div className="col-span-1">Estado</div>
+                  <div className="col-span-2 text-right">Acciones</div>
+                </div>
+                {ncfSequences.map((s) => {
+                  const remaining = s.range_end - s.next_number + 1;
+                  return (
+                    <div key={s.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-2 font-mono">{s.ncf_type}</div>
+                      <div className="col-span-3 font-mono text-xs" style={{ color: C.muted }}>{s.range_start} – {s.range_end}</div>
+                      <div className="col-span-2 font-mono">{s.next_number}</div>
+                      <div className="col-span-2 font-mono" style={{ color: remaining <= 10 ? C.red : C.muted }}>{Math.max(0, remaining)}</div>
+                      <div className="col-span-1">
+                        <button onClick={() => toggleNcfActive(s)}>
+                          <Pill label={s.active ? "Activa" : "Inactiva"} color={s.active ? C.green : C.muted} />
+                        </button>
+                      </div>
+                      <div className="col-span-2 flex items-center justify-end gap-2">
+                        <button onClick={() => setEditingNcf(s)} style={iconBtnStyle}><Pencil size={14} /></button>
+                        <button onClick={() => deleteNcfSequence(s.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {ncfSequences.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no has configurado ninguna secuencia NCF.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && canManage && view === "invoices" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{invoices.length} facturas emitidas</div>
+                <button onClick={() => setShowAddInvoice(true)} disabled={clients.length === 0 || ncfSequences.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Nueva factura
+                </button>
+              </div>
+              {clients.length === 0 && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un cliente antes de facturar.</div>}
+              {ncfSequences.length === 0 && isAdmin && <div className="text-sm mb-3" style={{ color: C.muted }}>Configura una secuencia NCF antes de facturar.</div>}
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">NCF</div>
+                  <div className="col-span-3">Cliente</div>
+                  <div className="col-span-2">Fecha</div>
+                  <div className="col-span-2 text-right">Total</div>
+                  <div className="col-span-2 text-right">Estado</div>
+                </div>
+                {invoices.map((inv) => (
+                  <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-3 font-mono text-xs">{inv.ncf}</div>
+                    <div className="col-span-3 truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
+                    <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
+                    <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
+                    <div className="col-span-2 text-right"><Pill label={inv.status === "anulada" ? "Anulada" : "Emitida"} color={inv.status === "anulada" ? C.red : C.green} /></div>
+                  </div>
+                ))}
+                {invoices.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay facturas emitidas.</div>}
+              </div>
+            </div>
+          )}
+
           {!loadingScope && isAdmin && view === "users" && (
             <div>
               <div className="flex justify-between items-center mb-4">
@@ -1358,6 +2489,55 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
       {historyFor && <HistoryModal title={historyFor.title} orders={historyFor.orders} branchName={branchName} equipName={equipName} techName={techName} onClose={() => setHistoryFor(null)} />}
+      {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
+      {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
+      {showAddAsset && <ClientAssetFormModal clients={clients} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
+      {editingAsset && <ClientAssetFormModal clients={clients} initial={editingAsset} onClose={() => setEditingAsset(null)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
+      {showAddProduct && <ProductFormModal existingProducts={products} onClose={() => setShowAddProduct(false)} onSave={saveProduct} saving={saving} />}
+      {editingProduct && <ProductFormModal initial={editingProduct} existingProducts={products} onClose={() => setEditingProduct(null)} onSave={saveProduct} saving={saving} />}
+      {showAddSupplier && <SupplierFormModal onClose={() => setShowAddSupplier(false)} onSave={saveSupplier} saving={saving} />}
+      {editingSupplier && <SupplierFormModal initial={editingSupplier} onClose={() => setEditingSupplier(null)} onSave={saveSupplier} saving={saving} />}
+      {showAddPurchase && (
+        <PurchaseFormModal
+          suppliers={suppliers}
+          products={products}
+          onClose={() => setShowAddPurchase(false)}
+          onSave={createPurchase}
+          saving={saving}
+          onRequestNewSupplier={() => setShowAddSupplier(true)}
+        />
+      )}
+      {purchaseDetail && (
+        <PurchaseDetailModal
+          purchase={purchaseDetail.purchase}
+          items={purchaseDetail.items}
+          supplierName={suppliers.find((s) => s.id === purchaseDetail.purchase.supplier_id)?.name || "—"}
+          onClose={() => setPurchaseDetail(null)}
+        />
+      )}
+      {showAddNcf && <NCFSequenceFormModal onClose={() => setShowAddNcf(false)} onSave={saveNcfSequence} saving={saving} />}
+      {editingNcf && <NCFSequenceFormModal initial={editingNcf} onClose={() => setEditingNcf(null)} onSave={saveNcfSequence} saving={saving} />}
+      {showAddInvoice && (
+        <InvoiceFormModal
+          clients={clients}
+          products={products}
+          ncfSequences={ncfSequences}
+          onClose={() => setShowAddInvoice(false)}
+          onSave={createInvoice}
+          saving={saving}
+          onRequestNewClient={() => setShowAddClient(true)}
+        />
+      )}
+      {invoiceDetail && (
+        <InvoiceDetailModal
+          invoice={invoiceDetail.invoice}
+          items={invoiceDetail.items}
+          clientName={clients.find((c) => c.id === invoiceDetail.invoice.client_id)?.name || "—"}
+          companyName={companyName}
+          onClose={() => setInvoiceDetail(null)}
+          onVoid={voidInvoice}
+        />
+      )}
       {showInvite && (
         <InviteFormModal
           technicians={technicians}
