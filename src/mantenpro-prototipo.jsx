@@ -2,8 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
-  ChevronDown, AlertTriangle, CheckCircle2, Zap, MapPin, Wrench,
-  Trash2, ArrowRight, Loader2
+  CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
@@ -108,7 +107,124 @@ function FullScreenLoader({ label }) {
 }
 
 // ---------------------------------------------------------------------------
-// New / Edit order modal
+// Pantalla de acceso (login / crear cuenta)
+// ---------------------------------------------------------------------------
+function AuthScreen({ onAuthed }) {
+  const [mode, setMode] = useState("login"); // 'login' | 'signup'
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    setError("");
+    if (!email.trim() || !password) { setError("Completa correo y contraseña."); return; }
+    setLoading(true);
+    const action = mode === "login"
+      ? supabase.auth.signInWithPassword({ email: email.trim(), password })
+      : supabase.auth.signUp({ email: email.trim(), password });
+    const { error } = await action;
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    onAuthed && onAuthed();
+  };
+
+  return (
+    <div className="w-full min-h-[720px] flex items-center justify-center" style={{ background: C.bg, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="w-full max-w-sm p-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2 mb-6">
+          <div className="w-8 h-8 flex items-center justify-center" style={{ background: C.amber }}>
+            <Wrench size={18} color="#1A1500" />
+          </div>
+          <div>
+            <div className="font-bold text-base leading-none" style={{ color: C.text }}>MantenPro</div>
+            <div className="text-[10px] uppercase tracking-wide" style={{ color: C.muted }}>Multi-empresa</div>
+          </div>
+        </div>
+
+        <div className="flex mb-5" style={{ borderBottom: `1px solid ${C.border}` }}>
+          {[["login", "Iniciar sesión"], ["signup", "Crear cuenta"]].map(([key, label]) => (
+            <button key={key} onClick={() => { setMode(key); setError(""); }}
+              className="flex-1 text-sm py-2 font-medium"
+              style={{ color: mode === key ? C.amber : C.muted, borderBottom: `2px solid ${mode === key ? C.amber : "transparent"}` }}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <Field label="Correo electrónico">
+          <input className={inputClass} style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@empresa.com" />
+        </Field>
+        <Field label="Contraseña">
+          <input className={inputClass} style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
+        </Field>
+
+        {error && <div className="text-xs mb-3" style={{ color: C.red }}>{error}</div>}
+
+        <button onClick={submit} disabled={loading} className="w-full px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {loading ? "Un momento..." : mode === "login" ? "Entrar" : "Crear cuenta"}
+        </button>
+
+        {mode === "signup" && (
+          <div className="text-xs mt-3" style={{ color: C.muted }}>
+            Al crear tu cuenta te vamos a pedir el nombre de tu empresa para configurar tu espacio de trabajo.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pantalla de bienvenida: crear la empresa la primera vez
+// ---------------------------------------------------------------------------
+function OnboardingScreen({ userId, onDone }) {
+  const [companyName, setCompanyName] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    if (!companyName.trim()) { setError("Escribe el nombre de tu empresa."); return; }
+    setLoading(true);
+    setError("");
+    const { data: company, error: companyError } = await supabase
+      .from("companies").insert({ name: companyName.trim() }).select().single();
+    if (companyError) { setLoading(false); setError(companyError.message); return; }
+
+    const { error: profileError } = await supabase.from("profiles").insert({
+      id: userId, company_id: company.id, full_name: fullName.trim() || null, role: "admin",
+    });
+    setLoading(false);
+    if (profileError) { setError(profileError.message); return; }
+    onDone();
+  };
+
+  return (
+    <div className="w-full min-h-[720px] flex items-center justify-center" style={{ background: C.bg, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="w-full max-w-sm p-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="font-bold text-base mb-1" style={{ color: C.text }}>Configura tu empresa</div>
+        <div className="text-xs mb-5" style={{ color: C.muted }}>Este será tu espacio de trabajo — nadie fuera de tu empresa podrá verlo.</div>
+
+        <Field label="Nombre de la empresa">
+          <input className={inputClass} style={inputStyle} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Ej. Grupo Frío RD" />
+        </Field>
+        <Field label="Tu nombre (opcional)">
+          <input className={inputClass} style={inputStyle} value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Ej. Darius Peña" />
+        </Field>
+
+        {error && <div className="text-xs mb-3" style={{ color: C.red }}>{error}</div>}
+
+        <button onClick={submit} disabled={loading} className="w-full px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {loading ? "Creando..." : "Comenzar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Modales de la app (sin cambios de diseño, solo ya no piden company_id)
 // ---------------------------------------------------------------------------
 function OrderFormModal({ branches, equipment, technicians, onClose, onSave, saving }) {
   const [branchId, setBranchId] = useState(branches[0]?.id || "");
@@ -124,15 +240,7 @@ function OrderFormModal({ branches, equipment, technicians, onClose, onSave, sav
 
   const submit = () => {
     if (!title.trim() || !branchId || !scheduled) return;
-    onSave({
-      branch_id: branchId,
-      equipment_id: equipmentId || null,
-      technician_id: technicianId || null,
-      type,
-      priority,
-      title: title.trim(),
-      scheduled,
-    });
+    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled });
   };
 
   return (
@@ -178,23 +286,6 @@ function OrderFormModal({ branches, equipment, technicians, onClose, onSave, sav
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
           {saving ? "Guardando..." : "Crear orden"}
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function AddCompanyModal({ onClose, onSave, saving }) {
-  const [name, setName] = useState("");
-  return (
-    <Modal title="Agregar nueva empresa" onClose={onClose}>
-      <Field label="Nombre de la empresa">
-        <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Refrigeración del Caribe" />
-      </Field>
-      <div className="flex justify-end gap-2 mt-4">
-        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
-        <button onClick={() => name.trim() && onSave(name.trim())} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
-          {saving ? "Creando..." : "Crear empresa"}
         </button>
       </div>
     </Modal>
@@ -250,26 +341,22 @@ function AddTechModal({ branches, onClose, onSave, saving }) {
 }
 
 // ---------------------------------------------------------------------------
-// Main app
+// Aplicación principal (una vez ya hay sesión + empresa)
 // ---------------------------------------------------------------------------
-export default function MantenProApp() {
-  const [loadingCompanies, setLoadingCompanies] = useState(true);
-  const [loadingScope, setLoadingScope] = useState(false);
+function Dashboard({ session, profile, companyName, onSignOut }) {
+  const companyId = profile.company_id;
+  const [loadingScope, setLoadingScope] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
-  const [companies, setCompanies] = useState([]);
   const [branches, setBranches] = useState([]);
   const [technicians, setTechnicians] = useState([]);
   const [equipment, setEquipment] = useState([]);
   const [orders, setOrders] = useState([]);
 
-  const [companyId, setCompanyId] = useState(null);
   const [branchFilter, setBranchFilter] = useState("all");
   const [view, setView] = useState("dashboard");
-  const [companyMenuOpen, setCompanyMenuOpen] = useState(false);
 
   const [showOrderForm, setShowOrderForm] = useState(false);
-  const [showAddCompany, setShowAddCompany] = useState(false);
   const [showAddBranch, setShowAddBranch] = useState(false);
   const [showAddTech, setShowAddTech] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -279,19 +366,6 @@ export default function MantenProApp() {
   const [statusFilter, setStatusFilter] = useState("all");
 
   useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase.from("companies").select("*").order("created_at");
-      if (error) setErrorMsg(error.message);
-      else {
-        setCompanies(data || []);
-        if (data && data.length > 0) setCompanyId(data[0].id);
-      }
-      setLoadingCompanies(false);
-    })();
-  }, []);
-
-  useEffect(() => {
-    if (!companyId) return;
     setLoadingScope(true);
     (async () => {
       const [br, tech, eq, ord] = await Promise.all([
@@ -305,24 +379,17 @@ export default function MantenProApp() {
       setTechnicians(tech.data || []);
       setEquipment(eq.data || []);
       setOrders(ord.data || []);
-      setBranchFilter("all");
       setLoadingScope(false);
     })();
   }, [companyId]);
 
-  const scopedOrders = useMemo(
-    () => orders.filter((o) => branchFilter === "all" || o.branch_id === branchFilter),
-    [orders, branchFilter]
-  );
-
-  const filteredOrders = useMemo(() => {
-    return scopedOrders.filter((o) => {
-      if (typeFilter !== "all" && o.type !== typeFilter) return false;
-      if (statusFilter !== "all" && o.status !== statusFilter) return false;
-      if (search && !o.title.toLowerCase().includes(search.toLowerCase()) && !(o.code || "").toLowerCase().includes(search.toLowerCase())) return false;
-      return true;
-    });
-  }, [scopedOrders, typeFilter, statusFilter, search]);
+  const scopedOrders = useMemo(() => orders.filter((o) => branchFilter === "all" || o.branch_id === branchFilter), [orders, branchFilter]);
+  const filteredOrders = useMemo(() => scopedOrders.filter((o) => {
+    if (typeFilter !== "all" && o.type !== typeFilter) return false;
+    if (statusFilter !== "all" && o.status !== statusFilter) return false;
+    if (search && !o.title.toLowerCase().includes(search.toLowerCase()) && !(o.code || "").toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  }), [scopedOrders, typeFilter, statusFilter, search]);
 
   const kpi = useMemo(() => {
     const pend = scopedOrders.filter((o) => o.status === "pendiente").length;
@@ -332,28 +399,18 @@ export default function MantenProApp() {
     return { pend, prog, done, prev, total: scopedOrders.length };
   }, [scopedOrders]);
 
-  const chartData = useMemo(
-    () => Object.entries(TYPE_CFG).map(([key, cfg]) => ({
-      name: cfg.label,
-      value: scopedOrders.filter((o) => o.type === key).length,
-      color: cfg.color,
-    })),
-    [scopedOrders]
-  );
+  const chartData = useMemo(() => Object.entries(TYPE_CFG).map(([key, cfg]) => ({
+    name: cfg.label, value: scopedOrders.filter((o) => o.type === key).length, color: cfg.color,
+  })), [scopedOrders]);
 
   const branchName = (id) => branches.find((b) => b.id === id)?.name || "—";
   const techName = (id) => technicians.find((t) => t.id === id)?.name || "Sin asignar";
   const equipName = (id) => equipment.find((e) => e.id === id)?.name || "—";
-  const currentCompany = companies.find((c) => c.id === companyId);
 
   const createOrder = async (payload) => {
     setSaving(true);
     const code = `OT-${String(orders.length + 1).padStart(4, "0")}`;
-    const { data, error } = await supabase
-      .from("work_orders")
-      .insert({ ...payload, code, company_id: companyId, status: "pendiente" })
-      .select()
-      .single();
+    const { data, error } = await supabase.from("work_orders").insert({ ...payload, code, company_id: companyId, status: "pendiente" }).select().single();
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
     setOrders((prev) => [data, ...prev]);
@@ -372,16 +429,6 @@ export default function MantenProApp() {
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
     const { error } = await supabase.from("work_orders").delete().eq("id", orderId);
     if (error) setErrorMsg(error.message);
-  };
-
-  const addCompany = async (name) => {
-    setSaving(true);
-    const { data, error } = await supabase.from("companies").insert({ name }).select().single();
-    setSaving(false);
-    if (error) { setErrorMsg(error.message); return; }
-    setCompanies((prev) => [...prev, data]);
-    setCompanyId(data.id);
-    setShowAddCompany(false);
   };
 
   const addBranch = async (name, city) => {
@@ -409,8 +456,6 @@ export default function MantenProApp() {
     { key: "branches", label: "Sucursales", Icon: Building2 },
   ];
 
-  if (loadingCompanies) return <FullScreenLoader label="Cargando empresas..." />;
-
   return (
     <div className="w-full min-h-[720px] flex" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <div className="w-56 flex-shrink-0 flex flex-col" style={{ background: C.panel, borderRight: `1px solid ${C.border}` }}>
@@ -432,8 +477,11 @@ export default function MantenProApp() {
             </button>
           ))}
         </nav>
-        <div className="px-5 py-4 text-[11px]" style={{ color: C.muted, borderTop: `1px solid ${C.border}` }}>
-          Conectado a Supabase — datos reales
+        <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.border}` }}>
+          <div className="text-xs truncate mb-2" style={{ color: C.muted }}>{session.user.email}</div>
+          <button onClick={onSignOut} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}>
+            <LogOut size={13} /> Cerrar sesión
+          </button>
         </div>
       </div>
 
@@ -447,48 +495,24 @@ export default function MantenProApp() {
 
         <div className="flex items-center justify-between px-6 py-3 flex-wrap gap-3" style={{ borderBottom: `1px solid ${C.border}` }}>
           <div className="flex items-center gap-3">
-            <div className="relative">
-              <button onClick={() => setCompanyMenuOpen((v) => !v)} className="flex items-center gap-2 px-3 py-2 text-sm font-medium" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-                <Building2 size={14} color={C.amber} />
-                {currentCompany?.name || "Sin empresas"}
-                <ChevronDown size={14} color={C.muted} />
-              </button>
-              {companyMenuOpen && (
-                <div className="absolute mt-1 w-56 z-40" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-                  {companies.map((c) => (
-                    <button key={c.id} onClick={() => { setCompanyId(c.id); setCompanyMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm flex items-center justify-between" style={{ color: c.id === companyId ? C.amber : C.text }}>
-                      {c.name}
-                      {c.id === companyId && <CheckCircle2 size={14} />}
-                    </button>
-                  ))}
-                  <button onClick={() => { setShowAddCompany(true); setCompanyMenuOpen(false); }} className="w-full text-left px-3 py-2 text-sm flex items-center gap-2" style={{ color: C.amber, borderTop: `1px solid ${C.border}` }}>
-                    <Plus size={14} /> Nueva empresa
-                  </button>
-                </div>
-              )}
+            <div className="flex items-center gap-2 px-3 py-2 text-sm font-medium" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+              <Building2 size={14} color={C.amber} />
+              {companyName}
             </div>
-
             <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
               <option value="all">Todas las sucursales</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
-
-          <button onClick={() => setShowOrderForm(true)} disabled={!companyId || branches.length === 0} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+          <button onClick={() => setShowOrderForm(true)} disabled={branches.length === 0} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
             <Plus size={16} /> Nueva orden
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
-          {!companyId && (
-            <div className="text-sm p-6 text-center" style={{ color: C.muted }}>
-              No hay ninguna empresa todavía. Crea la primera con el botón "Nueva empresa" arriba.
-            </div>
-          )}
+          {loadingScope && <FullScreenLoader label="Cargando datos..." />}
 
-          {companyId && loadingScope && <FullScreenLoader label="Cargando datos..." />}
-
-          {companyId && !loadingScope && view === "dashboard" && (
+          {!loadingScope && view === "dashboard" && (
             <div>
               <div className="flex gap-3 flex-wrap mb-6">
                 <KpiCard label="Órdenes activas" value={kpi.pend + kpi.prog} accent={C.amber} sub={`${kpi.pend} pendientes · ${kpi.prog} en progreso`} />
@@ -532,7 +556,7 @@ export default function MantenProApp() {
             </div>
           )}
 
-          {companyId && !loadingScope && view === "orders" && (
+          {!loadingScope && view === "orders" && (
             <div>
               <div className="flex flex-wrap gap-2 mb-4">
                 <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[200px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -586,10 +610,10 @@ export default function MantenProApp() {
             </div>
           )}
 
-          {companyId && !loadingScope && view === "technicians" && (
+          {!loadingScope && view === "technicians" && (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{technicians.length} técnicos en {currentCompany?.name}</div>
+                <div className="text-sm" style={{ color: C.muted }}>{technicians.length} técnicos</div>
                 <button onClick={() => setShowAddTech(true)} disabled={branches.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                   <Plus size={14} /> Agregar técnico
                 </button>
@@ -613,10 +637,10 @@ export default function MantenProApp() {
             </div>
           )}
 
-          {companyId && !loadingScope && view === "branches" && (
+          {!loadingScope && view === "branches" && (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{branches.length} sucursales en {currentCompany?.name}</div>
+                <div className="text-sm" style={{ color: C.muted }}>{branches.length} sucursales</div>
                 <button onClick={() => setShowAddBranch(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
                   <Plus size={14} /> Agregar sucursal
                 </button>
@@ -645,9 +669,57 @@ export default function MantenProApp() {
       </div>
 
       {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowOrderForm(false)} onSave={createOrder} saving={saving} />}
-      {showAddCompany && <AddCompanyModal onClose={() => setShowAddCompany(false)} onSave={addCompany} saving={saving} />}
       {showAddBranch && <AddBranchModal onClose={() => setShowAddBranch(false)} onSave={addBranch} saving={saving} />}
       {showAddTech && <AddTechModal branches={branches} onClose={() => setShowAddTech(false)} onSave={addTech} saving={saving} />}
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Punto de entrada: controla sesión / perfil / onboarding / app
+// ---------------------------------------------------------------------------
+export default function MantenProApp() {
+  const [authLoading, setAuthLoading] = useState(true);
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(undefined); // undefined = sin cargar, null = falta onboarding
+  const [company, setCompany] = useState(null);
+
+  const loadProfile = async (userId) => {
+    const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+    if (error) { console.error(error); setProfile(null); return; }
+    setProfile(data || null);
+    if (data?.company_id) {
+      const { data: comp } = await supabase.from("companies").select("*").eq("id", data.company_id).single();
+      setCompany(comp || null);
+    }
+  };
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      setSession(session);
+      if (session) await loadProfile(session.user.id);
+      setAuthLoading(false);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      setSession(session);
+      if (session) {
+        setAuthLoading(true);
+        await loadProfile(session.user.id);
+        setAuthLoading(false);
+      } else {
+        setProfile(undefined);
+        setCompany(null);
+      }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const signOut = () => supabase.auth.signOut();
+
+  if (authLoading) return <FullScreenLoader label="Cargando..." />;
+  if (!session) return <AuthScreen onAuthed={() => {}} />;
+  if (profile === undefined) return <FullScreenLoader label="Cargando tu perfil..." />;
+  if (profile === null) return <OnboardingScreen userId={session.user.id} onDone={() => loadProfile(session.user.id)} />;
+
+  return <Dashboard session={session} profile={profile} companyName={company?.name || "Tu empresa"} onSignOut={signOut} />;
 }
