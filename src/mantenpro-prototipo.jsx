@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
   CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut,
-  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck
+  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend
@@ -547,6 +547,135 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
 
 const fmtMoney = (n) => `RD$ ${Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// ---------------------------------------------------------------------------
+// Buscador con autocompletado (para elegir producto por nombre/SKU en vez de una lista larga)
+// ---------------------------------------------------------------------------
+function ProductSearchSelect({ products, value, onChange, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = products.find((p) => p.id === value);
+
+  const filtered = (query.trim()
+    ? products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || (p.sku || "").toLowerCase().includes(query.toLowerCase()))
+    : products
+  ).slice(0, 30);
+
+  return (
+    <div className="relative">
+      <input
+        className={inputClass}
+        style={inputStyle}
+        value={open ? query : selected ? selected.name : ""}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder || "Buscar producto..."}
+      />
+      {open && (
+        <div className="absolute z-50 w-full mt-1 max-h-56 overflow-y-auto" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <button type="button" onMouseDown={() => { onChange(""); setOpen(false); }} className="w-full text-left px-3 py-2 text-sm" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+            Servicio / producto libre (sin vincular)
+          </button>
+          {filtered.map((p) => (
+            <button key={p.id} type="button" onMouseDown={() => { onChange(p.id); setOpen(false); }} className="w-full text-left px-3 py-2 text-sm flex justify-between" style={{ color: C.text }}>
+              <span>{p.name}</span>
+              {p.sku && <span className="text-xs font-mono" style={{ color: C.muted }}>{p.sku}</span>}
+            </button>
+          ))}
+          {filtered.length === 0 && <div className="px-3 py-2 text-sm" style={{ color: C.muted }}>Sin resultados</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Impresión: abre una ventana nueva con el documento formateado y lanza el diálogo de imprimir
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Buscador genérico (para elegir cliente/proveedor por nombre en vez de una lista larga)
+// ---------------------------------------------------------------------------
+function SearchSelect({ items, value, onChange, placeholder, getLabel, getSub }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = items.find((i) => i.id === value);
+
+  const filtered = (query.trim()
+    ? items.filter((i) => getLabel(i).toLowerCase().includes(query.toLowerCase()) || (getSub ? (getSub(i) || "").toLowerCase().includes(query.toLowerCase()) : false))
+    : items
+  ).slice(0, 30);
+
+  return (
+    <div className="relative">
+      <input
+        className={inputClass}
+        style={inputStyle}
+        value={open ? query : selected ? getLabel(selected) : ""}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder || "Buscar..."}
+      />
+      {open && (
+        <div className="absolute z-50 w-full mt-1 max-h-56 overflow-y-auto" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          {filtered.map((i) => (
+            <button key={i.id} type="button" onMouseDown={() => { onChange(i.id); setOpen(false); }} className="w-full text-left px-3 py-2 text-sm flex justify-between" style={{ color: C.text }}>
+              <span>{getLabel(i)}</span>
+              {getSub && <span className="text-xs" style={{ color: C.muted }}>{getSub(i)}</span>}
+            </button>
+          ))}
+          {filtered.length === 0 && <div className="px-3 py-2 text-sm" style={{ color: C.muted }}>Sin resultados</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function printDocument(title, bodyHtml) {
+  const win = window.open("", "_blank", "width=800,height=900");
+  if (!win) { alert("Tu navegador bloqueó la ventana emergente. Permite las ventanas emergentes para poder imprimir."); return; }
+  win.document.write(`<html><head><title>${title}</title><style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 28px; }
+    h1 { font-size: 18px; margin: 0 0 2px; }
+    .muted { color: #666; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 13px; }
+    th { background: #f2f2f2; }
+    .totals { margin-top: 12px; width: 280px; margin-left: auto; }
+    .totals div { display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; }
+    .totals .total { font-weight: bold; font-size: 15px; border-top: 1px solid #333; margin-top: 4px; padding-top: 6px; }
+    .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  </style></head><body>${bodyHtml}<script>window.onload = () => setTimeout(() => window.print(), 200);</script></body></html>`);
+  win.document.close();
+  win.focus();
+}
+
+function invoiceLikeHtml({ docLabel, code, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, notes }) {
+  const rows = items.map((it) => `<tr><td>${it.description}${it.is_taxable ? " <span class='muted'>(ITBIS)</span>" : ""}</td><td style="text-align:right">${it.quantity}</td><td style="text-align:right">${fmtMoney(it.unit_price)}</td><td style="text-align:right">${fmtMoney((it.subtotal ?? it.quantity * it.unit_price))}</td></tr>`).join("");
+  return `
+    <div class="header-row">
+      <div><h1>${companyName}</h1><div class="muted">${docLabel}${code ? " · " + code : ""}</div></div>
+      <div class="muted" style="text-align:right">${dateLabel}: ${dateValue}${extraMeta || ""}</div>
+    </div>
+    <div class="muted">Cliente: <b style="color:#111">${clientName}</b></div>
+    <table><thead><tr><th>Descripción</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="totals">
+      <div><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
+      <div><span>ITBIS</span><span>${fmtMoney(itbis)}</span></div>
+      <div class="total"><span>Total</span><span>${fmtMoney(total)}</span></div>
+    </div>
+    ${notes ? `<div class="muted" style="margin-top:14px">Notas: ${notes}</div>` : ""}
+  `;
+}
+
+function listHtml(title, companyName, headers, rows) {
+  const head = headers.map((h) => `<th>${h}</th>`).join("");
+  const body = rows.map((r) => `<tr>${r.map((c) => `<td>${c ?? "—"}</td>`).join("")}</tr>`).join("");
+  return `<div class="header-row"><div><h1>${companyName}</h1><div class="muted">${title}</div></div><div class="muted">${new Date().toLocaleDateString("es-DO")}</div></div>
+    <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+
 const addMonths = (dateStr, months) => {
   const d = new Date(dateStr + "T00:00:00");
   d.setMonth(d.getMonth() + Number(months || 0));
@@ -820,10 +949,7 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
       <div className="grid grid-cols-3 gap-3">
         <Field label="Proveedor">
           <div className="flex gap-2">
-            <select className={inputClass} style={inputStyle} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-              <option value="">Selecciona uno</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            <div className="flex-1"><SearchSelect items={suppliers} value={supplierId} onChange={setSupplierId} placeholder="Buscar proveedor..." getLabel={(s) => s.name} /></div>
             <button type="button" onClick={onRequestNewSupplier} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
           </div>
         </Field>
@@ -841,10 +967,9 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
           const prod = products.find((p) => p.id === it.product_id);
           return (
             <div key={i} className="grid grid-cols-12 gap-2 items-center">
-              <select className={`${inputClass} col-span-5`} style={inputStyle} value={it.product_id} onChange={(e) => onProductPick(i, e.target.value)}>
-                <option value="">Selecciona un producto</option>
-                {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+              <div className="col-span-5">
+                <ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(i, id)} placeholder="Buscar producto..." />
+              </div>
               <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
               <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_cost} onChange={(e) => updateItem(i, { unit_cost: e.target.value })} placeholder="Costo unit." />
               <div className="col-span-2 text-sm font-mono text-right" style={{ color: C.muted }}>{fmtMoney((Number(it.quantity) || 0) * (Number(it.unit_cost) || 0))}</div>
@@ -875,7 +1000,16 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   );
 }
 
-function PurchaseDetailModal({ purchase, items, supplierName, onClose }) {
+function PurchaseDetailModal({ purchase, items, supplierName, companyName, onClose }) {
+  const doPrint = () => {
+    const html = invoiceLikeHtml({
+      docLabel: "Orden de compra", code: purchase.invoice_number, companyName,
+      clientName: supplierName, dateLabel: "Fecha", dateValue: fmtDate(purchase.purchase_date),
+      items: items.map((it) => ({ description: it.productName, quantity: it.quantity, unit_price: it.unit_cost, subtotal: it.subtotal, is_taxable: false })),
+      subtotal: purchase.total, itbis: 0, total: purchase.total, notes: purchase.notes,
+    });
+    printDocument(`Compra ${purchase.invoice_number || ""}`, html);
+  };
   return (
     <Modal title={`Compra${purchase.invoice_number ? " · " + purchase.invoice_number : ""}`} onClose={onClose} wide>
       <div className="grid grid-cols-3 gap-3 text-xs mb-4" style={{ color: C.muted }}>
@@ -892,7 +1026,8 @@ function PurchaseDetailModal({ purchase, items, supplierName, onClose }) {
         ))}
       </div>
       {purchase.notes && <div className="text-xs mt-3" style={{ color: C.muted }}>Notas: <span style={{ color: C.text }}>{purchase.notes}</span></div>}
-      <div className="flex justify-end mt-4">
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
       </div>
     </Modal>
@@ -953,11 +1088,11 @@ function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
   );
 }
 
-function InvoiceFormModal({ clients, products, ncfSequences, onClose, onSave, saving, onRequestNewClient }) {
-  const [clientId, setClientId] = useState(clients[0]?.id || "");
+function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, onSave, saving, onRequestNewClient }) {
+  const [clientId, setClientId] = useState(prefill?.client_id || clients[0]?.id || "");
   const [sequenceId, setSequenceId] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [items, setItems] = useState([{ product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
+  const [items, setItems] = useState(prefill?.items?.length ? prefill.items : [{ product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
 
   const usableSequences = ncfSequences.filter((s) => s.active && s.next_number <= s.range_end);
 
@@ -985,10 +1120,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, onClose, onSave, sa
       <div className="grid grid-cols-3 gap-3">
         <Field label="Cliente">
           <div className="flex gap-2">
-            <select className={inputClass} style={inputStyle} value={clientId} onChange={(e) => setClientId(e.target.value)}>
-              <option value="">Selecciona uno</option>
-              {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <div className="flex-1"><SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} /></div>
             <button type="button" onClick={onRequestNewClient} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
           </div>
         </Field>
@@ -1010,10 +1142,9 @@ function InvoiceFormModal({ clients, products, ncfSequences, onClose, onSave, sa
       <div className="space-y-2 mb-3">
         {items.map((it, i) => (
           <div key={i} className="grid grid-cols-12 gap-2 items-center">
-            <select className={`${inputClass} col-span-4`} style={inputStyle} value={it.product_id} onChange={(e) => onProductPick(i, e.target.value)}>
-              <option value="">Servicio / producto libre</option>
-              {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            <div className="col-span-4">
+              <ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(i, id)} placeholder="Buscar producto o servicio..." />
+            </div>
             <input className={`${inputClass} col-span-3`} style={inputStyle} value={it.description} onChange={(e) => updateItem(i, { description: e.target.value })} placeholder="Descripción" />
             <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
             <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} placeholder="Precio" />
@@ -1044,6 +1175,14 @@ function InvoiceFormModal({ clients, products, ncfSequences, onClose, onSave, sa
 
 function InvoiceDetailModal({ invoice, items, clientName, companyName, onClose, onVoid }) {
   const statusColor = invoice.status === "anulada" ? C.red : C.green;
+  const doPrint = () => {
+    const html = invoiceLikeHtml({
+      docLabel: "Factura", code: invoice.ncf, companyName, clientName,
+      dateLabel: "Fecha", dateValue: fmtDate(invoice.invoice_date), extraMeta: `<br/>NCF: ${invoice.ncf}`,
+      items, subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total,
+    });
+    printDocument(`Factura ${invoice.ncf}`, html);
+  };
   return (
     <Modal title={`Factura ${invoice.ncf}`} onClose={onClose} wide>
       <div className="flex items-center justify-between mb-4">
@@ -1076,7 +1215,145 @@ function InvoiceDetailModal({ invoice, items, clientName, companyName, onClose, 
             <Ban size={14} /> Anular factura
           </button>
         )}
+        <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
+const QUOTE_STATUS_CFG = {
+  pendiente: { label: "Pendiente", color: "#8B92A0" },
+  aprobada: { label: "Aprobada", color: "#4CAF6D" },
+  rechazada: { label: "Rechazada", color: "#E8654F" },
+  convertida: { label: "Convertida en factura", color: "#F2A93B" },
+};
+
+function QuoteFormModal({ clients, products, onClose, onSave, saving, onRequestNewClient }) {
+  const [clientId, setClientId] = useState(clients[0]?.id || "");
+  const [quoteDate, setQuoteDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [validUntil, setValidUntil] = useState("");
+  const [items, setItems] = useState([{ product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
+
+  const updateItem = (i, patch) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
+  const addItemRow = () => setItems((prev) => [...prev, { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
+  const removeItemRow = (i) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+
+  const onProductPick = (i, productId) => {
+    const prod = products.find((p) => p.id === productId);
+    updateItem(i, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
+  };
+
+  const subtotal = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
+  const itbis = items.reduce((sum, it) => sum + (it.is_taxable ? (Number(it.quantity) || 0) * (Number(it.unit_price) || 0) * 0.18 : 0), 0);
+  const total = subtotal + itbis;
+
+  const submit = () => {
+    const validItems = items.filter((it) => it.description.trim() && Number(it.quantity) > 0);
+    if (!clientId || validItems.length === 0) return;
+    onSave({ client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, subtotal, itbis, total }, validItems);
+  };
+
+  return (
+    <Modal title="Nueva cotización" onClose={onClose} wide>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Cliente">
+          <div className="flex gap-2">
+            <div className="flex-1"><SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} /></div>
+            <button type="button" onClick={onRequestNewClient} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
+          </div>
+        </Field>
+        <Field label="Fecha">
+          <input type="date" className={inputClass} style={inputStyle} value={quoteDate} onChange={(e) => setQuoteDate(e.target.value)} />
+        </Field>
+        <Field label="Válida hasta (opcional)">
+          <input type="date" className={inputClass} style={inputStyle} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
+        </Field>
+      </div>
+
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
+      <div className="space-y-2 mb-3">
+        {items.map((it, i) => (
+          <div key={i} className="grid grid-cols-12 gap-2 items-center">
+            <div className="col-span-4">
+              <ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(i, id)} placeholder="Buscar producto o servicio..." />
+            </div>
+            <input className={`${inputClass} col-span-3`} style={inputStyle} value={it.description} onChange={(e) => updateItem(i, { description: e.target.value })} placeholder="Descripción" />
+            <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
+            <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} placeholder="Precio" />
+            <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
+              <input type="checkbox" checked={it.is_taxable} onChange={(e) => updateItem(i, { is_taxable: e.target.checked })} /> ITBIS
+            </label>
+            <button onClick={() => removeItemRow(i)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+          </div>
+        ))}
+      </div>
+      <button onClick={addItemRow} className="flex items-center gap-2 text-sm mb-4" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+
+      <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS (18%)</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(total)}</span></div>
+      </div>
+
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : "Crear cotización"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function QuoteDetailModal({ quote, items, clientName, companyName, onClose, onMarkStatus, onConvert }) {
+  const s = QUOTE_STATUS_CFG[quote.status] || QUOTE_STATUS_CFG.pendiente;
+  const doPrint = () => {
+    const html = invoiceLikeHtml({
+      docLabel: "Cotización", code: quote.quote_number, companyName, clientName,
+      dateLabel: "Fecha", dateValue: fmtDate(quote.quote_date),
+      extraMeta: quote.valid_until ? `<br/>Válida hasta: ${fmtDate(quote.valid_until)}` : "",
+      items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total,
+    });
+    printDocument(`Cotización ${quote.quote_number || ""}`, html);
+  };
+  return (
+    <Modal title={`Cotización ${quote.quote_number || ""}`} onClose={onClose} wide>
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span></div>
+        <Pill label={s.label} color={s.color} />
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-xs mb-4" style={{ color: C.muted }}>
+        <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(quote.quote_date)}</span></div>
+        <div>Válida hasta<br /><span style={{ color: C.text }}>{quote.valid_until ? fmtDate(quote.valid_until) : "Sin definir"}</span></div>
+      </div>
+      <div className="space-y-1 mb-3">
+        {items.map((it) => (
+          <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+            <div>{it.description}</div>
+            <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(quote.subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(quote.itbis)}</span></div>
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(quote.total)}</span></div>
+      </div>
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        {quote.status === "pendiente" && (
+          <>
+            <button onClick={() => onMarkStatus(quote, "rechazada")} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>Marcar rechazada</button>
+            <button onClick={() => onMarkStatus(quote, "aprobada")} className="px-4 py-2 text-sm" style={{ color: C.green, border: `1px solid ${C.green}40` }}>Marcar aprobada</button>
+          </>
+        )}
+        {(quote.status === "pendiente" || quote.status === "aprobada") && (
+          <button onClick={() => onConvert(quote, items)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+            Convertir en factura
+          </button>
+        )}
+        <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
       </div>
     </Modal>
   );
@@ -1247,10 +1524,22 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
   const [clientAssets, setClientAssets] = useState([]);
+  const [selectedClients, setSelectedClients] = useState(new Set());
+  const [selectedProducts, setSelectedProducts] = useState(new Set());
+  const [selectedSuppliers, setSelectedSuppliers] = useState(new Set());
+  const [productSearch, setProductSearch] = useState("");
+  const [productCategoryFilter, setProductCategoryFilter] = useState("all");
+  const [purchaseSearch, setPurchaseSearch] = useState("");
+  const [purchaseSupplierFilter, setPurchaseSupplierFilter] = useState("all");
+  const [quoteSearch, setQuoteSearch] = useState("");
+  const [quoteStatusFilter, setQuoteStatusFilter] = useState("all");
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [invoiceStatusFilter, setInvoiceStatusFilter] = useState("all");
   const [suppliers, setSuppliers] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [ncfSequences, setNcfSequences] = useState([]);
   const [invoices, setInvoices] = useState([]);
+  const [quotes, setQuotes] = useState([]);
 
   const [branchFilter, setBranchFilter] = useState("all");
   const [view, setView] = useState("dashboard");
@@ -1283,6 +1572,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [editingNcf, setEditingNcf] = useState(null);
   const [showAddInvoice, setShowAddInvoice] = useState(false);
   const [invoiceDetail, setInvoiceDetail] = useState(null);
+  const [invoicePrefill, setInvoicePrefill] = useState(null);
+  const [showAddQuote, setShowAddQuote] = useState(false);
+  const [quoteDetail, setQuoteDetail] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -1291,7 +1583,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, profs, inv, cli, prod, ast, sup, purch, ncf, invc] = await Promise.all([
+    const [br, tech, eq, loc, ord, profs, inv, cli, prod, ast, sup, purch, ncf, invc, qts] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
@@ -1306,6 +1598,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       supabase.from("purchases").select("*").eq("company_id", companyId).order("purchase_date", { ascending: false }),
       supabase.from("ncf_sequences").select("*").eq("company_id", companyId).order("created_at"),
       supabase.from("invoices").select("*").eq("company_id", companyId).order("invoice_date", { ascending: false }),
+      supabase.from("quotes").select("*").eq("company_id", companyId).order("quote_date", { ascending: false }),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -1322,6 +1615,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setPurchases(purch.data || []);
     setNcfSequences(ncf.data || []);
     setInvoices(invc.data || []);
+    setQuotes(qts.data || []);
     setLoadingScope(false);
   };
 
@@ -1358,7 +1652,15 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const techStats = useMemo(() => technicians.map((t) => {
     const own = orders.filter((o) => o.technician_id === t.id);
-    return { ...t, total: own.length, active: own.filter((o) => o.status !== "completada").length, completed: own.filter((o) => o.status === "completada").length };
+    return {
+      ...t,
+      total: own.length,
+      active: own.filter((o) => o.status !== "completada").length,
+      completed: own.filter((o) => o.status === "completada").length,
+      preventivo: own.filter((o) => o.type === "preventivo").length,
+      correctivo: own.filter((o) => o.type === "correctivo").length,
+      predictivo: own.filter((o) => o.type === "predictivo").length,
+    };
   }), [technicians, orders]);
 
   const equipStats = useMemo(() => equipment.map((eq) => {
@@ -1366,11 +1668,39 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     return { ...eq, total: own.length, correctivo: own.filter((o) => o.type === "correctivo").length, open: own.filter((o) => o.status !== "completada").length };
   }), [equipment, orders]);
 
-  const techChartData = useMemo(() => techStats.map((t) => ({ name: t.name.split(" ")[0], Activas: t.active, Completadas: t.completed })), [techStats]);
+  const techChartData = useMemo(() => techStats.map((t) => ({ name: t.name.split(" ")[0], Preventivo: t.preventivo, Correctivo: t.correctivo, Predictivo: t.predictivo })), [techStats]);
   const equipChartData = useMemo(
     () => [...equipStats].sort((a, b) => b.correctivo - a.correctivo).slice(0, 8).map((eq) => ({ name: eq.name, Correctivos: eq.correctivo })),
     [equipStats]
   );
+
+  const productCategories = useMemo(() => [...new Set(products.map((p) => p.category).filter(Boolean))].sort(), [products]);
+  const filteredProducts = useMemo(() => products.filter((p) => {
+    if (productCategoryFilter !== "all" && (p.category || "") !== productCategoryFilter) return false;
+    if (productSearch && !p.name.toLowerCase().includes(productSearch.toLowerCase()) && !(p.sku || "").toLowerCase().includes(productSearch.toLowerCase())) return false;
+    return true;
+  }), [products, productCategoryFilter, productSearch]);
+
+  const filteredPurchases = useMemo(() => purchases.filter((pu) => {
+    const supplierName = suppliers.find((s) => s.id === pu.supplier_id)?.name || "";
+    if (purchaseSupplierFilter !== "all" && pu.supplier_id !== purchaseSupplierFilter) return false;
+    if (purchaseSearch && !supplierName.toLowerCase().includes(purchaseSearch.toLowerCase()) && !(pu.invoice_number || "").toLowerCase().includes(purchaseSearch.toLowerCase())) return false;
+    return true;
+  }), [purchases, suppliers, purchaseSupplierFilter, purchaseSearch]);
+
+  const filteredQuotes = useMemo(() => quotes.filter((q) => {
+    const clientNameStr = clients.find((c) => c.id === q.client_id)?.name || "";
+    if (quoteStatusFilter !== "all" && q.status !== quoteStatusFilter) return false;
+    if (quoteSearch && !clientNameStr.toLowerCase().includes(quoteSearch.toLowerCase()) && !(q.quote_number || "").toLowerCase().includes(quoteSearch.toLowerCase())) return false;
+    return true;
+  }), [quotes, clients, quoteStatusFilter, quoteSearch]);
+
+  const filteredInvoices = useMemo(() => invoices.filter((inv) => {
+    const clientNameStr = clients.find((c) => c.id === inv.client_id)?.name || "";
+    if (invoiceStatusFilter !== "all" && inv.status !== invoiceStatusFilter) return false;
+    if (invoiceSearch && !clientNameStr.toLowerCase().includes(invoiceSearch.toLowerCase()) && !(inv.ncf || "").toLowerCase().includes(invoiceSearch.toLowerCase())) return false;
+    return true;
+  }), [invoices, clients, invoiceStatusFilter, invoiceSearch]);
 
   const activeWarrantyAssets = useMemo(() => {
     const today = new Date();
@@ -1669,6 +1999,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
     await supabase.from("ncf_sequences").update({ next_number: freshSeq.next_number + 1 }).eq("id", freshSeq.id);
 
+    if (invoicePrefill?.sourceQuoteId) {
+      await supabase.from("quotes").update({ status: "convertida" }).eq("id", invoicePrefill.sourceQuoteId);
+    }
+
     for (const row of itemRows) {
       if (!row.product_id) continue;
       const prod = products.find((p) => p.id === row.product_id);
@@ -1678,6 +2012,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     }
 
     setSaving(false);
+    setInvoicePrefill(null);
     setShowAddInvoice(false);
     loadAll();
   };
@@ -1700,6 +2035,51 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const openInvoiceDetail = async (invoice) => {
     const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id);
     setInvoiceDetail({ invoice, items: items || [] });
+  };
+
+  // ---- Cotizaciones ----
+  const createQuote = async (payload, items) => {
+    setSaving(true);
+    const quote_number = `COT-${String(quotes.length + 1).padStart(4, "0")}`;
+    const { data: quote, error: quoteError } = await supabase.from("quotes").insert({ ...payload, company_id: companyId, quote_number, status: "pendiente" }).select().single();
+    if (quoteError) { setSaving(false); setErrorMsg(quoteError.message); return; }
+
+    const itemRows = items.map((it) => ({
+      quote_id: quote.id,
+      product_id: it.product_id || null,
+      description: it.description,
+      quantity: Number(it.quantity),
+      unit_price: Number(it.unit_price),
+      is_taxable: it.is_taxable,
+      subtotal: Number(it.quantity) * Number(it.unit_price),
+    }));
+    const { error: itemsError } = await supabase.from("quote_items").insert(itemRows);
+    setSaving(false);
+    if (itemsError) { setErrorMsg(itemsError.message); return; }
+    setShowAddQuote(false);
+    loadAll();
+  };
+
+  const markQuoteStatus = async (quote, status) => {
+    const { data, error } = await supabase.from("quotes").update({ status }).eq("id", quote.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setQuotes((prev) => prev.map((q) => (q.id === data.id ? data : q)));
+    setQuoteDetail((prev) => (prev ? { ...prev, quote: data } : prev));
+  };
+
+  const convertQuoteToInvoice = (quote, items) => {
+    setInvoicePrefill({
+      client_id: quote.client_id,
+      sourceQuoteId: quote.id,
+      items: items.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable })),
+    });
+    setQuoteDetail(null);
+    setShowAddInvoice(true);
+  };
+
+  const openQuoteDetail = async (quote) => {
+    const { data: items } = await supabase.from("quote_items").select("*").eq("quote_id", quote.id);
+    setQuoteDetail({ quote, items: items || [] });
   };
 
   // ---- Técnicos ----
@@ -1788,7 +2168,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       { key: "warranty", label: "Activos en Garantía", Icon: BadgeCheck },
       { key: "reports", label: "Reportes", Icon: BarChart3 },
     ] : []),
-    ...(canManage ? [{ section: "Comercial" }, { key: "clients", label: "Clientes", Icon: Users2 }, { key: "products", label: "Catálogo", Icon: Boxes }, { key: "suppliers", label: "Proveedores", Icon: Truck }, { key: "purchases", label: "Compras", Icon: ShoppingCart }, { key: "invoices", label: "Facturación", Icon: Receipt }] : []),
+    ...(canManage ? [{ section: "Comercial" }, { key: "clients", label: "Clientes", Icon: Users2 }, { key: "products", label: "Catálogo", Icon: Boxes }, { key: "suppliers", label: "Proveedores", Icon: Truck }, { key: "purchases", label: "Compras", Icon: ShoppingCart }, { key: "quotes", label: "Cotizaciones", Icon: ClipboardCheck }, { key: "invoices", label: "Facturación", Icon: Receipt }] : []),
     ...(canManage ? [{ section: "Administración" }, { key: "branches", label: "Sucursales", Icon: Building2 }] : []),
     ...(isAdmin ? [{ key: "ncf", label: "Secuencias NCF", Icon: Hash }] : []),
     ...(isAdmin ? [{ key: "users", label: "Usuarios", Icon: ShieldCheck }] : []),
@@ -2124,7 +2504,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && canManage && view === "reports" && (
             <div>
-              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Desempeño por técnico</div>
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Desempeño por técnico — por tipo de mantenimiento</div>
               <div className="p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={techChartData} margin={{ left: -20 }}>
@@ -2132,28 +2512,31 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     <YAxis allowDecimals={false} tick={{ fill: C.muted, fontSize: 12 }} axisLine={{ stroke: C.border }} tickLine={false} />
                     <Tooltip contentStyle={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }} cursor={{ fill: C.panelAlt }} />
                     <Legend wrapperStyle={{ fontSize: 12, color: C.muted }} />
-                    <Bar dataKey="Activas" stackId="a" fill={C.amber} radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="Completadas" stackId="a" fill={C.green} radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="Preventivo" stackId="a" fill={C.green} radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="Correctivo" stackId="a" fill={C.red} radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="Predictivo" stackId="a" fill={C.blue} radius={[2, 2, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-4">Técnico</div>
-                  <div className="col-span-2 text-center">Activas</div>
-                  <div className="col-span-2 text-center">Completadas</div>
-                  <div className="col-span-2 text-center">Total</div>
+                  <div className="col-span-3">Técnico</div>
+                  <div className="col-span-2 text-center">Preventivo</div>
+                  <div className="col-span-2 text-center">Correctivo</div>
+                  <div className="col-span-2 text-center">Predictivo</div>
+                  <div className="col-span-1 text-center">Total</div>
                   <div className="col-span-2 text-right">Historial</div>
                 </div>
                 {techStats.map((t) => (
                   <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-4">
+                    <div className="col-span-3">
                       <div>{t.name}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{t.specialty}</div>
                     </div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: t.active > 0 ? C.amber : C.muted }}>{t.active}</div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: C.green }}>{t.completed}</div>
-                    <div className="col-span-2 text-center font-mono">{t.total}</div>
+                    <div className="col-span-2 text-center font-mono" style={{ color: C.green }}>{t.preventivo}</div>
+                    <div className="col-span-2 text-center font-mono" style={{ color: C.red }}>{t.correctivo}</div>
+                    <div className="col-span-2 text-center font-mono" style={{ color: C.blue }}>{t.predictivo}</div>
+                    <div className="col-span-1 text-center font-mono">{t.total}</div>
                     <div className="col-span-2 text-right">
                       <button onClick={() => setHistoryFor({ title: `Historial de ${t.name}`, orders: orders.filter((o) => o.technician_id === t.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
                         <History size={13} /> Ver
@@ -2210,30 +2593,47 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           {!loadingScope && canManage && view === "clients" && (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{clients.length} clientes</div>
-                <button onClick={() => setShowAddClient(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
-                  <Plus size={14} /> Agregar cliente
-                </button>
+                <div className="text-sm" style={{ color: C.muted }}>{clients.length} clientes{selectedClients.size > 0 ? ` · ${selectedClients.size} seleccionados` : ""}</div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const list = selectedClients.size > 0 ? clients.filter((c) => selectedClients.has(c.id)) : clients;
+                      printDocument("Clientes", listHtml("Listado de clientes", companyName, ["Cliente", "RNC/Cédula", "Teléfono", "Correo", "Dirección"], list.map((c) => [c.name, c.rnc_cedula, c.phone, c.email, c.address])));
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
+                  >
+                    <FileText size={14} /> {selectedClients.size > 0 ? `Imprimir selección (${selectedClients.size})` : "Imprimir lista"}
+                  </button>
+                  <button onClick={() => setShowAddClient(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                    <Plus size={14} /> Agregar cliente
+                  </button>
+                </div>
               </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Cliente</div>
-                  <div className="col-span-2">RNC / Cédula</div>
-                  <div className="col-span-2">Teléfono</div>
-                  <div className="col-span-2">Correo</div>
-                  <div className="col-span-2">Dirección</div>
-                  <div className="col-span-1 text-right">Acciones</div>
+                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <input type="checkbox" checked={clients.length > 0 && selectedClients.size === clients.length} onChange={() => setSelectedClients(selectedClients.size === clients.length ? new Set() : new Set(clients.map((c) => c.id)))} />
+                  <div className="flex-1 grid grid-cols-12 gap-2">
+                    <div className="col-span-3">Cliente</div>
+                    <div className="col-span-2">RNC / Cédula</div>
+                    <div className="col-span-2">Teléfono</div>
+                    <div className="col-span-2">Correo</div>
+                    <div className="col-span-2">Dirección</div>
+                    <div className="col-span-1 text-right">Acciones</div>
+                  </div>
                 </div>
                 {clients.map((c) => (
-                  <div key={c.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3 truncate">{c.name}</div>
-                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.rnc_cedula || "—"}</div>
-                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.phone || "—"}</div>
-                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.email || "—"}</div>
-                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.address || "—"}</div>
-                    <div className="col-span-1 flex items-center justify-end gap-2">
-                      <button onClick={() => setEditingClient(c)} style={iconBtnStyle}><Pencil size={14} /></button>
-                      <button onClick={() => deleteClient(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                  <div key={c.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <input type="checkbox" checked={selectedClients.has(c.id)} onChange={() => setSelectedClients((prev) => { const next = new Set(prev); next.has(c.id) ? next.delete(c.id) : next.add(c.id); return next; })} />
+                    <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-3 truncate">{c.name}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.rnc_cedula || "—"}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.phone || "—"}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.email || "—"}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.address || "—"}</div>
+                      <div className="col-span-1 flex items-center justify-end gap-2">
+                        <button onClick={() => setEditingClient(c)} style={iconBtnStyle}><Pencil size={14} /></button>
+                        <button onClick={() => deleteClient(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2244,38 +2644,71 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && canManage && view === "products" && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{products.length} productos</div>
-                <button onClick={() => setShowAddProduct(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
-                  <Plus size={14} /> Agregar producto
-                </button>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {filteredProducts.length}{filteredProducts.length !== products.length ? ` de ${products.length}` : ""} productos{selectedProducts.size > 0 ? ` · ${selectedProducts.size} seleccionados` : ""}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const list = selectedProducts.size > 0 ? filteredProducts.filter((p) => selectedProducts.has(p.id)) : filteredProducts;
+                      printDocument("Catálogo", listHtml("Catálogo de productos", companyName, ["SKU", "Producto", "Categoría", "Costo", "Precio", "Stock"], list.map((p) => [p.sku, p.name, p.category, fmtMoney(p.cost_price), fmtMoney(p.unit_price), `${p.stock_qty} ${p.unit}`])));
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
+                  >
+                    <FileText size={14} /> {selectedProducts.size > 0 ? `Imprimir selección (${selectedProducts.size})` : "Imprimir lista"}
+                  </button>
+                  <button onClick={() => setShowAddProduct(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                    <Plus size={14} /> Agregar producto
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[220px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <Search size={14} color={C.muted} />
+                  <input value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Buscar por nombre o SKU..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                </div>
+                <select value={productCategoryFilter} onChange={(e) => setProductCategoryFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todas las categorías</option>
+                  {productCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-4">Producto</div>
-                  <div className="col-span-2 text-right">Costo</div>
-                  <div className="col-span-2 text-right">Precio venta</div>
-                  <div className="col-span-2 text-right">Stock</div>
-                  <div className="col-span-2 text-right">Acciones</div>
+                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <input type="checkbox" checked={filteredProducts.length > 0 && selectedProducts.size === filteredProducts.length} onChange={() => setSelectedProducts(selectedProducts.size === filteredProducts.length ? new Set() : new Set(filteredProducts.map((p) => p.id)))} />
+                  <div className="flex-1 grid grid-cols-12 gap-2">
+                    <div className="col-span-4">Producto</div>
+                    <div className="col-span-2 text-right">Costo</div>
+                    <div className="col-span-2 text-right">Precio venta</div>
+                    <div className="col-span-2 text-right">Stock</div>
+                    <div className="col-span-2 text-right">Acciones</div>
+                  </div>
                 </div>
-                {products.map((p) => (
-                  <div key={p.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-4 min-w-0">
-                      <div className="truncate">{p.name}</div>
-                      <div className="text-xs truncate" style={{ color: C.muted }}>
-                        {p.sku ? `SKU: ${p.sku}` : ""}{p.sku && p.category ? " · " : ""}{p.category || (!p.sku ? p.description || "—" : "")}
+                {filteredProducts.map((p) => (
+                  <div key={p.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => setSelectedProducts((prev) => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; })} />
+                    <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                      <div className="col-span-4 min-w-0">
+                        <div className="truncate">{p.name}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>
+                          {p.sku ? `SKU: ${p.sku}` : ""}{p.sku && p.category ? " · " : ""}{p.category || (!p.sku ? p.description || "—" : "")}
+                        </div>
                       </div>
-                    </div>
-                    <div className="col-span-2 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney(p.cost_price)}</div>
-                    <div className="col-span-2 text-right font-mono">{fmtMoney(p.unit_price)}</div>
-                    <div className="col-span-2 text-right font-mono" style={{ color: p.stock_qty <= 0 ? C.red : C.text }}>{p.stock_qty} {p.unit}</div>
-                    <div className="col-span-2 flex items-center justify-end gap-2">
-                      <button onClick={() => setEditingProduct(p)} style={iconBtnStyle}><Pencil size={14} /></button>
-                      <button onClick={() => deleteProduct(p.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                      <div className="col-span-2 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney(p.cost_price)}</div>
+                      <div className="col-span-2 text-right font-mono">{fmtMoney(p.unit_price)}</div>
+                      <div className="col-span-2 text-right font-mono" style={{ color: p.stock_qty <= 0 ? C.red : C.text }}>{p.stock_qty} {p.unit}</div>
+                      <div className="col-span-2 flex items-center justify-end gap-2">
+                        <button onClick={() => setEditingProduct(p)} style={iconBtnStyle}><Pencil size={14} /></button>
+                        <button onClick={() => deleteProduct(p.id)} style={iconBtnStyle}><Trash2 size={14} /></button>
+                      </div>
                     </div>
                   </div>
                 ))}
-                {products.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay productos en el catálogo.</div>}
+                {filteredProducts.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                    {products.length === 0 ? "Todavía no hay productos en el catálogo." : "Ningún producto coincide con la búsqueda."}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2283,16 +2716,30 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           {!loadingScope && canManage && view === "suppliers" && (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{suppliers.length} proveedores</div>
-                <button onClick={() => setShowAddSupplier(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
-                  <Plus size={14} /> Agregar proveedor
-                </button>
+                <div className="text-sm" style={{ color: C.muted }}>{suppliers.length} proveedores{selectedSuppliers.size > 0 ? ` · ${selectedSuppliers.size} seleccionados` : ""}</div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const list = selectedSuppliers.size > 0 ? suppliers.filter((s) => selectedSuppliers.has(s.id)) : suppliers;
+                      printDocument("Proveedores", listHtml("Listado de proveedores", companyName, ["Proveedor", "RNC", "Teléfono", "Correo"], list.map((s) => [s.name, s.rnc, s.phone, s.email])));
+                    }}
+                    className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
+                  >
+                    <FileText size={14} /> {selectedSuppliers.size > 0 ? `Imprimir selección (${selectedSuppliers.size})` : "Imprimir lista"}
+                  </button>
+                  <button onClick={() => setShowAddSupplier(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                    <Plus size={14} /> Agregar proveedor
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {suppliers.map((s) => (
                   <div key={s.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                     <div className="flex items-center justify-between">
-                      <div className="font-semibold">{s.name}</div>
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" checked={selectedSuppliers.has(s.id)} onChange={() => setSelectedSuppliers((prev) => { const next = new Set(prev); next.has(s.id) ? next.delete(s.id) : next.add(s.id); return next; })} />
+                        <div className="font-semibold">{s.name}</div>
+                      </div>
                       <div className="flex items-center gap-2">
                         <button onClick={() => setEditingSupplier(s)} style={iconBtnStyle}><Pencil size={13} /></button>
                         <button onClick={() => deleteSupplier(s.id)} style={iconBtnStyle}><Trash2 size={13} /></button>
@@ -2312,13 +2759,23 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && canManage && view === "purchases" && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{purchases.length} compras registradas</div>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>{filteredPurchases.length}{filteredPurchases.length !== purchases.length ? ` de ${purchases.length}` : ""} compras registradas</div>
                 <button onClick={() => setShowAddPurchase(true)} disabled={products.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                   <Plus size={14} /> Registrar compra
                 </button>
               </div>
               {products.length === 0 && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un producto al catálogo antes de registrar una compra.</div>}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[220px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <Search size={14} color={C.muted} />
+                  <input value={purchaseSearch} onChange={(e) => setPurchaseSearch(e.target.value)} placeholder="Buscar por proveedor o factura..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                </div>
+                <select value={purchaseSupplierFilter} onChange={(e) => setPurchaseSupplierFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los proveedores</option>
+                  {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Proveedor</div>
@@ -2327,7 +2784,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Total</div>
                   <div className="col-span-3 text-right">Acciones</div>
                 </div>
-                {purchases.map((pu) => (
+                {filteredPurchases.map((pu) => (
                   <div key={pu.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
                     <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
@@ -2339,7 +2796,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     </div>
                   </div>
                 ))}
-                {purchases.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay compras registradas.</div>}
+                {filteredPurchases.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                    {purchases.length === 0 ? "Todavía no hay compras registradas." : "Ninguna compra coincide con la búsqueda."}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2386,16 +2847,75 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && canManage && view === "quotes" && (
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>{filteredQuotes.length}{filteredQuotes.length !== quotes.length ? ` de ${quotes.length}` : ""} cotizaciones</div>
+                <button onClick={() => setShowAddQuote(true)} disabled={clients.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Nueva cotización
+                </button>
+              </div>
+              {clients.length === 0 && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un cliente antes de cotizar.</div>}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[220px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <Search size={14} color={C.muted} />
+                  <input value={quoteSearch} onChange={(e) => setQuoteSearch(e.target.value)} placeholder="Buscar por cliente o número..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                </div>
+                <select value={quoteStatusFilter} onChange={(e) => setQuoteStatusFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los estados</option>
+                  {Object.entries(QUOTE_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-2">No.</div>
+                  <div className="col-span-3">Cliente</div>
+                  <div className="col-span-2">Fecha</div>
+                  <div className="col-span-2 text-right">Total</div>
+                  <div className="col-span-3 text-right">Estado</div>
+                </div>
+                {filteredQuotes.map((q) => {
+                  const s = QUOTE_STATUS_CFG[q.status] || QUOTE_STATUS_CFG.pendiente;
+                  return (
+                    <div key={q.id} onClick={() => openQuoteDetail(q)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-2 font-mono text-xs">{q.quote_number}</div>
+                      <div className="col-span-3 truncate">{clients.find((c) => c.id === q.client_id)?.name || "—"}</div>
+                      <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(q.quote_date)}</div>
+                      <div className="col-span-2 text-right font-mono">{fmtMoney(q.total)}</div>
+                      <div className="col-span-3 text-right"><Pill label={s.label} color={s.color} /></div>
+                    </div>
+                  );
+                })}
+                {filteredQuotes.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                    {quotes.length === 0 ? "Todavía no hay cotizaciones registradas." : "Ninguna cotización coincide con la búsqueda."}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {!loadingScope && canManage && view === "invoices" && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{invoices.length} facturas emitidas</div>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>{filteredInvoices.length}{filteredInvoices.length !== invoices.length ? ` de ${invoices.length}` : ""} facturas emitidas</div>
                 <button onClick={() => setShowAddInvoice(true)} disabled={clients.length === 0 || ncfSequences.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                   <Plus size={14} /> Nueva factura
                 </button>
               </div>
               {clients.length === 0 && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un cliente antes de facturar.</div>}
               {ncfSequences.length === 0 && isAdmin && <div className="text-sm mb-3" style={{ color: C.muted }}>Configura una secuencia NCF antes de facturar.</div>}
+              <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[220px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <Search size={14} color={C.muted} />
+                  <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Buscar por cliente o NCF..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                </div>
+                <select value={invoiceStatusFilter} onChange={(e) => setInvoiceStatusFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los estados</option>
+                  <option value="emitida">Emitida</option>
+                  <option value="anulada">Anulada</option>
+                </select>
+              </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">NCF</div>
@@ -2404,7 +2924,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Total</div>
                   <div className="col-span-2 text-right">Estado</div>
                 </div>
-                {invoices.map((inv) => (
+                {filteredInvoices.map((inv) => (
                   <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3 font-mono text-xs">{inv.ncf}</div>
                     <div className="col-span-3 truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
@@ -2413,7 +2933,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     <div className="col-span-2 text-right"><Pill label={inv.status === "anulada" ? "Anulada" : "Emitida"} color={inv.status === "anulada" ? C.red : C.green} /></div>
                   </div>
                 ))}
-                {invoices.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay facturas emitidas.</div>}
+                {filteredInvoices.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                    {invoices.length === 0 ? "Todavía no hay facturas emitidas." : "Ninguna factura coincide con la búsqueda."}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2512,6 +3036,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           purchase={purchaseDetail.purchase}
           items={purchaseDetail.items}
           supplierName={suppliers.find((s) => s.id === purchaseDetail.purchase.supplier_id)?.name || "—"}
+          companyName={companyName}
           onClose={() => setPurchaseDetail(null)}
         />
       )}
@@ -2522,10 +3047,32 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           clients={clients}
           products={products}
           ncfSequences={ncfSequences}
-          onClose={() => setShowAddInvoice(false)}
+          prefill={invoicePrefill}
+          onClose={() => { setShowAddInvoice(false); setInvoicePrefill(null); }}
           onSave={createInvoice}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}
+        />
+      )}
+      {showAddQuote && (
+        <QuoteFormModal
+          clients={clients}
+          products={products}
+          onClose={() => setShowAddQuote(false)}
+          onSave={createQuote}
+          saving={saving}
+          onRequestNewClient={() => setShowAddClient(true)}
+        />
+      )}
+      {quoteDetail && (
+        <QuoteDetailModal
+          quote={quoteDetail.quote}
+          items={quoteDetail.items}
+          clientName={clients.find((c) => c.id === quoteDetail.quote.client_id)?.name || "—"}
+          companyName={companyName}
+          onClose={() => setQuoteDetail(null)}
+          onMarkStatus={markQuoteStatus}
+          onConvert={convertQuoteToInvoice}
         />
       )}
       {invoiceDetail && (
