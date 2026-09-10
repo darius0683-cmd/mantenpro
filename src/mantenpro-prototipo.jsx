@@ -687,7 +687,7 @@ function printDocument(title, bodyHtml) {
   win.focus();
 }
 
-function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, notes }) {
+function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, discountPct, notes }) {
   const groups = groupItemsByChapter(items, (it) => Number(it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost) ?? 0));
   const showChapters = groups.length > 1 || (groups[0] && groups[0].chapter !== "General");
   const rowHtml = (it) => `<tr><td>${it.description || ""}${it.is_taxable ? " <span class='muted'>(ITBIS)</span>" : ""}</td><td style="text-align:right">${it.quantity}</td><td style="text-align:right">${fmtMoney(it.unit_price ?? it.unit_cost)}</td><td style="text-align:right">${fmtMoney((it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost)))}</td></tr>`;
@@ -702,6 +702,7 @@ function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, da
     <div class="muted">Cliente: <b style="color:#111">${clientName}</b></div>
     <table><thead><tr><th>Descripción</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="totals">
+      ${discountPct > 0 ? `<div><span>Descuento aplicado</span><span>${discountPct}%</span></div>` : ""}
       <div><span>Subtotal</span><span>${fmtMoney(subtotal)}</span></div>
       <div><span>ITBIS</span><span>${fmtMoney(itbis)}</span></div>
       <div class="total"><span>Total</span><span>${fmtMoney(total)}</span></div>
@@ -1217,11 +1218,12 @@ function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
   );
 }
 
-function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, onSave, saving, onRequestNewClient }) {
+function InvoiceFormModal({ clients, products, ncfSequences, prefill, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
   const [title, setTitle] = useState(prefill?.title || "");
   const [clientId, setClientId] = useState(prefill?.client_id || clients[0]?.id || "");
   const [sequenceId, setSequenceId] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [discountPct, setDiscountPct] = useState(prefill?.discount_pct ?? 0);
   const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true };
   const [blocks, setBlocks] = useState(() => {
     if (prefill?.items?.length) return itemsToBlocks(prefill.items, blankItem);
@@ -1241,6 +1243,11 @@ function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, o
     updateBlock(id, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
   };
 
+  const onDiscountChange = (v) => {
+    const n = Math.max(0, Math.min(maxDiscountPct, Number(v) || 0));
+    setDiscountPct(n);
+  };
+
   const resolvedItems = useMemo(() => {
     let current = "";
     const result = [];
@@ -1252,8 +1259,12 @@ function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, o
   }, [blocks]);
 
   const itemAmount = (it) => (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
-  const subtotal = resolvedItems.reduce((sum, it) => sum + itemAmount(it), 0);
-  const itbis = resolvedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) * 0.18 : 0), 0);
+  const grossSubtotal = resolvedItems.reduce((sum, it) => sum + itemAmount(it), 0);
+  const grossTaxable = resolvedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) : 0), 0);
+  const discountFactor = 1 - (Number(discountPct) || 0) / 100;
+  const discountAmount = grossSubtotal * (1 - discountFactor);
+  const subtotal = grossSubtotal * discountFactor;
+  const itbis = grossTaxable * discountFactor * 0.18;
   const total = subtotal + itbis;
   const chapterGroups = groupItemsByChapter(resolvedItems, itemAmount);
   const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
@@ -1262,7 +1273,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, o
   const submit = () => {
     const validItems = resolvedItems.filter((it) => it.description.trim() && Number(it.quantity) > 0);
     if (!clientId || !sequenceId || validItems.length === 0) return;
-    onSave({ title: title.trim() || null, client_id: clientId, ncf_sequence_id: sequenceId, invoice_date: invoiceDate, subtotal, itbis, total }, validItems);
+    onSave({ title: title.trim() || null, client_id: clientId, ncf_sequence_id: sequenceId, invoice_date: invoiceDate, discount_pct: discountPct, subtotal, itbis, total }, validItems);
   };
 
   return (
@@ -1290,6 +1301,10 @@ function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, o
           <input type="date" className={inputClass} style={inputStyle} value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
         </Field>
       </div>
+      <Field label={`Descuento (% — máximo permitido: ${maxDiscountPct}%)`}>
+        <input type="number" min="0" max={maxDiscountPct} step="0.5" className={inputClass} style={inputStyle} value={discountPct} onChange={(e) => onDiscountChange(e.target.value)} disabled={maxDiscountPct <= 0} />
+        {maxDiscountPct <= 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>No tienes permiso para aplicar descuentos — pídele a un admin que te asigne un límite.</div>}
+      </Field>
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
       <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
@@ -1339,6 +1354,8 @@ function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, o
       )}
 
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal bruto</span><span className="font-mono">{fmtMoney(grossSubtotal)}</span></div>}
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento ({discountPct}%)</span><span className="font-mono">-{fmtMoney(discountAmount)}</span></div>}
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS (18%)</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(total)}</span></div>
@@ -1370,7 +1387,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
     const html = invoiceLikeHtml({
       docLabel: "Factura", code: invoice.ncf, docTitle: invoice.title, companyName, clientName,
       dateLabel: "Fecha", dateValue: fmtDate(invoice.invoice_date), extraMeta: `<br/>NCF: ${invoice.ncf}`,
-      items, subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total,
+      items, subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total, discountPct: invoice.discount_pct,
     });
     printDocument(`Factura ${invoice.ncf}`, html);
   };
@@ -1418,6 +1435,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
         ))}
       </div>
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        {invoice.discount_pct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento aplicado</span><span className="font-mono">{invoice.discount_pct}%</span></div>}
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(invoice.subtotal)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(invoice.itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(invoice.total)}</span></div>
@@ -1500,11 +1518,12 @@ const SALES_ORDER_STATUS_CFG = {
   cancelada: { label: "Cancelada", color: "#E8654F" },
 };
 
-function QuoteFormModal({ clients, products, prefill, initial, initialItems, onClose, onSave, saving, onRequestNewClient }) {
+function QuoteFormModal({ clients, products, prefill, initial, initialItems, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
   const [title, setTitle] = useState(initial?.title || prefill?.title || "");
   const [clientId, setClientId] = useState(initial?.client_id || prefill?.client_id || clients[0]?.id || "");
   const [quoteDate, setQuoteDate] = useState(initial?.quote_date || (() => new Date().toISOString().slice(0, 10))());
   const [validUntil, setValidUntil] = useState(initial?.valid_until || "");
+  const [discountPct, setDiscountPct] = useState(initial?.discount_pct ?? 0);
   const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true };
   const [blocks, setBlocks] = useState(() => {
     if (initial) return itemsToBlocks(initialItems, blankItem);
@@ -1523,6 +1542,11 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, onC
     updateBlock(id, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
   };
 
+  const onDiscountChange = (v) => {
+    const n = Math.max(0, Math.min(maxDiscountPct, Number(v) || 0));
+    setDiscountPct(n);
+  };
+
   // Asigna a cada línea el nombre del capítulo bajo el que aparece
   const resolvedItems = useMemo(() => {
     let current = "";
@@ -1535,8 +1559,12 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, onC
   }, [blocks]);
 
   const itemAmount = (it) => (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
-  const subtotal = resolvedItems.reduce((sum, it) => sum + itemAmount(it), 0);
-  const itbis = resolvedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) * 0.18 : 0), 0);
+  const grossSubtotal = resolvedItems.reduce((sum, it) => sum + itemAmount(it), 0);
+  const grossTaxable = resolvedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) : 0), 0);
+  const discountFactor = 1 - (Number(discountPct) || 0) / 100;
+  const discountAmount = grossSubtotal * (1 - discountFactor);
+  const subtotal = grossSubtotal * discountFactor;
+  const itbis = grossTaxable * discountFactor * 0.18;
   const total = subtotal + itbis;
   const chapterGroups = groupItemsByChapter(resolvedItems, itemAmount);
   const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
@@ -1545,7 +1573,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, onC
   const submit = () => {
     const validItems = resolvedItems.filter((it) => it.description.trim() && Number(it.quantity) > 0);
     if (!clientId || validItems.length === 0) return;
-    onSave({ title: title.trim() || null, client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, subtotal, itbis, total }, validItems);
+    onSave({ title: title.trim() || null, client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, discount_pct: discountPct, subtotal, itbis, total }, validItems);
   };
 
   return (
@@ -1567,6 +1595,10 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, onC
           <input type="date" className={inputClass} style={inputStyle} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
         </Field>
       </div>
+      <Field label={`Descuento (% — máximo permitido: ${maxDiscountPct}%)`}>
+        <input type="number" min="0" max={maxDiscountPct} step="0.5" className={inputClass} style={inputStyle} value={discountPct} onChange={(e) => onDiscountChange(e.target.value)} disabled={maxDiscountPct <= 0} />
+        {maxDiscountPct <= 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>No tienes permiso para aplicar descuentos — pídele a un admin que te asigne un límite.</div>}
+      </Field>
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
       <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
@@ -1616,6 +1648,8 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, onC
       )}
 
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal bruto</span><span className="font-mono">{fmtMoney(grossSubtotal)}</span></div>}
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento ({discountPct}%)</span><span className="font-mono">-{fmtMoney(discountAmount)}</span></div>}
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS (18%)</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(total)}</span></div>
@@ -1640,7 +1674,7 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, on
       docLabel: "Cotización", code: quote.quote_number, docTitle: quote.title, companyName, clientName,
       dateLabel: "Fecha", dateValue: fmtDate(quote.quote_date),
       extraMeta: quote.valid_until ? `<br/>Válida hasta: ${fmtDate(quote.valid_until)}` : "",
-      items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total,
+      items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, discountPct: quote.discount_pct,
     });
     printDocument(`Cotización ${quote.quote_number || ""}`, html);
   };
@@ -1677,6 +1711,7 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, on
         ))}
       </div>
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        {quote.discount_pct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento aplicado</span><span className="font-mono">{quote.discount_pct}%</span></div>}
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(quote.subtotal)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(quote.itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(quote.total)}</span></div>
@@ -1709,7 +1744,7 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, on
   );
 }
 
-function SalesOrderDetailModal({ order, items, clientName, companyName, workOrderInfo, onClose, onGenerateInvoice, onGenerateWorkOrder, onCancel }) {
+function SalesOrderDetailModal({ order, items, clientName, companyName, workOrderInfo, onClose, onGenerateInvoice, onGenerateWorkOrder, onCancel, onDelete }) {
   const s = SALES_ORDER_STATUS_CFG[order.status] || SALES_ORDER_STATUS_CFG.en_proceso;
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
@@ -1729,6 +1764,11 @@ function SalesOrderDetailModal({ order, items, clientName, companyName, workOrde
       </div>
       {order.title && <div className="text-sm font-semibold mb-2" style={{ color: C.text }}>{order.title}</div>}
       {workOrderInfo && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Orden de trabajo generada: <span className="font-mono">{workOrderInfo.code}</span></div>}
+      {order.status !== "en_proceso" && (
+        <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.muted, border: `1px solid ${C.border}` }}>
+          {order.status === "facturada" ? "Esta orden ya fue facturada y no se puede modificar." : "Esta orden está cancelada y no se puede modificar."}
+        </div>
+      )}
       <div className="text-xs mb-4" style={{ color: C.muted }}>Fecha<br /><span style={{ color: C.text }}>{fmtDate(order.order_date)}</span></div>
       <div className="space-y-1 mb-3">
         {showChapters ? chapterGroups.map((g) => (
@@ -1766,6 +1806,9 @@ function SalesOrderDetailModal({ order, items, clientName, companyName, workOrde
             <button onClick={() => onCancel(order)} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>Cancelar orden</button>
             <button onClick={() => onGenerateInvoice(order, items)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Generar factura</button>
           </>
+        )}
+        {order.status === "cancelada" && (
+          <button onClick={() => onDelete(order)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}><Trash2 size={14} /> Eliminar orden</button>
         )}
         <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
@@ -2150,6 +2193,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const canManage = profile.role === "admin" || profile.role === "supervisor";
   const isAdmin = profile.role === "admin";
   const isTecnico = profile.role === "tecnico";
+  const maxDiscountPct = isAdmin ? 100 : Number(profile.max_discount_pct) || 0;
 
   const [loadingScope, setLoadingScope] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
@@ -2184,6 +2228,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [invoices, setInvoices] = useState([]);
   const [quotes, setQuotes] = useState([]);
   const [salesOrders, setSalesOrders] = useState([]);
+  const [selectedSalesOrders, setSelectedSalesOrders] = useState(new Set());
   const [incidents, setIncidents] = useState([]);
 
   const [branchFilter, setBranchFilter] = useState("all");
@@ -2715,8 +2760,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       await supabase.from("quotes").update({ status: "convertida" }).eq("id", invoicePrefill.sourceQuoteId);
     }
     if (invoicePrefill?.sourceOrderId) {
-      const { data: updatedOrder } = await supabase.from("sales_orders").update({ status: "facturada", invoice_id: invoice.id }).eq("id", invoicePrefill.sourceOrderId).select().single();
-      if (updatedOrder) setSalesOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
+      const { data: updatedOrder, error: orderUpdateError } = await supabase.from("sales_orders").update({ status: "facturada", invoice_id: invoice.id }).eq("id", invoicePrefill.sourceOrderId).select().single();
+      if (orderUpdateError) {
+        setErrorMsg(`La factura se creó, pero no se pudo marcar la orden de venta como facturada: ${orderUpdateError.message}`);
+      } else if (updatedOrder) {
+        setSalesOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
+      }
     }
 
     for (const row of itemRows) {
@@ -2899,6 +2948,23 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     }
   };
 
+  const deleteSalesOrder = async (order) => {
+    if (!window.confirm("¿Eliminar definitivamente esta orden de venta cancelada?")) return;
+    const { error } = await supabase.from("sales_orders").delete().eq("id", order.id);
+    if (error) { setErrorMsg(error.message); return; }
+    setSalesOrders((prev) => prev.filter((o) => o.id !== order.id));
+    setSalesOrderDetail(null);
+  };
+
+  const deleteSalesOrdersBulk = async (ids) => {
+    if (ids.length === 0) return;
+    if (!window.confirm(`¿Eliminar definitivamente ${ids.length} orden${ids.length !== 1 ? "es" : ""} de venta cancelada${ids.length !== 1 ? "s" : ""}?`)) return;
+    const { error } = await supabase.from("sales_orders").delete().in("id", ids);
+    if (error) { setErrorMsg(error.message); return; }
+    setSalesOrders((prev) => prev.filter((o) => !ids.includes(o.id)));
+    setSelectedSalesOrders(new Set());
+  };
+
   const openQuoteDetail = async (quote) => {
     const { data: items } = await supabase.from("quote_items").select("*").eq("quote_id", quote.id);
     setQuoteDetail({ quote, items: items || [] });
@@ -3060,6 +3126,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   };
 
   // ---- Usuarios / invitaciones ----
+  const updateMaxDiscount = async (userId, value) => {
+    const n = Math.max(0, Math.min(100, Number(value) || 0));
+    const { data, error } = await supabase.from("profiles").update({ max_discount_pct: n }).eq("id", userId).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+  };
+
   const createInvite = async (email, role, technicianId) => {
     setSaving(true);
     const { data, error } = await supabase.from("invites").insert({ company_id: companyId, email, role, technician_id: technicianId }).select().single();
@@ -3879,31 +3952,62 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           {!loadingScope && canManage && view === "salesOrders" && (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{salesOrders.length} órdenes de venta</div>
+                <div className="text-sm" style={{ color: C.muted }}>{salesOrders.length} órdenes de venta{selectedSalesOrders.size > 0 ? ` · ${selectedSalesOrders.size} seleccionadas` : ""}</div>
+                {selectedSalesOrders.size > 0 && (
+                  <button onClick={() => deleteSalesOrdersBulk([...selectedSalesOrders])} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#2A0A08" }}>
+                    <Trash2 size={14} /> Eliminar seleccionadas ({selectedSalesOrders.size})
+                  </button>
+                )}
               </div>
               <div className="text-xs mb-3" style={{ color: C.muted }}>
-                Las órdenes de venta se generan desde una cotización aprobada (botón "Pasar a Orden de Venta") — representan un trabajo o venta ya en ejecución, antes de facturarse.
+                Las órdenes de venta se generan desde una cotización aprobada (botón "Pasar a Orden de Venta") — representan un trabajo o venta ya en ejecución, antes de facturarse. Solo las canceladas se pueden marcar y borrar.
               </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Orden</div>
-                  <div className="col-span-3">Cliente</div>
-                  <div className="col-span-2">Fecha</div>
-                  <div className="col-span-2 text-right">Total</div>
-                  <div className="col-span-2 text-right">Estado</div>
+                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <input
+                    type="checkbox"
+                    checked={salesOrders.some((o) => o.status === "cancelada") && salesOrders.filter((o) => o.status === "cancelada").every((o) => selectedSalesOrders.has(o.id))}
+                    onChange={() => {
+                      const cancelledIds = salesOrders.filter((o) => o.status === "cancelada").map((o) => o.id);
+                      const allSelected = cancelledIds.every((id) => selectedSalesOrders.has(id)) && cancelledIds.length > 0;
+                      setSelectedSalesOrders(allSelected ? new Set() : new Set(cancelledIds));
+                    }}
+                  />
+                  <div className="flex-1 grid grid-cols-12 gap-2">
+                    <div className="col-span-3">Orden</div>
+                    <div className="col-span-3">Cliente</div>
+                    <div className="col-span-2">Fecha</div>
+                    <div className="col-span-2 text-right">Total</div>
+                    <div className="col-span-2 text-right">Estado</div>
+                  </div>
                 </div>
                 {salesOrders.map((o) => {
                   const s = SALES_ORDER_STATUS_CFG[o.status] || SALES_ORDER_STATUS_CFG.en_proceso;
+                  const isCancelled = o.status === "cancelada";
                   return (
-                    <div key={o.id} onClick={() => openSalesOrderDetail(o)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-3 min-w-0">
-                        <div className="font-mono text-xs">{o.order_number}</div>
-                        {o.title && <div className="text-xs truncate" style={{ color: C.muted }}>{o.title}</div>}
+                    <div key={o.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <input
+                        type="checkbox"
+                        disabled={!isCancelled}
+                        checked={selectedSalesOrders.has(o.id)}
+                        onChange={() => setSelectedSalesOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })}
+                        style={{ opacity: isCancelled ? 1 : 0.3 }}
+                      />
+                      <div onClick={() => openSalesOrderDetail(o)} className="flex-1 grid grid-cols-12 gap-2 items-center cursor-pointer">
+                        <div className="col-span-3 min-w-0">
+                          <div className="font-mono text-xs">{o.order_number}</div>
+                          {o.title && <div className="text-xs truncate" style={{ color: C.muted }}>{o.title}</div>}
+                        </div>
+                        <div className="col-span-3 truncate">{clients.find((c) => c.id === o.client_id)?.name || "—"}</div>
+                        <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(o.order_date)}</div>
+                        <div className="col-span-2 text-right font-mono">{fmtMoney(o.total)}</div>
+                        <div className="col-span-2 flex items-center justify-end gap-2">
+                          <Pill label={s.label} color={s.color} />
+                          {isCancelled && (
+                            <button onClick={(e) => { e.stopPropagation(); deleteSalesOrder(o); }} style={iconBtnStyle}><Trash2 size={14} /></button>
+                          )}
+                        </div>
                       </div>
-                      <div className="col-span-3 truncate">{clients.find((c) => c.id === o.client_id)?.name || "—"}</div>
-                      <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(o.order_date)}</div>
-                      <div className="col-span-2 text-right font-mono">{fmtMoney(o.total)}</div>
-                      <div className="col-span-2 text-right"><Pill label={s.label} color={s.color} /></div>
                     </div>
                   );
                 })}
@@ -3991,7 +4095,19 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       <div>{p.full_name || p.email}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{p.email}</div>
                     </div>
-                    <Pill label={ROLE_CFG[p.role]?.label || p.role} color={ROLE_CFG[p.role]?.color || C.muted} />
+                    <div className="flex items-center gap-3">
+                      {p.role === "supervisor" && (
+                        <label className="flex items-center gap-1 text-xs" style={{ color: C.muted }}>
+                          Descuento máx.
+                          <input
+                            type="number" min="0" max="100" step="1" defaultValue={p.max_discount_pct ?? 0}
+                            onBlur={(e) => updateMaxDiscount(p.id, e.target.value)}
+                            className="w-16 px-2 py-1 text-xs" style={{ ...inputStyle }}
+                          />%
+                        </label>
+                      )}
+                      <Pill label={ROLE_CFG[p.role]?.label || p.role} color={ROLE_CFG[p.role]?.color || C.muted} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -4103,6 +4219,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           products={products}
           ncfSequences={ncfSequences}
           prefill={invoicePrefill}
+          maxDiscountPct={maxDiscountPct}
           onClose={() => { setShowAddInvoice(false); setInvoicePrefill(null); }}
           onSave={createInvoice}
           saving={saving}
@@ -4114,6 +4231,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           clients={clients}
           products={products}
           prefill={quotePrefill}
+          maxDiscountPct={maxDiscountPct}
           onClose={() => { setShowAddQuote(false); setQuotePrefill(null); }}
           onSave={(payload, items) => createQuote(payload, items, quotePrefill?.incidentId)}
           saving={saving}
@@ -4146,6 +4264,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           onGenerateInvoice={generateInvoiceFromOrder}
           onGenerateWorkOrder={convertSalesOrderToWorkOrder}
           onCancel={cancelSalesOrder}
+          onDelete={deleteSalesOrder}
         />
       )}
       {editingQuote && (
@@ -4154,6 +4273,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           products={products}
           initial={editingQuote}
           initialItems={editingQuoteItems}
+          maxDiscountPct={maxDiscountPct}
           onClose={() => { setEditingQuote(null); setEditingQuoteItems(null); }}
           onSave={updateQuote}
           saving={saving}
