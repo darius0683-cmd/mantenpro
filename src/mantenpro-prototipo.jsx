@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
   CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut,
-  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck
+  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend
@@ -299,17 +299,18 @@ function OrderFormModal({ branches, equipment, technicians, initial, onClose, on
   const [equipmentId, setEquipmentId] = useState(initial?.equipment_id || "");
   const [technicianId, setTechnicianId] = useState(initial?.technician_id || "");
   const [scheduled, setScheduled] = useState(initial?.scheduled || "");
+  const [files, setFiles] = useState([]);
 
   const branchEquip = equipment.filter((e) => e.branch_id === branchId);
   const branchTechs = technicians.filter((t) => t.branch_id === branchId);
 
   const submit = () => {
     if (!title.trim() || !branchId || !scheduled) return;
-    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled });
+    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled }, files);
   };
 
   return (
-    <Modal title={initial ? "Editar orden de trabajo" : "Nueva orden de trabajo"} onClose={onClose} wide>
+    <Modal title={initial?.id ? "Editar orden de trabajo" : "Nueva orden de trabajo"} onClose={onClose} wide>
       <Field label="Título / descripción breve">
         <input className={inputClass} style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Ruido anormal en compresor" />
       </Field>
@@ -347,10 +348,16 @@ function OrderFormModal({ branches, equipment, technicians, initial, onClose, on
           </select>
         </Field>
       </div>
+      {!initial?.id && (
+        <Field label="Archivos o imágenes de apoyo para el técnico (opcional)">
+          <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" onChange={(e) => setFiles(Array.from(e.target.files || []))} className={inputClass} style={inputStyle} />
+          {files.length > 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>{files.length} archivo{files.length !== 1 ? "s" : ""} seleccionado{files.length !== 1 ? "s" : ""}</div>}
+        </Field>
+      )}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
-          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Crear orden"}
+          {saving ? "Guardando..." : initial?.id ? "Guardar cambios" : "Crear orden"}
         </button>
       </div>
     </Modal>
@@ -547,6 +554,36 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
 
 const fmtMoney = (n) => `RD$ ${Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// Agrupa las líneas de un documento por "capítulo" (sección), calculando el subtotal de cada grupo
+function groupItemsByChapter(items, getAmount) {
+  const map = new Map();
+  const order = [];
+  items.forEach((it) => {
+    const ch = (it.chapter || "").trim() || "General";
+    if (!map.has(ch)) { map.set(ch, []); order.push(ch); }
+    map.get(ch).push(it);
+  });
+  return order.map((ch) => ({ chapter: ch, items: map.get(ch), subtotal: map.get(ch).reduce((s, it) => s + getAmount(it), 0) }));
+}
+
+// Convierte líneas ya guardadas (planas, con .chapter) en bloques editables (capítulo + líneas) para el formulario de edición
+function itemsToBlocks(items, blankItem) {
+  let n = 0;
+  const blocks = [];
+  let currentChapter = "";
+  (items || []).forEach((it) => {
+    const ch = (it.chapter || "").trim();
+    if (ch !== currentChapter) {
+      if (ch) blocks.push({ id: n++, kind: "chapter", name: ch });
+      currentChapter = ch;
+    }
+    const { chapter, ...rest } = it;
+    blocks.push({ id: n++, kind: "item", ...rest });
+  });
+  if (blocks.length === 0) blocks.push({ id: n++, kind: "item", ...blankItem });
+  return blocks;
+}
+
 // ---------------------------------------------------------------------------
 // Buscador con autocompletado (para elegir producto por nombre/SKU en vez de una lista larga)
 // ---------------------------------------------------------------------------
@@ -650,11 +687,16 @@ function printDocument(title, bodyHtml) {
   win.focus();
 }
 
-function invoiceLikeHtml({ docLabel, code, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, notes }) {
-  const rows = items.map((it) => `<tr><td>${it.description}${it.is_taxable ? " <span class='muted'>(ITBIS)</span>" : ""}</td><td style="text-align:right">${it.quantity}</td><td style="text-align:right">${fmtMoney(it.unit_price)}</td><td style="text-align:right">${fmtMoney((it.subtotal ?? it.quantity * it.unit_price))}</td></tr>`).join("");
+function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, notes }) {
+  const groups = groupItemsByChapter(items, (it) => Number(it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost) ?? 0));
+  const showChapters = groups.length > 1 || (groups[0] && groups[0].chapter !== "General");
+  const rowHtml = (it) => `<tr><td>${it.description || ""}${it.is_taxable ? " <span class='muted'>(ITBIS)</span>" : ""}</td><td style="text-align:right">${it.quantity}</td><td style="text-align:right">${fmtMoney(it.unit_price ?? it.unit_cost)}</td><td style="text-align:right">${fmtMoney((it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost)))}</td></tr>`;
+  const rows = showChapters
+    ? groups.map((g) => `<tr><td colspan="4" style="background:#f2f2f2;font-weight:bold">${g.chapter} <span style="font-weight:normal;float:right">${fmtMoney(g.subtotal)}</span></td></tr>${g.items.map(rowHtml).join("")}`).join("")
+    : items.map(rowHtml).join("");
   return `
     <div class="header-row">
-      <div><h1>${companyName}</h1><div class="muted">${docLabel}${code ? " · " + code : ""}</div></div>
+      <div><h1>${companyName}</h1><div class="muted">${docLabel}${code ? " · " + code : ""}</div>${docTitle ? `<div class="muted" style="margin-top:2px">${docTitle}</div>` : ""}</div>
       <div class="muted" style="text-align:right">${dateLabel}: ${dateValue}${extraMeta || ""}</div>
     </div>
     <div class="muted">Cliente: <b style="color:#111">${clientName}</b></div>
@@ -673,6 +715,30 @@ function listHtml(title, companyName, headers, rows) {
   const body = rows.map((r) => `<tr>${r.map((c) => `<td>${c ?? "—"}</td>`).join("")}</tr>`).join("");
   return `<div class="header-row"><div><h1>${companyName}</h1><div class="muted">${title}</div></div><div class="muted">${new Date().toLocaleDateString("es-DO")}</div></div>
     <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+function statementHtml(companyName, clientName, invoicesList) {
+  const rows = invoicesList.map((inv) => {
+    const balance = Number(inv.total) - Number(inv.amount_paid || 0);
+    const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
+    return `<tr><td>${inv.ncf}</td><td>${fmtDate(inv.invoice_date)}</td><td style="text-align:right">${fmtMoney(inv.total)}</td><td style="text-align:right">${fmtMoney(inv.amount_paid || 0)}</td><td style="text-align:right">${fmtMoney(balance)}</td><td>${payCfg.label}</td></tr>`;
+  }).join("");
+  const totalFacturado = invoicesList.reduce((s, i) => s + Number(i.total), 0);
+  const totalCobrado = invoicesList.reduce((s, i) => s + Number(i.amount_paid || 0), 0);
+  const saldo = totalFacturado - totalCobrado;
+  return `
+    <div class="header-row">
+      <div><h1>${companyName}</h1><div class="muted">Estado de cuenta</div></div>
+      <div class="muted" style="text-align:right">Fecha: ${new Date().toLocaleDateString("es-DO")}</div>
+    </div>
+    <div class="muted">Cliente: <b style="color:#111">${clientName}</b></div>
+    <table><thead><tr><th>NCF</th><th>Fecha</th><th style="text-align:right">Total</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="totals">
+      <div><span>Total facturado</span><span>${fmtMoney(totalFacturado)}</span></div>
+      <div><span>Total cobrado</span><span>${fmtMoney(totalCobrado)}</span></div>
+      <div class="total"><span>Saldo pendiente</span><span>${fmtMoney(saldo)}</span></div>
+    </div>
+  `;
 }
 
 
@@ -921,31 +987,51 @@ function SupplierFormModal({ initial, onClose, onSave, saving }) {
 }
 
 function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onRequestNewSupplier }) {
+  const [title, setTitle] = useState("");
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id || "");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState("");
-  const [items, setItems] = useState([{ product_id: "", quantity: 1, unit_cost: 0 }]);
+  const [blocks, setBlocks] = useState([{ id: 0, kind: "item", product_id: "", quantity: 1, unit_cost: 0 }]);
+  const newBlockId = () => Date.now() + Math.random();
 
-  const updateItem = (i, patch) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
-  const addItemRow = () => setItems((prev) => [...prev, { product_id: "", quantity: 1, unit_cost: 0 }]);
-  const removeItemRow = (i) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+  const updateBlock = (id, patch) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", product_id: "", quantity: 1, unit_cost: 0 }]);
+  const addChapterRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "chapter", name: "" }]);
+  const removeBlock = (id) => setBlocks((prev) => prev.filter((b) => b.id !== id));
 
-  const onProductPick = (i, productId) => {
+  const onProductPick = (id, productId) => {
     const prod = products.find((p) => p.id === productId);
-    updateItem(i, { product_id: productId, unit_cost: prod ? prod.cost_price : 0 });
+    updateBlock(id, { product_id: productId, unit_cost: prod ? prod.cost_price : 0 });
   };
 
-  const total = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0), 0);
+  const resolvedItems = useMemo(() => {
+    let current = "";
+    const result = [];
+    blocks.forEach((b) => {
+      if (b.kind === "chapter") current = b.name.trim();
+      else result.push({ ...b, chapter: current });
+    });
+    return result;
+  }, [blocks]);
+
+  const itemAmount = (it) => (Number(it.quantity) || 0) * (Number(it.unit_cost) || 0);
+  const total = resolvedItems.reduce((sum, it) => sum + itemAmount(it), 0);
+  const chapterGroups = groupItemsByChapter(resolvedItems, itemAmount);
+  const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
+  const chapterSubtotal = (name) => chapterGroups.find((g) => g.chapter === (name.trim() || "General"))?.subtotal || 0;
 
   const submit = () => {
-    const validItems = items.filter((it) => it.product_id && Number(it.quantity) > 0);
+    const validItems = resolvedItems.filter((it) => it.product_id && Number(it.quantity) > 0);
     if (!supplierId || validItems.length === 0) return;
-    onSave({ supplier_id: supplierId, invoice_number: invoiceNumber.trim() || null, purchase_date: purchaseDate, notes: notes.trim() || null, total }, validItems);
+    onSave({ title: title.trim() || null, supplier_id: supplierId, invoice_number: invoiceNumber.trim() || null, purchase_date: purchaseDate, notes: notes.trim() || null, total }, validItems);
   };
 
   return (
     <Modal title="Registrar compra" onClose={onClose} wide>
+      <Field label="Título de la compra (opcional)">
+        <input className={inputClass} style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Reposición de inventario trimestral" />
+      </Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Proveedor">
           <div className="flex gap-2">
@@ -962,24 +1048,52 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
       </div>
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos comprados</div>
+      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+        <div className="col-span-5">Producto</div>
+        <div className="col-span-2">Cantidad</div>
+        <div className="col-span-2">Costo unitario</div>
+        <div className="col-span-2 text-right">Subtotal</div>
+        <div className="col-span-1"></div>
+      </div>
       <div className="space-y-2 mb-3">
-        {items.map((it, i) => {
-          const prod = products.find((p) => p.id === it.product_id);
-          return (
-            <div key={i} className="grid grid-cols-12 gap-2 items-center">
-              <div className="col-span-5">
-                <ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(i, id)} placeholder="Buscar producto..." />
+        {blocks.map((b) => {
+          if (b.kind === "chapter") {
+            return (
+              <div key={b.id} className="flex items-center gap-2 pt-2">
+                <input className={inputClass} style={{ ...inputStyle, fontWeight: 600, color: C.amber, borderColor: C.amber + "60" }} value={b.name} onChange={(e) => updateBlock(b.id, { name: e.target.value })} placeholder="Nombre del capítulo — ej. Repuestos, Consumibles" />
+                <div className="text-sm font-mono flex-shrink-0" style={{ color: C.amber, minWidth: 100, textAlign: "right" }}>{fmtMoney(chapterSubtotal(b.name))}</div>
+                <button onClick={() => removeBlock(b.id)} style={iconBtnStyle}><X size={16} /></button>
               </div>
-              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
-              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_cost} onChange={(e) => updateItem(i, { unit_cost: e.target.value })} placeholder="Costo unit." />
-              <div className="col-span-2 text-sm font-mono text-right" style={{ color: C.muted }}>{fmtMoney((Number(it.quantity) || 0) * (Number(it.unit_cost) || 0))}</div>
-              <button onClick={() => removeItemRow(i)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+            );
+          }
+          const prod = products.find((p) => p.id === b.product_id);
+          return (
+            <div key={b.id} className="grid grid-cols-12 gap-2 items-center">
+              <div className="col-span-5">
+                <ProductSearchSelect products={products} value={b.product_id} onChange={(id) => onProductPick(b.id, id)} placeholder="Buscar producto..." />
+              </div>
+              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
+              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_cost} onChange={(e) => updateBlock(b.id, { unit_cost: e.target.value })} placeholder="Costo unit." />
+              <div className="col-span-2 text-sm font-mono text-right" style={{ color: C.muted }}>{fmtMoney((Number(b.quantity) || 0) * (Number(b.unit_cost) || 0))}</div>
+              <button onClick={() => removeBlock(b.id)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
               {prod && <div className="col-span-12 text-xs -mt-1" style={{ color: C.muted }}>Stock actual: {prod.stock_qty} {prod.unit}</div>}
             </div>
           );
         })}
       </div>
-      <button onClick={addItemRow} className="flex items-center gap-2 text-sm mb-4" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+      <div className="flex gap-4 mb-4">
+        <button onClick={addItemRow} className="flex items-center gap-2 text-sm" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+        <button onClick={addChapterRow} className="flex items-center gap-2 text-sm" style={{ color: C.text }}><Plus size={14} /> Agregar capítulo</button>
+      </div>
+
+      {hasChapters && (
+        <div className="mb-3 p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Subtotales por capítulo</div>
+          {chapterGroups.map((g) => (
+            <div key={g.chapter} className="flex justify-between text-sm" style={{ color: C.text }}><span>{g.chapter}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span></div>
+          ))}
+        </div>
+      )}
 
       <Field label="Notas (opcional)">
         <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observaciones de la compra" />
@@ -1001,24 +1115,39 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
 }
 
 function PurchaseDetailModal({ purchase, items, supplierName, companyName, onClose }) {
+  const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
+  const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const doPrint = () => {
     const html = invoiceLikeHtml({
-      docLabel: "Orden de compra", code: purchase.invoice_number, companyName,
+      docLabel: "Orden de compra", code: purchase.invoice_number, docTitle: purchase.title, companyName,
       clientName: supplierName, dateLabel: "Fecha", dateValue: fmtDate(purchase.purchase_date),
-      items: items.map((it) => ({ description: it.productName, quantity: it.quantity, unit_price: it.unit_cost, subtotal: it.subtotal, is_taxable: false })),
+      items: items.map((it) => ({ description: it.productName, quantity: it.quantity, unit_price: it.unit_cost, subtotal: it.subtotal, is_taxable: false, chapter: it.chapter })),
       subtotal: purchase.total, itbis: 0, total: purchase.total, notes: purchase.notes,
     });
     printDocument(`Compra ${purchase.invoice_number || ""}`, html);
   };
   return (
     <Modal title={`Compra${purchase.invoice_number ? " · " + purchase.invoice_number : ""}`} onClose={onClose} wide>
+      {purchase.title && <div className="text-sm font-semibold mb-2" style={{ color: C.text }}>{purchase.title}</div>}
       <div className="grid grid-cols-3 gap-3 text-xs mb-4" style={{ color: C.muted }}>
         <div>Proveedor<br /><span style={{ color: C.text }}>{supplierName}</span></div>
         <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(purchase.purchase_date)}</span></div>
         <div>Total<br /><span style={{ color: C.text }}>{fmtMoney(purchase.total)}</span></div>
       </div>
       <div className="space-y-1">
-        {items.map((it) => (
+        {showChapters ? chapterGroups.map((g) => (
+          <div key={g.chapter}>
+            <div className="flex items-center justify-between text-xs uppercase tracking-wide px-3 py-1" style={{ color: C.amber }}>
+              <span>{g.chapter}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span>
+            </div>
+            {g.items.map((it) => (
+              <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+                <div>{it.productName}</div>
+                <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_cost)} = {fmtMoney(it.subtotal)}</div>
+              </div>
+            ))}
+          </div>
+        )) : items.map((it) => (
           <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
             <div>{it.productName}</div>
             <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_cost)} = {fmtMoney(it.subtotal)}</div>
@@ -1089,34 +1218,58 @@ function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
 }
 
 function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, onSave, saving, onRequestNewClient }) {
+  const [title, setTitle] = useState(prefill?.title || "");
   const [clientId, setClientId] = useState(prefill?.client_id || clients[0]?.id || "");
   const [sequenceId, setSequenceId] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [items, setItems] = useState(prefill?.items?.length ? prefill.items : [{ product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
+  const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true };
+  const [blocks, setBlocks] = useState(() => {
+    if (prefill?.items?.length) return itemsToBlocks(prefill.items, blankItem);
+    return [{ id: 0, kind: "item", ...blankItem }];
+  });
+  const newBlockId = () => Date.now() + Math.random();
 
   const usableSequences = ncfSequences.filter((s) => s.active && s.next_number <= s.range_end);
 
-  const updateItem = (i, patch) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
-  const addItemRow = () => setItems((prev) => [...prev, { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
-  const removeItemRow = (i) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+  const updateBlock = (id, patch) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", ...blankItem }]);
+  const addChapterRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "chapter", name: "" }]);
+  const removeBlock = (id) => setBlocks((prev) => prev.filter((b) => b.id !== id));
 
-  const onProductPick = (i, productId) => {
+  const onProductPick = (id, productId) => {
     const prod = products.find((p) => p.id === productId);
-    updateItem(i, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
+    updateBlock(id, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
   };
 
-  const subtotal = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
-  const itbis = items.reduce((sum, it) => sum + (it.is_taxable ? (Number(it.quantity) || 0) * (Number(it.unit_price) || 0) * 0.18 : 0), 0);
+  const resolvedItems = useMemo(() => {
+    let current = "";
+    const result = [];
+    blocks.forEach((b) => {
+      if (b.kind === "chapter") current = b.name.trim();
+      else result.push({ ...b, chapter: current });
+    });
+    return result;
+  }, [blocks]);
+
+  const itemAmount = (it) => (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
+  const subtotal = resolvedItems.reduce((sum, it) => sum + itemAmount(it), 0);
+  const itbis = resolvedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) * 0.18 : 0), 0);
   const total = subtotal + itbis;
+  const chapterGroups = groupItemsByChapter(resolvedItems, itemAmount);
+  const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
+  const chapterSubtotal = (name) => chapterGroups.find((g) => g.chapter === (name.trim() || "General"))?.subtotal || 0;
 
   const submit = () => {
-    const validItems = items.filter((it) => it.description.trim() && Number(it.quantity) > 0);
+    const validItems = resolvedItems.filter((it) => it.description.trim() && Number(it.quantity) > 0);
     if (!clientId || !sequenceId || validItems.length === 0) return;
-    onSave({ client_id: clientId, ncf_sequence_id: sequenceId, invoice_date: invoiceDate, subtotal, itbis, total }, validItems);
+    onSave({ title: title.trim() || null, client_id: clientId, ncf_sequence_id: sequenceId, invoice_date: invoiceDate, subtotal, itbis, total }, validItems);
   };
 
   return (
     <Modal title="Nueva factura" onClose={onClose} wide>
+      <Field label="Título de la factura (opcional)">
+        <input className={inputClass} style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Instalación de A/C - Oficina Principal" />
+      </Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Cliente">
           <div className="flex gap-2">
@@ -1139,23 +1292,51 @@ function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, o
       </div>
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
-      <div className="space-y-2 mb-3">
-        {items.map((it, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2 items-center">
-            <div className="col-span-4">
-              <ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(i, id)} placeholder="Buscar producto o servicio..." />
-            </div>
-            <input className={`${inputClass} col-span-3`} style={inputStyle} value={it.description} onChange={(e) => updateItem(i, { description: e.target.value })} placeholder="Descripción" />
-            <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
-            <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} placeholder="Precio" />
-            <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
-              <input type="checkbox" checked={it.is_taxable} onChange={(e) => updateItem(i, { is_taxable: e.target.checked })} /> ITBIS
-            </label>
-            <button onClick={() => removeItemRow(i)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
-          </div>
-        ))}
+      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+        <div className="col-span-4">Producto</div>
+        <div className="col-span-3">Descripción</div>
+        <div className="col-span-1">Cantidad</div>
+        <div className="col-span-2">Precio</div>
+        <div className="col-span-1">ITBIS</div>
+        <div className="col-span-1"></div>
       </div>
-      <button onClick={addItemRow} className="flex items-center gap-2 text-sm mb-4" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+      <div className="space-y-2 mb-3">
+        {blocks.map((b) =>
+          b.kind === "chapter" ? (
+            <div key={b.id} className="flex items-center gap-2 pt-2">
+              <input className={inputClass} style={{ ...inputStyle, fontWeight: 600, color: C.amber, borderColor: C.amber + "60" }} value={b.name} onChange={(e) => updateBlock(b.id, { name: e.target.value })} placeholder="Nombre del capítulo — ej. Mano de obra, Materiales" />
+              <div className="text-sm font-mono flex-shrink-0" style={{ color: C.amber, minWidth: 100, textAlign: "right" }}>{fmtMoney(chapterSubtotal(b.name))}</div>
+              <button onClick={() => removeBlock(b.id)} style={iconBtnStyle}><X size={16} /></button>
+            </div>
+          ) : (
+            <div key={b.id} className="grid grid-cols-12 gap-2 items-center">
+              <div className="col-span-4">
+                <ProductSearchSelect products={products} value={b.product_id} onChange={(id) => onProductPick(b.id, id)} placeholder="Buscar producto o servicio..." />
+              </div>
+              <input className={`${inputClass} col-span-3`} style={inputStyle} value={b.description} onChange={(e) => updateBlock(b.id, { description: e.target.value })} placeholder="Descripción" />
+              <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
+              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_price} onChange={(e) => updateBlock(b.id, { unit_price: e.target.value })} placeholder="Precio" />
+              <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
+                <input type="checkbox" checked={b.is_taxable} onChange={(e) => updateBlock(b.id, { is_taxable: e.target.checked })} /> ITBIS
+              </label>
+              <button onClick={() => removeBlock(b.id)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+            </div>
+          )
+        )}
+      </div>
+      <div className="flex gap-4 mb-4">
+        <button onClick={addItemRow} className="flex items-center gap-2 text-sm" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+        <button onClick={addChapterRow} className="flex items-center gap-2 text-sm" style={{ color: C.text }}><Plus size={14} /> Agregar capítulo</button>
+      </div>
+
+      {hasChapters && (
+        <div className="mb-3 p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Subtotales por capítulo</div>
+          {chapterGroups.map((g) => (
+            <div key={g.chapter} className="flex justify-between text-sm" style={{ color: C.text }}><span>{g.chapter}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span></div>
+          ))}
+        </div>
+      )}
 
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
@@ -1173,31 +1354,63 @@ function InvoiceFormModal({ clients, products, ncfSequences, prefill, onClose, o
   );
 }
 
-function InvoiceDetailModal({ invoice, items, clientName, companyName, onClose, onVoid }) {
+function InvoiceDetailModal({ invoice, items, payments, clientName, companyName, onClose, onVoid, onRegisterPayment, onDeletePayment }) {
   const statusColor = invoice.status === "anulada" ? C.red : C.green;
+  const payCfg = PAYMENT_STATUS_CFG[invoice.payment_status] || PAYMENT_STATUS_CFG.pendiente;
+  const balance = Number(invoice.total) - Number(invoice.amount_paid || 0);
+  const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
+  const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [payAmount, setPayAmount] = useState(balance > 0 ? balance.toFixed(2) : "");
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payMethod, setPayMethod] = useState("");
+  const [payNotes, setPayNotes] = useState("");
+
   const doPrint = () => {
     const html = invoiceLikeHtml({
-      docLabel: "Factura", code: invoice.ncf, companyName, clientName,
+      docLabel: "Factura", code: invoice.ncf, docTitle: invoice.title, companyName, clientName,
       dateLabel: "Fecha", dateValue: fmtDate(invoice.invoice_date), extraMeta: `<br/>NCF: ${invoice.ncf}`,
       items, subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total,
     });
     printDocument(`Factura ${invoice.ncf}`, html);
   };
+
+  const submitPayment = () => {
+    const amt = Number(payAmount);
+    if (!amt || amt <= 0) return;
+    onRegisterPayment(invoice, { amount: amt, payment_date: payDate, method: payMethod.trim() || null, notes: payNotes.trim() || null });
+    setShowPaymentForm(false);
+  };
+
   return (
     <Modal title={`Factura ${invoice.ncf}`} onClose={onClose} wide>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-2">
         <div>
           <div className="font-bold text-base" style={{ color: C.text }}>{companyName}</div>
           <div className="text-xs" style={{ color: C.muted }}>NCF: <span className="font-mono">{invoice.ncf}</span></div>
         </div>
         <Pill label={invoice.status === "anulada" ? "Anulada" : "Emitida"} color={statusColor} />
       </div>
+      {invoice.title && <div className="text-sm mb-2" style={{ color: C.text }}>{invoice.title}</div>}
+      <div className="mb-4"><Pill label={payCfg.label} color={payCfg.color} /></div>
       <div className="grid grid-cols-2 gap-3 text-xs mb-4" style={{ color: C.muted }}>
         <div>Cliente<br /><span style={{ color: C.text }}>{clientName}</span></div>
         <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(invoice.invoice_date)}</span></div>
       </div>
       <div className="space-y-1 mb-3">
-        {items.map((it) => (
+        {showChapters ? chapterGroups.map((g) => (
+          <div key={g.chapter}>
+            <div className="flex items-center justify-between text-xs uppercase tracking-wide px-3 py-1" style={{ color: C.amber }}>
+              <span>{g.chapter}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span>
+            </div>
+            {g.items.map((it) => (
+              <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+                <div>{it.description} {it.is_taxable && <span className="text-xs" style={{ color: C.muted }}>(ITBIS)</span>}</div>
+                <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
+              </div>
+            ))}
+          </div>
+        )) : items.map((it) => (
           <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
             <div>{it.description} {it.is_taxable && <span className="text-xs" style={{ color: C.muted }}>(ITBIS)</span>}</div>
             <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
@@ -1208,8 +1421,53 @@ function InvoiceDetailModal({ invoice, items, clientName, companyName, onClose, 
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(invoice.subtotal)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(invoice.itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(invoice.total)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.green }}><span>Cobrado</span><span className="font-mono">{fmtMoney(invoice.amount_paid || 0)}</span></div>
+        <div className="flex justify-between text-sm font-semibold" style={{ color: balance > 0 ? C.red : C.muted }}><span>Saldo pendiente</span><span className="font-mono">{fmtMoney(balance)}</span></div>
       </div>
-      <div className="flex justify-end gap-2 mt-4">
+
+      {payments?.length > 0 && (
+        <div className="mt-3">
+          <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Pagos registrados</div>
+          <div className="space-y-1">
+            {payments.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+                <div>{fmtDate(p.payment_date)} {p.method && <span style={{ color: C.muted }}>· {p.method}</span>}</div>
+                <div className="flex items-center gap-3">
+                  <span className="font-mono" style={{ color: C.green }}>{fmtMoney(p.amount)}</span>
+                  <button onClick={() => onDeletePayment(p, invoice)} style={iconBtnStyle}><Trash2 size={13} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showPaymentForm && invoice.status !== "anulada" && (
+        <div className="mt-3 p-3 space-y-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Monto pagado">
+              <input type="number" step="0.01" className={inputClass} style={inputStyle} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            </Field>
+            <Field label="Fecha del pago">
+              <input type="date" className={inputClass} style={inputStyle} value={payDate} onChange={(e) => setPayDate(e.target.value)} />
+            </Field>
+          </div>
+          <Field label="Método (opcional)">
+            <input className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => setPayMethod(e.target.value)} placeholder="Ej. Transferencia, Efectivo, Cheque" />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowPaymentForm(false)} className="px-3 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+            <button onClick={submitPayment} className="px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Guardar pago</button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        {invoice.status !== "anulada" && balance > 0 && !showPaymentForm && (
+          <button onClick={() => setShowPaymentForm(true)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.green, color: "#0A1F12" }}>
+            Registrar pago
+          </button>
+        )}
         {invoice.status !== "anulada" && (
           <button onClick={() => onVoid(invoice)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>
             <Ban size={14} /> Anular factura
@@ -1222,40 +1480,79 @@ function InvoiceDetailModal({ invoice, items, clientName, companyName, onClose, 
   );
 }
 
+const PAYMENT_STATUS_CFG = {
+  pendiente: { label: "Pendiente de cobro", color: "#E8654F" },
+  parcial: { label: "Parcialmente cobrada", color: "#F2A93B" },
+  cobrada: { label: "Cobrada", color: "#4CAF6D" },
+};
+
 const QUOTE_STATUS_CFG = {
   pendiente: { label: "Pendiente", color: "#8B92A0" },
   aprobada: { label: "Aprobada", color: "#4CAF6D" },
   rechazada: { label: "Rechazada", color: "#E8654F" },
+  en_orden: { label: "En orden de trabajo", color: "#4FA8D8" },
   convertida: { label: "Convertida en factura", color: "#F2A93B" },
 };
 
-function QuoteFormModal({ clients, products, onClose, onSave, saving, onRequestNewClient }) {
-  const [clientId, setClientId] = useState(clients[0]?.id || "");
-  const [quoteDate, setQuoteDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [validUntil, setValidUntil] = useState("");
-  const [items, setItems] = useState([{ product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
+const SALES_ORDER_STATUS_CFG = {
+  en_proceso: { label: "En proceso", color: "#4FA8D8" },
+  facturada: { label: "Facturada", color: "#4CAF6D" },
+  cancelada: { label: "Cancelada", color: "#E8654F" },
+};
 
-  const updateItem = (i, patch) => setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, ...patch } : it)));
-  const addItemRow = () => setItems((prev) => [...prev, { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true }]);
-  const removeItemRow = (i) => setItems((prev) => prev.filter((_, idx) => idx !== i));
+function QuoteFormModal({ clients, products, prefill, initial, initialItems, onClose, onSave, saving, onRequestNewClient }) {
+  const [title, setTitle] = useState(initial?.title || prefill?.title || "");
+  const [clientId, setClientId] = useState(initial?.client_id || prefill?.client_id || clients[0]?.id || "");
+  const [quoteDate, setQuoteDate] = useState(initial?.quote_date || (() => new Date().toISOString().slice(0, 10))());
+  const [validUntil, setValidUntil] = useState(initial?.valid_until || "");
+  const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true };
+  const [blocks, setBlocks] = useState(() => {
+    if (initial) return itemsToBlocks(initialItems, blankItem);
+    if (prefill?.items?.length) return itemsToBlocks(prefill.items, blankItem);
+    return [{ id: 0, kind: "item", ...blankItem }];
+  });
+  const newBlockId = () => Date.now() + Math.random();
 
-  const onProductPick = (i, productId) => {
+  const updateBlock = (id, patch) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", ...blankItem }]);
+  const addChapterRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "chapter", name: "" }]);
+  const removeBlock = (id) => setBlocks((prev) => prev.filter((b) => b.id !== id));
+
+  const onProductPick = (id, productId) => {
     const prod = products.find((p) => p.id === productId);
-    updateItem(i, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
+    updateBlock(id, { product_id: productId, description: prod?.name || "", unit_price: prod?.unit_price || 0, is_taxable: prod?.is_taxable ?? true });
   };
 
-  const subtotal = items.reduce((sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
-  const itbis = items.reduce((sum, it) => sum + (it.is_taxable ? (Number(it.quantity) || 0) * (Number(it.unit_price) || 0) * 0.18 : 0), 0);
+  // Asigna a cada línea el nombre del capítulo bajo el que aparece
+  const resolvedItems = useMemo(() => {
+    let current = "";
+    const result = [];
+    blocks.forEach((b) => {
+      if (b.kind === "chapter") current = b.name.trim();
+      else result.push({ ...b, chapter: current });
+    });
+    return result;
+  }, [blocks]);
+
+  const itemAmount = (it) => (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
+  const subtotal = resolvedItems.reduce((sum, it) => sum + itemAmount(it), 0);
+  const itbis = resolvedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) * 0.18 : 0), 0);
   const total = subtotal + itbis;
+  const chapterGroups = groupItemsByChapter(resolvedItems, itemAmount);
+  const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
+  const chapterSubtotal = (name) => chapterGroups.find((g) => g.chapter === (name.trim() || "General"))?.subtotal || 0;
 
   const submit = () => {
-    const validItems = items.filter((it) => it.description.trim() && Number(it.quantity) > 0);
+    const validItems = resolvedItems.filter((it) => it.description.trim() && Number(it.quantity) > 0);
     if (!clientId || validItems.length === 0) return;
-    onSave({ client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, subtotal, itbis, total }, validItems);
+    onSave({ title: title.trim() || null, client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, subtotal, itbis, total }, validItems);
   };
 
   return (
-    <Modal title="Nueva cotización" onClose={onClose} wide>
+    <Modal title={initial ? "Editar cotización" : "Nueva cotización"} onClose={onClose} wide>
+      <Field label="Título de la cotización (opcional)">
+        <input className={inputClass} style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Instalación de A/C - Oficina Principal" />
+      </Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Cliente">
           <div className="flex gap-2">
@@ -1272,23 +1569,51 @@ function QuoteFormModal({ clients, products, onClose, onSave, saving, onRequestN
       </div>
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
-      <div className="space-y-2 mb-3">
-        {items.map((it, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2 items-center">
-            <div className="col-span-4">
-              <ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(i, id)} placeholder="Buscar producto o servicio..." />
-            </div>
-            <input className={`${inputClass} col-span-3`} style={inputStyle} value={it.description} onChange={(e) => updateItem(i, { description: e.target.value })} placeholder="Descripción" />
-            <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(i, { quantity: e.target.value })} placeholder="Cant." />
-            <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.unit_price} onChange={(e) => updateItem(i, { unit_price: e.target.value })} placeholder="Precio" />
-            <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
-              <input type="checkbox" checked={it.is_taxable} onChange={(e) => updateItem(i, { is_taxable: e.target.checked })} /> ITBIS
-            </label>
-            <button onClick={() => removeItemRow(i)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
-          </div>
-        ))}
+      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+        <div className="col-span-4">Producto</div>
+        <div className="col-span-3">Descripción</div>
+        <div className="col-span-1">Cantidad</div>
+        <div className="col-span-2">Precio</div>
+        <div className="col-span-1">ITBIS</div>
+        <div className="col-span-1"></div>
       </div>
-      <button onClick={addItemRow} className="flex items-center gap-2 text-sm mb-4" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+      <div className="space-y-2 mb-3">
+        {blocks.map((b) =>
+          b.kind === "chapter" ? (
+            <div key={b.id} className="flex items-center gap-2 pt-2">
+              <input className={inputClass} style={{ ...inputStyle, fontWeight: 600, color: C.amber, borderColor: C.amber + "60" }} value={b.name} onChange={(e) => updateBlock(b.id, { name: e.target.value })} placeholder="Nombre del capítulo — ej. Mano de obra, Materiales" />
+              <div className="text-sm font-mono flex-shrink-0" style={{ color: C.amber, minWidth: 100, textAlign: "right" }}>{fmtMoney(chapterSubtotal(b.name))}</div>
+              <button onClick={() => removeBlock(b.id)} style={iconBtnStyle}><X size={16} /></button>
+            </div>
+          ) : (
+            <div key={b.id} className="grid grid-cols-12 gap-2 items-center">
+              <div className="col-span-4">
+                <ProductSearchSelect products={products} value={b.product_id} onChange={(id) => onProductPick(b.id, id)} placeholder="Buscar producto o servicio..." />
+              </div>
+              <input className={`${inputClass} col-span-3`} style={inputStyle} value={b.description} onChange={(e) => updateBlock(b.id, { description: e.target.value })} placeholder="Descripción" />
+              <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
+              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_price} onChange={(e) => updateBlock(b.id, { unit_price: e.target.value })} placeholder="Precio" />
+              <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
+                <input type="checkbox" checked={b.is_taxable} onChange={(e) => updateBlock(b.id, { is_taxable: e.target.checked })} /> ITBIS
+              </label>
+              <button onClick={() => removeBlock(b.id)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+            </div>
+          )
+        )}
+      </div>
+      <div className="flex gap-4 mb-4">
+        <button onClick={addItemRow} className="flex items-center gap-2 text-sm" style={{ color: C.amber }}><Plus size={14} /> Agregar línea</button>
+        <button onClick={addChapterRow} className="flex items-center gap-2 text-sm" style={{ color: C.text }}><Plus size={14} /> Agregar capítulo</button>
+      </div>
+
+      {hasChapters && (
+        <div className="mb-3 p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Subtotales por capítulo</div>
+          {chapterGroups.map((g) => (
+            <div key={g.chapter} className="flex justify-between text-sm" style={{ color: C.text }}><span>{g.chapter}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span></div>
+          ))}
+        </div>
+      )}
 
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
@@ -1299,18 +1624,20 @@ function QuoteFormModal({ clients, products, onClose, onSave, saving, onRequestN
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
-          {saving ? "Guardando..." : "Crear cotización"}
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Crear cotización"}
         </button>
       </div>
     </Modal>
   );
 }
 
-function QuoteDetailModal({ quote, items, clientName, companyName, onClose, onMarkStatus, onConvert }) {
+function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, onClose, onMarkStatus, onConvert, onConvertToOrder, onEdit, onDuplicate }) {
   const s = QUOTE_STATUS_CFG[quote.status] || QUOTE_STATUS_CFG.pendiente;
+  const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
+  const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const doPrint = () => {
     const html = invoiceLikeHtml({
-      docLabel: "Cotización", code: quote.quote_number, companyName, clientName,
+      docLabel: "Cotización", code: quote.quote_number, docTitle: quote.title, companyName, clientName,
       dateLabel: "Fecha", dateValue: fmtDate(quote.quote_date),
       extraMeta: quote.valid_until ? `<br/>Válida hasta: ${fmtDate(quote.valid_until)}` : "",
       items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total,
@@ -1319,16 +1646,30 @@ function QuoteDetailModal({ quote, items, clientName, companyName, onClose, onMa
   };
   return (
     <Modal title={`Cotización ${quote.quote_number || ""}`} onClose={onClose} wide>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-2">
         <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span></div>
         <Pill label={s.label} color={s.color} />
       </div>
+      {quote.title && <div className="text-sm font-semibold mb-2" style={{ color: C.text }}>{quote.title}</div>}
+      {orderInfo && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Orden de venta generada: <span className="font-mono">{orderInfo.order_number}</span></div>}
       <div className="grid grid-cols-2 gap-3 text-xs mb-4" style={{ color: C.muted }}>
         <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(quote.quote_date)}</span></div>
         <div>Válida hasta<br /><span style={{ color: C.text }}>{quote.valid_until ? fmtDate(quote.valid_until) : "Sin definir"}</span></div>
       </div>
       <div className="space-y-1 mb-3">
-        {items.map((it) => (
+        {showChapters ? chapterGroups.map((g) => (
+          <div key={g.chapter}>
+            <div className="flex items-center justify-between text-xs uppercase tracking-wide px-3 py-1" style={{ color: C.amber }}>
+              <span>{g.chapter}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span>
+            </div>
+            {g.items.map((it) => (
+              <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+                <div>{it.description}</div>
+                <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
+              </div>
+            ))}
+          </div>
+        )) : items.map((it) => (
           <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
             <div>{it.description}</div>
             <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
@@ -1347,13 +1688,296 @@ function QuoteDetailModal({ quote, items, clientName, companyName, onClose, onMa
             <button onClick={() => onMarkStatus(quote, "aprobada")} className="px-4 py-2 text-sm" style={{ color: C.green, border: `1px solid ${C.green}40` }}>Marcar aprobada</button>
           </>
         )}
+        {quote.status === "aprobada" && (
+          <button onClick={() => onConvertToOrder(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.blue, color: "#08202E" }}>
+            <Layers size={14} /> Pasar a Orden de Venta
+          </button>
+        )}
         {(quote.status === "pendiente" || quote.status === "aprobada") && (
           <button onClick={() => onConvert(quote, items)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
             Convertir en factura
           </button>
         )}
+        {quote.status !== "convertida" && quote.status !== "en_orden" && (
+          <button onClick={() => onEdit(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}><Pencil size={14} /> Editar</button>
+        )}
+        <button onClick={() => onDuplicate(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}><Copy size={14} /> Duplicar</button>
         <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function SalesOrderDetailModal({ order, items, clientName, companyName, workOrderInfo, onClose, onGenerateInvoice, onGenerateWorkOrder, onCancel }) {
+  const s = SALES_ORDER_STATUS_CFG[order.status] || SALES_ORDER_STATUS_CFG.en_proceso;
+  const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
+  const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
+  const doPrint = () => {
+    const html = invoiceLikeHtml({
+      docLabel: "Orden de venta", code: order.order_number, docTitle: order.title, companyName, clientName,
+      dateLabel: "Fecha", dateValue: fmtDate(order.order_date),
+      items, subtotal: order.subtotal, itbis: order.itbis, total: order.total,
+    });
+    printDocument(`Orden de venta ${order.order_number || ""}`, html);
+  };
+  return (
+    <Modal title={`Orden de venta ${order.order_number || ""}`} onClose={onClose} wide>
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span></div>
+        <Pill label={s.label} color={s.color} />
+      </div>
+      {order.title && <div className="text-sm font-semibold mb-2" style={{ color: C.text }}>{order.title}</div>}
+      {workOrderInfo && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Orden de trabajo generada: <span className="font-mono">{workOrderInfo.code}</span></div>}
+      <div className="text-xs mb-4" style={{ color: C.muted }}>Fecha<br /><span style={{ color: C.text }}>{fmtDate(order.order_date)}</span></div>
+      <div className="space-y-1 mb-3">
+        {showChapters ? chapterGroups.map((g) => (
+          <div key={g.chapter}>
+            <div className="flex items-center justify-between text-xs uppercase tracking-wide px-3 py-1" style={{ color: C.amber }}>
+              <span>{g.chapter}</span><span className="font-mono">{fmtMoney(g.subtotal)}</span>
+            </div>
+            {g.items.map((it) => (
+              <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+                <div>{it.description}</div>
+                <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
+              </div>
+            ))}
+          </div>
+        )) : items.map((it) => (
+          <div key={it.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+            <div>{it.description}</div>
+            <div className="font-mono" style={{ color: C.muted }}>{it.quantity} × {fmtMoney(it.unit_price)} = {fmtMoney(it.subtotal)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(order.subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(order.itbis)}</span></div>
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(order.total)}</span></div>
+      </div>
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        {order.status === "en_proceso" && !workOrderInfo && (
+          <button onClick={() => onGenerateWorkOrder(order)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.blue, color: "#08202E" }}>
+            <ClipboardList size={14} /> Generar orden de trabajo
+          </button>
+        )}
+        {order.status === "en_proceso" && (
+          <>
+            <button onClick={() => onCancel(order)} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>Cancelar orden</button>
+            <button onClick={() => onGenerateInvoice(order, items)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Generar factura</button>
+          </>
+        )}
+        <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
+const INCIDENT_STATUS_CFG = {
+  abierto: { label: "Abierto", color: "#E8654F" },
+  en_revision: { label: "En revisión", color: "#F2A93B" },
+  resuelto: { label: "Resuelto", color: "#4CAF6D" },
+  descartado: { label: "Descartado", color: "#8B92A0" },
+  convertido: { label: "Convertido", color: "#4FA8D8" },
+};
+
+function IncidentFormModal({ branches, equipment, clients, initial, onClose, onSave, saving, onRequestNewClient }) {
+  const [title, setTitle] = useState(initial?.title || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || "");
+  const [equipmentId, setEquipmentId] = useState(initial?.equipment_id || "");
+  const [clientId, setClientId] = useState(initial?.client_id || "");
+  const [reportedBy, setReportedBy] = useState(initial?.reported_by || "");
+  const [priority, setPriority] = useState(initial?.priority || "media");
+
+  const branchEquip = equipment.filter((e) => e.branch_id === branchId);
+
+  const submit = () => {
+    if (!title.trim()) return;
+    onSave({
+      title: title.trim(), description: description.trim() || null, branch_id: branchId || null,
+      equipment_id: equipmentId || null, client_id: clientId || null, reported_by: reportedBy.trim() || null, priority,
+    });
+  };
+
+  return (
+    <Modal title={initial ? "Editar incidente" : "Reportar incidente"} onClose={onClose} wide>
+      <Field label="Título del incidente">
+        <input className={inputClass} style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Fuga de refrigerante en cámara fría" />
+      </Field>
+      <Field label="Descripción (opcional)">
+        <textarea rows={3} className={inputClass} style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Detalles de lo ocurrido" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Reportado por (opcional)">
+          <input className={inputClass} style={inputStyle} value={reportedBy} onChange={(e) => setReportedBy(e.target.value)} placeholder="Nombre de quien reporta" />
+        </Field>
+        <Field label="Prioridad">
+          <select className={inputClass} style={inputStyle} value={priority} onChange={(e) => setPriority(e.target.value)}>
+            {Object.entries(PRIORITY_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Vincular a (opcional)</div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Sucursal / equipo interno">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => { setBranchId(e.target.value); setEquipmentId(""); }}>
+            <option value="">Sin especificar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Equipo">
+          <select className={inputClass} style={inputStyle} value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)} disabled={!branchId}>
+            <option value="">Sin especificar</option>
+            {branchEquip.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Field label="Cliente relacionado">
+        <div className="flex gap-2">
+          <div className="flex-1"><SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente (opcional)..." getLabel={(c) => c.name} /></div>
+          <button type="button" onClick={onRequestNewClient} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
+        </div>
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Reportar incidente"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function IncidentDetailModal({ incident, branchName, equipName, clientName, orders, quotes, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete }) {
+  const s = INCIDENT_STATUS_CFG[incident.status] || INCIDENT_STATUS_CFG.abierto;
+  const p = PRIORITY_CFG[incident.priority] || PRIORITY_CFG.media;
+  const linkedOrder = incident.work_order_id ? orders.find((o) => o.id === incident.work_order_id) : null;
+  const linkedQuote = incident.quote_id ? quotes.find((q) => q.id === incident.quote_id) : null;
+
+  return (
+    <Modal title={incident.title} onClose={onClose} wide>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <Pill label={s.label} color={s.color} />
+        <Pill label={p.label} color={p.color} />
+      </div>
+      {incident.description && <div className="text-sm mb-3" style={{ color: C.text }}>{incident.description}</div>}
+      <div className="grid grid-cols-2 gap-3 text-xs mb-4" style={{ color: C.muted }}>
+        <div>Reportado por<br /><span style={{ color: C.text }}>{incident.reported_by || "Sin especificar"}</span></div>
+        <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(incident.created_at?.slice(0, 10))}</span></div>
+        <div>Sucursal / equipo<br /><span style={{ color: C.text }}>{branchName(incident.branch_id)}{incident.equipment_id ? ` · ${equipName(incident.equipment_id)}` : ""}</span></div>
+        <div>Cliente<br /><span style={{ color: C.text }}>{incident.client_id ? clientName(incident.client_id) : "Sin especificar"}</span></div>
+      </div>
+
+      {linkedOrder && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Orden vinculada: <span className="font-mono">{linkedOrder.code}</span></div>}
+      {linkedQuote && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Cotización vinculada: <span className="font-mono">{linkedQuote.quote_number}</span></div>}
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4">
+        {incident.status === "abierto" && (
+          <>
+            <button onClick={() => onMarkStatus(incident, "en_revision")} className="px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.amber}40` }}>Marcar en revisión</button>
+            <button onClick={() => onMarkStatus(incident, "descartado")} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>Descartar</button>
+          </>
+        )}
+        {incident.status !== "descartado" && incident.status !== "convertido" && (
+          <button onClick={() => onMarkStatus(incident, "resuelto")} className="px-4 py-2 text-sm" style={{ color: C.green, border: `1px solid ${C.green}40` }}>Marcar resuelto</button>
+        )}
+        {!incident.work_order_id && (
+          <button onClick={() => onConvertOrder(incident)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Convertir en orden de trabajo</button>
+        )}
+        {!incident.quote_id && (
+          <button onClick={() => onConvertQuote(incident)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Convertir en cotización</button>
+        )}
+        <button onClick={() => onDelete(incident.id)} style={iconBtnStyle}><Trash2 size={16} /></button>
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
+function StatementModal({ clients, invoices, companyName, onClose }) {
+  const [clientId, setClientId] = useState("");
+  const [paymentFilters, setPaymentFilters] = useState(new Set());
+  const client = clients.find((c) => c.id === clientId);
+  const clientInvoicesAll = invoices.filter((inv) => inv.client_id === clientId && inv.status !== "anulada");
+  const clientInvoices = paymentFilters.size === 0 ? clientInvoicesAll : clientInvoicesAll.filter((inv) => paymentFilters.has(inv.payment_status || "pendiente"));
+  const totalFacturado = clientInvoices.reduce((s, i) => s + Number(i.total), 0);
+  const totalCobrado = clientInvoices.reduce((s, i) => s + Number(i.amount_paid || 0), 0);
+  const saldo = totalFacturado - totalCobrado;
+  const togglePaymentFilter = (key) => setPaymentFilters((prev) => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  const filterLabel = paymentFilters.size === 0 || paymentFilters.size === 3 ? "" : ` — ${[...paymentFilters].map((k) => PAYMENT_STATUS_CFG[k]?.label).join(", ")}`;
+
+  const doPrint = () => {
+    if (!client) return;
+    printDocument(`Estado de cuenta - ${client.name}`, statementHtml(companyName, client.name + filterLabel, clientInvoices));
+  };
+
+  return (
+    <Modal title="Estado de cuenta" onClose={onClose} wide>
+      <Field label="Cliente">
+        <SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} />
+      </Field>
+      <Field label="Filtrar por estado de cobro (deja todo sin marcar para ver todas)">
+        <div className="flex flex-wrap gap-3">
+          {Object.entries(PAYMENT_STATUS_CFG).map(([k, v]) => (
+            <label key={k} className="flex items-center gap-2 text-sm px-3 py-2 cursor-pointer" style={{ border: `1px solid ${C.border}`, color: paymentFilters.has(k) ? v.color : C.muted }}>
+              <input type="checkbox" checked={paymentFilters.has(k)} onChange={() => togglePaymentFilter(k)} />
+              {v.label}
+            </label>
+          ))}
+        </div>
+      </Field>
+
+      {client && (
+        <>
+          <div className="space-y-1 mt-3 mb-3">
+            <div className="grid grid-cols-12 gap-2 px-3 py-1 text-xs uppercase tracking-wide" style={{ color: C.muted }}>
+              <div className="col-span-3">NCF</div>
+              <div className="col-span-2">Fecha</div>
+              <div className="col-span-2 text-right">Total</div>
+              <div className="col-span-2 text-right">Cobrado</div>
+              <div className="col-span-1 text-right">Saldo</div>
+              <div className="col-span-2 text-right">Estado</div>
+            </div>
+            {clientInvoices.map((inv) => {
+              const balance = Number(inv.total) - Number(inv.amount_paid || 0);
+              const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
+              return (
+                <div key={inv.id} className="grid grid-cols-12 gap-2 items-center text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+                  <div className="col-span-3 font-mono text-xs">{inv.ncf}</div>
+                  <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
+                  <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
+                  <div className="col-span-2 text-right font-mono" style={{ color: C.green }}>{fmtMoney(inv.amount_paid || 0)}</div>
+                  <div className="col-span-1 text-right font-mono" style={{ color: balance > 0 ? C.red : C.muted }}>{fmtMoney(balance)}</div>
+                  <div className="col-span-2 text-right"><Pill label={payCfg.label} color={payCfg.color} /></div>
+                </div>
+              );
+            })}
+            {clientInvoices.length === 0 && (
+              <div className="text-sm text-center py-6" style={{ color: C.muted }}>
+                {clientInvoicesAll.length === 0 ? "Este cliente no tiene facturas emitidas." : "Ninguna factura coincide con el filtro de estado elegido."}
+              </div>
+            )}
+          </div>
+
+          {clientInvoices.length > 0 && (
+            <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+              <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Total facturado</span><span className="font-mono">{fmtMoney(totalFacturado)}</span></div>
+              <div className="flex justify-between text-sm" style={{ color: C.green }}><span>Total cobrado</span><span className="font-mono">{fmtMoney(totalCobrado)}</span></div>
+              <div className="flex justify-between text-base font-bold" style={{ color: saldo > 0 ? C.red : C.text }}><span>Saldo pendiente</span><span className="font-mono">{fmtMoney(saldo)}</span></div>
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
+        {client && clientInvoices.length > 0 && (
+          <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+            <FileText size={14} /> Imprimir estado de cuenta
+          </button>
+        )}
       </div>
     </Modal>
   );
@@ -1412,7 +2036,7 @@ function InviteFormModal({ technicians, onClose, onSave, saving, generatedLink, 
   );
 }
 
-function OrderDetailModal({ order, branchName, equipName, techName, onClose, onSave, saving, readOnly }) {
+function OrderDetailModal({ order, attachments, branchName, equipName, techName, onClose, onSave, saving, readOnly }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(order.photo_url || "");
@@ -1424,6 +2048,8 @@ function OrderDetailModal({ order, branchName, equipName, techName, onClose, onS
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
   };
+
+  const isImage = (name) => /\.(png|jpe?g|gif|webp)$/i.test(name || "");
 
   return (
     <Modal title={`Orden ${order.code}`} onClose={onClose} wide>
@@ -1438,6 +2064,20 @@ function OrderDetailModal({ order, branchName, equipName, techName, onClose, onS
         <div>Equipo<br /><span style={{ color: C.text }}>{equipName(order.equipment_id)}</span></div>
         <div>Técnico<br /><span style={{ color: C.text }}>{techName(order.technician_id)}</span></div>
       </div>
+
+      {attachments && attachments.length > 0 && (
+        <div className="mb-4">
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Archivos de apoyo</div>
+          <div className="grid grid-cols-2 gap-2">
+            {attachments.map((a) => (
+              <a key={a.id} href={a.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.amber }}>
+                {isImage(a.file_name) ? <ImageIcon size={14} /> : <FileText size={14} />}
+                <span className="truncate">{a.file_name || "Archivo"}</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {readOnly && (
         <div className="text-xs mb-3 px-3 py-2" style={{ background: C.panelAlt, color: C.muted, border: `1px solid ${C.border}` }}>
@@ -1525,8 +2165,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [products, setProducts] = useState([]);
   const [clientAssets, setClientAssets] = useState([]);
   const [selectedClients, setSelectedClients] = useState(new Set());
+  const [clientSearch, setClientSearch] = useState("");
   const [selectedProducts, setSelectedProducts] = useState(new Set());
   const [selectedSuppliers, setSelectedSuppliers] = useState(new Set());
+  const [supplierSearch, setSupplierSearch] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [productCategoryFilter, setProductCategoryFilter] = useState("all");
   const [purchaseSearch, setPurchaseSearch] = useState("");
@@ -1535,18 +2177,29 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [quoteStatusFilter, setQuoteStatusFilter] = useState("all");
   const [invoiceSearch, setInvoiceSearch] = useState("");
   const [invoiceStatusFilter, setInvoiceStatusFilter] = useState("all");
+  const [invoicePaymentFilter, setInvoicePaymentFilter] = useState("all");
   const [suppliers, setSuppliers] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [ncfSequences, setNcfSequences] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [quotes, setQuotes] = useState([]);
+  const [salesOrders, setSalesOrders] = useState([]);
+  const [incidents, setIncidents] = useState([]);
 
   const [branchFilter, setBranchFilter] = useState("all");
-  const [view, setView] = useState("dashboard");
+  const [view, setView] = useState(() => new URLSearchParams(window.location.search).get("view") || "dashboard");
+  const changeView = (key) => {
+    setView(key);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", key);
+    window.history.replaceState(null, "", url);
+  };
 
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [detailOrder, setDetailOrder] = useState(null);
+  const [detailOrderAttachments, setDetailOrderAttachments] = useState([]);
+  const [orderAttachmentIds, setOrderAttachmentIds] = useState(new Set());
   const [showAddBranch, setShowAddBranch] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
   const [showAddTech, setShowAddTech] = useState(false);
@@ -1571,10 +2224,20 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [showAddNcf, setShowAddNcf] = useState(false);
   const [editingNcf, setEditingNcf] = useState(null);
   const [showAddInvoice, setShowAddInvoice] = useState(false);
+  const [showStatement, setShowStatement] = useState(false);
   const [invoiceDetail, setInvoiceDetail] = useState(null);
   const [invoicePrefill, setInvoicePrefill] = useState(null);
   const [showAddQuote, setShowAddQuote] = useState(false);
   const [quoteDetail, setQuoteDetail] = useState(null);
+  const [editingQuote, setEditingQuote] = useState(null);
+  const [editingQuoteItems, setEditingQuoteItems] = useState(null);
+  const [salesOrderDetail, setSalesOrderDetail] = useState(null);
+  const [showAddIncident, setShowAddIncident] = useState(false);
+  const [editingIncident, setEditingIncident] = useState(null);
+  const [incidentDetail, setIncidentDetail] = useState(null);
+  const [orderFromIncident, setOrderFromIncident] = useState(null);
+  const [orderFromSalesOrder, setOrderFromSalesOrder] = useState(null);
+  const [quotePrefill, setQuotePrefill] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -1583,12 +2246,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, profs, inv, cli, prod, ast, sup, purch, ncf, invc, qts] = await Promise.all([
+    const [br, tech, eq, loc, ord, woa, profs, inv, cli, prod, ast, sup, purch, ncf, invc, qts, sord, inc] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
       supabase.from("locations").select("*").eq("company_id", companyId).order("name"),
       supabase.from("work_orders").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
+      supabase.from("work_order_attachments").select("work_order_id"),
       supabase.from("profiles").select("*").eq("company_id", companyId).order("created_at"),
       isAdmin ? supabase.from("invites").select("*").eq("company_id", companyId).eq("used", false).order("created_at") : Promise.resolve({ data: [] }),
       supabase.from("clients").select("*").eq("company_id", companyId).order("name"),
@@ -1599,6 +2263,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       supabase.from("ncf_sequences").select("*").eq("company_id", companyId).order("created_at"),
       supabase.from("invoices").select("*").eq("company_id", companyId).order("invoice_date", { ascending: false }),
       supabase.from("quotes").select("*").eq("company_id", companyId).order("quote_date", { ascending: false }),
+      supabase.from("sales_orders").select("*").eq("company_id", companyId).order("order_date", { ascending: false }),
+      supabase.from("incidents").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -1606,6 +2272,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setEquipment(eq.data || []);
     setLocations(loc.data || []);
     setOrders(ord.data || []);
+    setOrderAttachmentIds(new Set((woa.data || []).map((r) => r.work_order_id)));
     setProfiles(profs.data || []);
     setInvites(inv.data || []);
     setClients(cli.data || []);
@@ -1616,6 +2283,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setNcfSequences(ncf.data || []);
     setInvoices(invc.data || []);
     setQuotes(qts.data || []);
+    setSalesOrders(sord.data || []);
+    setIncidents(inc.data || []);
     setLoadingScope(false);
   };
 
@@ -1674,6 +2343,18 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     [equipStats]
   );
 
+  const filteredClients = useMemo(() => {
+    if (!clientSearch.trim()) return clients;
+    const q = clientSearch.toLowerCase();
+    return clients.filter((c) => [c.name, c.rnc_cedula, c.phone, c.email, c.address].some((v) => (v || "").toLowerCase().includes(q)));
+  }, [clients, clientSearch]);
+
+  const filteredSuppliers = useMemo(() => {
+    if (!supplierSearch.trim()) return suppliers;
+    const q = supplierSearch.toLowerCase();
+    return suppliers.filter((s) => [s.name, s.rnc, s.phone, s.email].some((v) => (v || "").toLowerCase().includes(q)));
+  }, [suppliers, supplierSearch]);
+
   const productCategories = useMemo(() => [...new Set(products.map((p) => p.category).filter(Boolean))].sort(), [products]);
   const filteredProducts = useMemo(() => products.filter((p) => {
     if (productCategoryFilter !== "all" && (p.category || "") !== productCategoryFilter) return false;
@@ -1698,9 +2379,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const filteredInvoices = useMemo(() => invoices.filter((inv) => {
     const clientNameStr = clients.find((c) => c.id === inv.client_id)?.name || "";
     if (invoiceStatusFilter !== "all" && inv.status !== invoiceStatusFilter) return false;
+    if (invoicePaymentFilter !== "all" && (inv.payment_status || "pendiente") !== invoicePaymentFilter) return false;
     if (invoiceSearch && !clientNameStr.toLowerCase().includes(invoiceSearch.toLowerCase()) && !(inv.ncf || "").toLowerCase().includes(invoiceSearch.toLowerCase())) return false;
     return true;
-  }), [invoices, clients, invoiceStatusFilter, invoiceSearch]);
+  }), [invoices, clients, invoiceStatusFilter, invoicePaymentFilter, invoiceSearch]);
 
   const activeWarrantyAssets = useMemo(() => {
     const today = new Date();
@@ -1714,14 +2396,36 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   }, [clientAssets]);
 
   // ---- Órdenes ----
-  const createOrder = async (payload) => {
+  const createOrder = async (payload, files, linkedIncidentId, linkedSalesOrderId) => {
     setSaving(true);
     const code = `OT-${String(orders.length + 1).padStart(4, "0")}`;
     const { data, error } = await supabase.from("work_orders").insert({ ...payload, code, company_id: companyId, status: "pendiente" }).select().single();
-    setSaving(false);
-    if (error) { setErrorMsg(error.message); return; }
+    if (error) { setSaving(false); setErrorMsg(error.message); return; }
     setOrders((prev) => [data, ...prev]);
     setShowOrderForm(false);
+    setOrderFromIncident(null);
+    setOrderFromSalesOrder(null);
+    if (linkedIncidentId) {
+      await supabase.from("incidents").update({ work_order_id: data.id, status: "convertido" }).eq("id", linkedIncidentId);
+      setIncidents((prev) => prev.map((i) => (i.id === linkedIncidentId ? { ...i, work_order_id: data.id, status: "convertido" } : i)));
+    }
+    if (linkedSalesOrderId) {
+      await supabase.from("sales_orders").update({ work_order_id: data.id }).eq("id", linkedSalesOrderId);
+      setSalesOrders((prev) => prev.map((o) => (o.id === linkedSalesOrderId ? { ...o, work_order_id: data.id } : o)));
+    }
+    if (files && files.length > 0) {
+      for (const file of files) {
+        const ext = file.name.split(".").pop();
+        const path = `support/${companyId}/${data.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
+        if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
+        const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
+        const { error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: pub.publicUrl, file_name: file.name });
+        if (attError) setErrorMsg(`Se subió ${file.name} pero no se pudo vincular a la orden: ${attError.message}`);
+        else setOrderAttachmentIds((prev) => new Set(prev).add(data.id));
+      }
+    }
+    setSaving(false);
   };
 
   const updateOrder = async (payload) => {
@@ -1746,6 +2450,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setOrders((prev) => prev.filter((o) => o.id !== orderId));
     const { error } = await supabase.from("work_orders").delete().eq("id", orderId);
     if (error) setErrorMsg(error.message);
+  };
+
+  const openOrderDetail = async (order) => {
+    const { data: attachments } = await supabase.from("work_order_attachments").select("*").eq("work_order_id", order.id).order("uploaded_at");
+    setDetailOrderAttachments(attachments || []);
+    setDetailOrder(order);
   };
 
   const saveOrderDetail = async (order, notes, photoFile) => {
@@ -1903,6 +2613,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       quantity: Number(it.quantity),
       unit_cost: Number(it.unit_cost),
       subtotal: Number(it.quantity) * Number(it.unit_cost),
+      chapter: it.chapter?.trim() || null,
     }));
     const { error: itemsError } = await supabase.from("purchase_items").insert(itemRows);
     if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
@@ -1993,6 +2704,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       unit_price: Number(it.unit_price),
       is_taxable: it.is_taxable,
       subtotal: Number(it.quantity) * Number(it.unit_price),
+      chapter: it.chapter?.trim() || null,
     }));
     const { error: itemsError } = await supabase.from("invoice_items").insert(itemRows);
     if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
@@ -2001,6 +2713,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
     if (invoicePrefill?.sourceQuoteId) {
       await supabase.from("quotes").update({ status: "convertida" }).eq("id", invoicePrefill.sourceQuoteId);
+    }
+    if (invoicePrefill?.sourceOrderId) {
+      const { data: updatedOrder } = await supabase.from("sales_orders").update({ status: "facturada", invoice_id: invoice.id }).eq("id", invoicePrefill.sourceOrderId).select().single();
+      if (updatedOrder) setSalesOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
     }
 
     for (const row of itemRows) {
@@ -2034,11 +2750,41 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const openInvoiceDetail = async (invoice) => {
     const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id);
-    setInvoiceDetail({ invoice, items: items || [] });
+    const { data: payments } = await supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id).order("payment_date");
+    setInvoiceDetail({ invoice, items: items || [], payments: payments || [] });
+  };
+
+  const registerPayment = async (invoice, payload) => {
+    setSaving(true);
+    const { error: payError } = await supabase.from("invoice_payments").insert({ ...payload, invoice_id: invoice.id });
+    if (payError) { setSaving(false); setErrorMsg(payError.message); return; }
+
+    const { data: allPayments } = await supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id);
+    const totalPaid = (allPayments || []).reduce((s, p) => s + Number(p.amount), 0);
+    const payment_status = totalPaid <= 0 ? "pendiente" : totalPaid >= Number(invoice.total) ? "cobrada" : "parcial";
+    const { data: updated, error: updError } = await supabase.from("invoices").update({ amount_paid: totalPaid, payment_status }).eq("id", invoice.id).select().single();
+    setSaving(false);
+    if (updError) { setErrorMsg(updError.message); return; }
+    setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated, payments: allPayments } : prev));
+  };
+
+  const deletePayment = async (payment, invoice) => {
+    if (!window.confirm("¿Eliminar este pago registrado?")) return;
+    const { error: delError } = await supabase.from("invoice_payments").delete().eq("id", payment.id);
+    if (delError) { setErrorMsg(delError.message); return; }
+
+    const { data: allPayments } = await supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id);
+    const totalPaid = (allPayments || []).reduce((s, p) => s + Number(p.amount), 0);
+    const payment_status = totalPaid <= 0 ? "pendiente" : totalPaid >= Number(invoice.total) ? "cobrada" : "parcial";
+    const { data: updated, error: updError } = await supabase.from("invoices").update({ amount_paid: totalPaid, payment_status }).eq("id", invoice.id).select().single();
+    if (updError) { setErrorMsg(updError.message); return; }
+    setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated, payments: allPayments } : prev));
   };
 
   // ---- Cotizaciones ----
-  const createQuote = async (payload, items) => {
+  const createQuote = async (payload, items, linkedIncidentId) => {
     setSaving(true);
     const quote_number = `COT-${String(quotes.length + 1).padStart(4, "0")}`;
     const { data: quote, error: quoteError } = await supabase.from("quotes").insert({ ...payload, company_id: companyId, quote_number, status: "pendiente" }).select().single();
@@ -2052,11 +2798,16 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       unit_price: Number(it.unit_price),
       is_taxable: it.is_taxable,
       subtotal: Number(it.quantity) * Number(it.unit_price),
+      chapter: it.chapter?.trim() || null,
     }));
     const { error: itemsError } = await supabase.from("quote_items").insert(itemRows);
     setSaving(false);
     if (itemsError) { setErrorMsg(itemsError.message); return; }
     setShowAddQuote(false);
+    setQuotePrefill(null);
+    if (linkedIncidentId) {
+      await supabase.from("incidents").update({ quote_id: quote.id, status: "convertido" }).eq("id", linkedIncidentId);
+    }
     loadAll();
   };
 
@@ -2071,15 +2822,182 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setInvoicePrefill({
       client_id: quote.client_id,
       sourceQuoteId: quote.id,
-      items: items.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable })),
+      items: items.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable, chapter: it.chapter || "" })),
     });
     setQuoteDetail(null);
     setShowAddInvoice(true);
   };
 
+  // ---- Órdenes comerciales (cotización aprobada -> orden -> factura) ----
+  const convertQuoteToOrder = async (quote, items) => {
+    setSaving(true);
+    const { data: existing } = await supabase.from("sales_orders").select("id").eq("quote_id", quote.id).neq("status", "cancelada");
+    if (existing && existing.length > 0) {
+      setSaving(false);
+      setErrorMsg("Esta cotización ya tiene una orden de venta activa.");
+      setQuoteDetail(null);
+      loadAll();
+      return;
+    }
+    const order_number = `ORD-${String(salesOrders.length + 1).padStart(4, "0")}`;
+    const { data: order, error: orderError } = await supabase.from("sales_orders").insert({
+      company_id: companyId, client_id: quote.client_id, quote_id: quote.id, order_number,
+      title: quote.title, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, status: "en_proceso",
+    }).select().single();
+    if (orderError) { setSaving(false); setErrorMsg(orderError.message); return; }
+
+    const itemRows = items.map((it) => ({
+      sales_order_id: order.id,
+      product_id: it.product_id || null,
+      description: it.description,
+      quantity: Number(it.quantity),
+      unit_price: Number(it.unit_price),
+      is_taxable: it.is_taxable,
+      subtotal: Number(it.quantity) * Number(it.unit_price),
+      chapter: it.chapter || null,
+    }));
+    const { error: itemsError } = await supabase.from("sales_order_items").insert(itemRows);
+    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
+
+    await supabase.from("quotes").update({ status: "en_orden" }).eq("id", quote.id);
+    setSaving(false);
+    setQuoteDetail(null);
+    loadAll();
+  };
+
+  const openSalesOrderDetail = async (order) => {
+    const { data: items } = await supabase.from("sales_order_items").select("*").eq("sales_order_id", order.id);
+    setSalesOrderDetail({ order, items: items || [] });
+  };
+
+  const convertSalesOrderToWorkOrder = (order) => {
+    setOrderFromSalesOrder({ salesOrderId: order.id, title: order.title || `Trabajo — ${order.order_number}`, branch_id: "", equipment_id: "" });
+    setSalesOrderDetail(null);
+  };
+
+  const generateInvoiceFromOrder = (order, items) => {
+    setInvoicePrefill({
+      client_id: order.client_id,
+      sourceOrderId: order.id,
+      title: order.title,
+      items: items.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable, chapter: it.chapter || "" })),
+    });
+    setSalesOrderDetail(null);
+    setShowAddInvoice(true);
+  };
+
+  const cancelSalesOrder = async (order) => {
+    if (!window.confirm("¿Cancelar esta orden de venta? Si viene de una cotización, esa cotización volverá a quedar editable.")) return;
+    const { data, error } = await supabase.from("sales_orders").update({ status: "cancelada" }).eq("id", order.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setSalesOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+    setSalesOrderDetail(null);
+    if (order.quote_id) {
+      await supabase.rpc("revert_quote_on_order_cancel", { order_id_param: order.id });
+      const { data: revertedQuote } = await supabase.from("quotes").select("*").eq("id", order.quote_id).single();
+      if (revertedQuote) setQuotes((prev) => prev.map((q) => (q.id === revertedQuote.id ? revertedQuote : q)));
+    }
+  };
+
   const openQuoteDetail = async (quote) => {
     const { data: items } = await supabase.from("quote_items").select("*").eq("quote_id", quote.id);
     setQuoteDetail({ quote, items: items || [] });
+  };
+
+  const openEditQuote = (quote, items) => {
+    setEditingQuote(quote);
+    setEditingQuoteItems(items);
+    setQuoteDetail(null);
+  };
+
+  const updateQuote = async (payload, items) => {
+    setSaving(true);
+    const { error: delError } = await supabase.from("quote_items").delete().eq("quote_id", editingQuote.id);
+    if (delError) { setSaving(false); setErrorMsg(delError.message); return; }
+
+    const itemRows = items.map((it) => ({
+      quote_id: editingQuote.id,
+      product_id: it.product_id || null,
+      description: it.description,
+      quantity: Number(it.quantity),
+      unit_price: Number(it.unit_price),
+      is_taxable: it.is_taxable,
+      subtotal: Number(it.quantity) * Number(it.unit_price),
+      chapter: it.chapter?.trim() || null,
+    }));
+    const { error: itemsError } = await supabase.from("quote_items").insert(itemRows);
+    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
+
+    const { error: updError } = await supabase.from("quotes").update(payload).eq("id", editingQuote.id);
+    setSaving(false);
+    if (updError) { setErrorMsg(updError.message); return; }
+    setEditingQuote(null);
+    setEditingQuoteItems(null);
+    loadAll();
+  };
+
+  // ---- Incidentes ----
+  const saveIncident = async (payload) => {
+    setSaving(true);
+    if (editingIncident) {
+      const { data, error } = await supabase.from("incidents").update(payload).eq("id", editingIncident.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setIncidents((prev) => prev.map((i) => (i.id === data.id ? data : i)));
+      setEditingIncident(null);
+    } else {
+      const { data, error } = await supabase.from("incidents").insert({ ...payload, company_id: companyId, status: "abierto" }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setIncidents((prev) => [data, ...prev]);
+      setShowAddIncident(false);
+    }
+  };
+
+  const deleteIncident = async (id) => {
+    if (!window.confirm("¿Eliminar este incidente?")) return;
+    const { error } = await supabase.from("incidents").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setIncidents((prev) => prev.filter((i) => i.id !== id));
+    setIncidentDetail(null);
+  };
+
+  const markIncidentStatus = async (incident, status) => {
+    const { data, error } = await supabase.from("incidents").update({ status }).eq("id", incident.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setIncidents((prev) => prev.map((i) => (i.id === data.id ? data : i)));
+    setIncidentDetail((prev) => (prev ? data : prev));
+  };
+
+  const convertIncidentToOrder = (incident) => {
+    setOrderFromIncident({ incidentId: incident.id, title: incident.title, branch_id: incident.branch_id || "", equipment_id: incident.equipment_id || "" });
+    setIncidentDetail(null);
+  };
+
+  const convertIncidentToQuote = (incident) => {
+    setQuotePrefill({
+      incidentId: incident.id,
+      client_id: incident.client_id || "",
+      items: [{ product_id: "", description: incident.title, quantity: 1, unit_price: 0, is_taxable: true }],
+    });
+    setIncidentDetail(null);
+    setShowAddQuote(true);
+  };
+
+  const duplicateQuote = (quote, items) => {
+    setQuotePrefill({
+      client_id: quote.client_id,
+      items: items.map((it) => ({
+        product_id: it.product_id || "",
+        description: it.description,
+        quantity: it.quantity,
+        unit_price: it.unit_price,
+        is_taxable: it.is_taxable,
+        chapter: it.chapter || "",
+      })),
+    });
+    setQuoteDetail(null);
+    setShowAddQuote(true);
   };
 
   // ---- Técnicos ----
@@ -2163,12 +3081,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     { section: "Departamento Técnico" },
     { key: "orders", label: "Órdenes de trabajo", Icon: ClipboardList },
     ...(canManage ? [
+      { key: "incidents", label: "Incidentes", Icon: AlertTriangle },
       { key: "equipment", label: "Equipos", Icon: Settings2 },
       { key: "technicians", label: "Técnicos", Icon: Users },
       { key: "warranty", label: "Activos en Garantía", Icon: BadgeCheck },
       { key: "reports", label: "Reportes", Icon: BarChart3 },
     ] : []),
-    ...(canManage ? [{ section: "Comercial" }, { key: "clients", label: "Clientes", Icon: Users2 }, { key: "products", label: "Catálogo", Icon: Boxes }, { key: "suppliers", label: "Proveedores", Icon: Truck }, { key: "purchases", label: "Compras", Icon: ShoppingCart }, { key: "quotes", label: "Cotizaciones", Icon: ClipboardCheck }, { key: "invoices", label: "Facturación", Icon: Receipt }] : []),
+    ...(canManage ? [{ section: "Comercial" }, { key: "clients", label: "Clientes", Icon: Users2 }, { key: "products", label: "Catálogo", Icon: Boxes }, { key: "suppliers", label: "Proveedores", Icon: Truck }, { key: "purchases", label: "Compras", Icon: ShoppingCart }, { key: "quotes", label: "Cotizaciones", Icon: ClipboardCheck }, { key: "salesOrders", label: "Órdenes de Venta", Icon: Layers }, { key: "invoices", label: "Facturación", Icon: Receipt }] : []),
     ...(canManage ? [{ section: "Administración" }, { key: "branches", label: "Sucursales", Icon: Building2 }] : []),
     ...(isAdmin ? [{ key: "ncf", label: "Secuencias NCF", Icon: Hash }] : []),
     ...(isAdmin ? [{ key: "users", label: "Usuarios", Icon: ShieldCheck }] : []),
@@ -2193,7 +3112,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {item.section}
               </div>
             ) : (
-              <button key={item.key} onClick={() => setView(item.key)} className="w-full flex items-center gap-3 px-5 py-2.5 text-sm text-left"
+              <button key={item.key} onClick={() => changeView(item.key)} className="w-full flex items-center gap-3 px-5 py-2.5 text-sm text-left"
                 style={{ color: view === item.key ? C.text : C.muted, background: view === item.key ? C.panelAlt : "transparent", borderLeft: `2px solid ${view === item.key ? C.amber : "transparent"}` }}>
                 <item.Icon size={16} />
                 {item.label}
@@ -2331,7 +3250,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                             {s.label} <ArrowRight size={12} />
                           </button>
                         )}
-                        <button onClick={() => setDetailOrder(o)} title={isTecnico && o.status === "completada" ? "Ver nota y foto" : "Nota de cierre y foto"} style={{ color: o.resolution_notes || o.photo_url ? C.amber : C.muted }}>
+                        <button onClick={() => openOrderDetail(o)} title={isTecnico && o.status === "completada" ? "Ver nota y foto" : "Nota de cierre y foto"} style={{ color: o.resolution_notes || o.photo_url || orderAttachmentIds.has(o.id) ? C.amber : C.muted }}>
                           {o.photo_url ? <Paperclip size={14} /> : <FileText size={14} />}
                         </button>
                         {canManage && (
@@ -2345,6 +3264,42 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   );
                 })}
                 {filteredOrders.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Ninguna orden coincide con los filtros aplicados.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && canManage && view === "incidents" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{incidents.length} incidentes</div>
+                <button onClick={() => setShowAddIncident(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Reportar incidente
+                </button>
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-4">Incidente</div>
+                  <div className="col-span-2">Sucursal</div>
+                  <div className="col-span-2">Cliente</div>
+                  <div className="col-span-1">Prioridad</div>
+                  <div className="col-span-1">Fecha</div>
+                  <div className="col-span-2 text-right">Estado</div>
+                </div>
+                {incidents.map((inc) => {
+                  const s = INCIDENT_STATUS_CFG[inc.status] || INCIDENT_STATUS_CFG.abierto;
+                  const p = PRIORITY_CFG[inc.priority] || PRIORITY_CFG.media;
+                  return (
+                    <div key={inc.id} onClick={() => setIncidentDetail(inc)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${s.color}` }}>
+                      <div className="col-span-4 truncate">{inc.title}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(inc.branch_id)}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—"}</div>
+                      <div className="col-span-1"><Pill label={p.label} color={p.color} /></div>
+                      <div className="col-span-1 text-xs" style={{ color: C.muted }}>{fmtDate(inc.created_at?.slice(0, 10))}</div>
+                      <div className="col-span-2 text-right"><Pill label={s.label} color={s.color} /></div>
+                    </div>
+                  );
+                })}
+                {incidents.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay incidentes reportados.</div>}
               </div>
             </div>
           )}
@@ -2592,12 +3547,14 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && canManage && view === "clients" && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{clients.length} clientes{selectedClients.size > 0 ? ` · ${selectedClients.size} seleccionados` : ""}</div>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {filteredClients.length}{filteredClients.length !== clients.length ? ` de ${clients.length}` : ""} clientes{selectedClients.size > 0 ? ` · ${selectedClients.size} seleccionados` : ""}
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
-                      const list = selectedClients.size > 0 ? clients.filter((c) => selectedClients.has(c.id)) : clients;
+                      const list = selectedClients.size > 0 ? filteredClients.filter((c) => selectedClients.has(c.id)) : filteredClients;
                       printDocument("Clientes", listHtml("Listado de clientes", companyName, ["Cliente", "RNC/Cédula", "Teléfono", "Correo", "Dirección"], list.map((c) => [c.name, c.rnc_cedula, c.phone, c.email, c.address])));
                     }}
                     className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
@@ -2609,9 +3566,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </button>
                 </div>
               </div>
+              <div className="flex items-center gap-2 px-3 py-2 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <Search size={14} color={C.muted} />
+                <input value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} placeholder="Buscar por nombre, RNC, teléfono o correo..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+              </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input type="checkbox" checked={clients.length > 0 && selectedClients.size === clients.length} onChange={() => setSelectedClients(selectedClients.size === clients.length ? new Set() : new Set(clients.map((c) => c.id)))} />
+                  <input type="checkbox" checked={filteredClients.length > 0 && selectedClients.size === filteredClients.length} onChange={() => setSelectedClients(selectedClients.size === filteredClients.length ? new Set() : new Set(filteredClients.map((c) => c.id)))} />
                   <div className="flex-1 grid grid-cols-12 gap-2">
                     <div className="col-span-3">Cliente</div>
                     <div className="col-span-2">RNC / Cédula</div>
@@ -2621,7 +3582,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     <div className="col-span-1 text-right">Acciones</div>
                   </div>
                 </div>
-                {clients.map((c) => (
+                {filteredClients.map((c) => (
                   <div key={c.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <input type="checkbox" checked={selectedClients.has(c.id)} onChange={() => setSelectedClients((prev) => { const next = new Set(prev); next.has(c.id) ? next.delete(c.id) : next.add(c.id); return next; })} />
                     <div className="flex-1 grid grid-cols-12 gap-2 items-center">
@@ -2637,7 +3598,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     </div>
                   </div>
                 ))}
-                {clients.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay clientes registrados.</div>}
+                {filteredClients.length === 0 && (
+                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                    {clients.length === 0 ? "Todavía no hay clientes registrados." : "Ningún cliente coincide con la búsqueda."}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2715,12 +3680,14 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && canManage && view === "suppliers" && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{suppliers.length} proveedores{selectedSuppliers.size > 0 ? ` · ${selectedSuppliers.size} seleccionados` : ""}</div>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {filteredSuppliers.length}{filteredSuppliers.length !== suppliers.length ? ` de ${suppliers.length}` : ""} proveedores{selectedSuppliers.size > 0 ? ` · ${selectedSuppliers.size} seleccionados` : ""}
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
-                      const list = selectedSuppliers.size > 0 ? suppliers.filter((s) => selectedSuppliers.has(s.id)) : suppliers;
+                      const list = selectedSuppliers.size > 0 ? filteredSuppliers.filter((s) => selectedSuppliers.has(s.id)) : filteredSuppliers;
                       printDocument("Proveedores", listHtml("Listado de proveedores", companyName, ["Proveedor", "RNC", "Teléfono", "Correo"], list.map((s) => [s.name, s.rnc, s.phone, s.email])));
                     }}
                     className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
@@ -2732,8 +3699,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </button>
                 </div>
               </div>
+              <div className="flex items-center gap-2 px-3 py-2 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <Search size={14} color={C.muted} />
+                <input value={supplierSearch} onChange={(e) => setSupplierSearch(e.target.value)} placeholder="Buscar por nombre, RNC, teléfono o correo..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {suppliers.map((s) => (
+                {filteredSuppliers.map((s) => (
                   <div key={s.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -2752,7 +3723,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     </div>
                   </div>
                 ))}
-                {suppliers.length === 0 && <div className="text-sm" style={{ color: C.muted }}>Todavía no hay proveedores registrados.</div>}
+                {filteredSuppliers.length === 0 && (
+                  <div className="text-sm" style={{ color: C.muted }}>
+                    {suppliers.length === 0 ? "Todavía no hay proveedores registrados." : "Ningún proveedor coincide con la búsqueda."}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2786,7 +3761,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 </div>
                 {filteredPurchases.map((pu) => (
                   <div key={pu.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
+                    <div className="col-span-3 min-w-0">
+                      <div className="truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
+                      {pu.title && <div className="text-xs truncate" style={{ color: C.muted }}>{pu.title}</div>}
+                    </div>
                     <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
                     <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
                     <div className="col-span-2 text-right font-mono">{fmtMoney(pu.total)}</div>
@@ -2878,7 +3856,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   const s = QUOTE_STATUS_CFG[q.status] || QUOTE_STATUS_CFG.pendiente;
                   return (
                     <div key={q.id} onClick={() => openQuoteDetail(q)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-2 font-mono text-xs">{q.quote_number}</div>
+                      <div className="col-span-2 min-w-0">
+                        <div className="font-mono text-xs">{q.quote_number}</div>
+                        {q.title && <div className="text-xs truncate" style={{ color: C.muted }}>{q.title}</div>}
+                      </div>
                       <div className="col-span-3 truncate">{clients.find((c) => c.id === q.client_id)?.name || "—"}</div>
                       <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(q.quote_date)}</div>
                       <div className="col-span-2 text-right font-mono">{fmtMoney(q.total)}</div>
@@ -2895,13 +3876,54 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && canManage && view === "salesOrders" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{salesOrders.length} órdenes de venta</div>
+              </div>
+              <div className="text-xs mb-3" style={{ color: C.muted }}>
+                Las órdenes de venta se generan desde una cotización aprobada (botón "Pasar a Orden de Venta") — representan un trabajo o venta ya en ejecución, antes de facturarse.
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Orden</div>
+                  <div className="col-span-3">Cliente</div>
+                  <div className="col-span-2">Fecha</div>
+                  <div className="col-span-2 text-right">Total</div>
+                  <div className="col-span-2 text-right">Estado</div>
+                </div>
+                {salesOrders.map((o) => {
+                  const s = SALES_ORDER_STATUS_CFG[o.status] || SALES_ORDER_STATUS_CFG.en_proceso;
+                  return (
+                    <div key={o.id} onClick={() => openSalesOrderDetail(o)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-3 min-w-0">
+                        <div className="font-mono text-xs">{o.order_number}</div>
+                        {o.title && <div className="text-xs truncate" style={{ color: C.muted }}>{o.title}</div>}
+                      </div>
+                      <div className="col-span-3 truncate">{clients.find((c) => c.id === o.client_id)?.name || "—"}</div>
+                      <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(o.order_date)}</div>
+                      <div className="col-span-2 text-right font-mono">{fmtMoney(o.total)}</div>
+                      <div className="col-span-2 text-right"><Pill label={s.label} color={s.color} /></div>
+                    </div>
+                  );
+                })}
+                {salesOrders.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay órdenes de venta generadas. Aprueba una cotización y dale "Pasar a Orden de Venta".</div>}
+              </div>
+            </div>
+          )}
+
           {!loadingScope && canManage && view === "invoices" && (
             <div>
               <div className="flex justify-between items-center mb-3">
                 <div className="text-sm" style={{ color: C.muted }}>{filteredInvoices.length}{filteredInvoices.length !== invoices.length ? ` de ${invoices.length}` : ""} facturas emitidas</div>
-                <button onClick={() => setShowAddInvoice(true)} disabled={clients.length === 0 || ncfSequences.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
-                  <Plus size={14} /> Nueva factura
-                </button>
+                <div className="flex gap-2">
+                  <button onClick={() => setShowStatement(true)} disabled={clients.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                    <FileText size={14} /> Estado de cuenta
+                  </button>
+                  <button onClick={() => setShowAddInvoice(true)} disabled={clients.length === 0 || ncfSequences.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                    <Plus size={14} /> Nueva factura
+                  </button>
+                </div>
               </div>
               {clients.length === 0 && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un cliente antes de facturar.</div>}
               {ncfSequences.length === 0 && isAdmin && <div className="text-sm mb-3" style={{ color: C.muted }}>Configura una secuencia NCF antes de facturar.</div>}
@@ -2915,24 +3937,34 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <option value="emitida">Emitida</option>
                   <option value="anulada">Anulada</option>
                 </select>
+                <select value={invoicePaymentFilter} onChange={(e) => setInvoicePaymentFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los estados de cobro</option>
+                  {Object.entries(PAYMENT_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
               </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">NCF</div>
+                  <div className="col-span-2">NCF</div>
                   <div className="col-span-3">Cliente</div>
                   <div className="col-span-2">Fecha</div>
                   <div className="col-span-2 text-right">Total</div>
-                  <div className="col-span-2 text-right">Estado</div>
+                  <div className="col-span-3 text-right">Cobro</div>
                 </div>
-                {filteredInvoices.map((inv) => (
-                  <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3 font-mono text-xs">{inv.ncf}</div>
-                    <div className="col-span-3 truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
-                    <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
-                    <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
-                    <div className="col-span-2 text-right"><Pill label={inv.status === "anulada" ? "Anulada" : "Emitida"} color={inv.status === "anulada" ? C.red : C.green} /></div>
-                  </div>
-                ))}
+                {filteredInvoices.map((inv) => {
+                  const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
+                  return (
+                    <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${inv.status === "anulada" ? C.red : "transparent"}` }}>
+                      <div className="col-span-2 min-w-0">
+                        <div className="font-mono text-xs">{inv.ncf}</div>
+                        {inv.title && <div className="text-xs truncate" style={{ color: C.muted }}>{inv.title}</div>}
+                      </div>
+                      <div className="col-span-3 truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
+                      <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
+                      <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
+                      <div className="col-span-3 text-right"><Pill label={inv.status === "anulada" ? "Anulada" : payCfg.label} color={inv.status === "anulada" ? C.red : payCfg.color} /></div>
+                    </div>
+                  );
+                })}
                 {filteredInvoices.length === 0 && (
                   <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
                     {invoices.length === 0 ? "Todavía no hay facturas emitidas." : "Ninguna factura coincide con la búsqueda."}
@@ -2987,13 +4019,36 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
       {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowOrderForm(false)} onSave={createOrder} saving={saving} />}
       {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} initial={editingOrder} onClose={() => setEditingOrder(null)} onSave={updateOrder} saving={saving} />}
+      {orderFromIncident && (
+        <OrderFormModal
+          branches={branches}
+          equipment={equipment}
+          technicians={technicians}
+          initial={{ title: orderFromIncident.title, branch_id: orderFromIncident.branch_id, equipment_id: orderFromIncident.equipment_id }}
+          onClose={() => setOrderFromIncident(null)}
+          onSave={(payload, files) => createOrder(payload, files, orderFromIncident.incidentId)}
+          saving={saving}
+        />
+      )}
+      {orderFromSalesOrder && (
+        <OrderFormModal
+          branches={branches}
+          equipment={equipment}
+          technicians={technicians}
+          initial={{ title: orderFromSalesOrder.title, branch_id: orderFromSalesOrder.branch_id, equipment_id: orderFromSalesOrder.equipment_id }}
+          onClose={() => setOrderFromSalesOrder(null)}
+          onSave={(payload, files) => createOrder(payload, files, null, orderFromSalesOrder.salesOrderId)}
+          saving={saving}
+        />
+      )}
       {detailOrder && (
         <OrderDetailModal
           order={detailOrder}
+          attachments={detailOrderAttachments}
           branchName={branchName}
           equipName={equipName}
           techName={techName}
-          onClose={() => setDetailOrder(null)}
+          onClose={() => { setDetailOrder(null); setDetailOrderAttachments([]); }}
           onSave={saveOrderDetail}
           saving={saving}
           readOnly={isTecnico && detailOrder.status === "completada"}
@@ -3058,8 +4113,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
         <QuoteFormModal
           clients={clients}
           products={products}
-          onClose={() => setShowAddQuote(false)}
-          onSave={createQuote}
+          prefill={quotePrefill}
+          onClose={() => { setShowAddQuote(false); setQuotePrefill(null); }}
+          onSave={(payload, items) => createQuote(payload, items, quotePrefill?.incidentId)}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}
         />
@@ -3070,19 +4126,90 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           items={quoteDetail.items}
           clientName={clients.find((c) => c.id === quoteDetail.quote.client_id)?.name || "—"}
           companyName={companyName}
+          orderInfo={salesOrders.find((o) => o.quote_id === quoteDetail.quote.id) || null}
           onClose={() => setQuoteDetail(null)}
           onMarkStatus={markQuoteStatus}
           onConvert={convertQuoteToInvoice}
+          onConvertToOrder={convertQuoteToOrder}
+          onEdit={openEditQuote}
+          onDuplicate={duplicateQuote}
         />
       )}
+      {salesOrderDetail && (
+        <SalesOrderDetailModal
+          order={salesOrderDetail.order}
+          items={salesOrderDetail.items}
+          clientName={clients.find((c) => c.id === salesOrderDetail.order.client_id)?.name || "—"}
+          companyName={companyName}
+          workOrderInfo={orders.find((o) => o.id === salesOrderDetail.order.work_order_id) || null}
+          onClose={() => setSalesOrderDetail(null)}
+          onGenerateInvoice={generateInvoiceFromOrder}
+          onGenerateWorkOrder={convertSalesOrderToWorkOrder}
+          onCancel={cancelSalesOrder}
+        />
+      )}
+      {editingQuote && (
+        <QuoteFormModal
+          clients={clients}
+          products={products}
+          initial={editingQuote}
+          initialItems={editingQuoteItems}
+          onClose={() => { setEditingQuote(null); setEditingQuoteItems(null); }}
+          onSave={updateQuote}
+          saving={saving}
+          onRequestNewClient={() => setShowAddClient(true)}
+        />
+      )}
+      {showAddIncident && (
+        <IncidentFormModal
+          branches={branches}
+          equipment={equipment}
+          clients={clients}
+          onClose={() => setShowAddIncident(false)}
+          onSave={saveIncident}
+          saving={saving}
+          onRequestNewClient={() => setShowAddClient(true)}
+        />
+      )}
+      {editingIncident && (
+        <IncidentFormModal
+          branches={branches}
+          equipment={equipment}
+          clients={clients}
+          initial={editingIncident}
+          onClose={() => setEditingIncident(null)}
+          onSave={saveIncident}
+          saving={saving}
+          onRequestNewClient={() => setShowAddClient(true)}
+        />
+      )}
+      {incidentDetail && (
+        <IncidentDetailModal
+          incident={incidentDetail}
+          branchName={branchName}
+          equipName={equipName}
+          clientName={(id) => clients.find((c) => c.id === id)?.name || "—"}
+          orders={orders}
+          quotes={quotes}
+          onClose={() => setIncidentDetail(null)}
+          onMarkStatus={markIncidentStatus}
+          onConvertOrder={convertIncidentToOrder}
+          onConvertQuote={convertIncidentToQuote}
+          onDelete={deleteIncident}
+        />
+      )}
+      {showStatement && <StatementModal clients={clients} invoices={invoices} companyName={companyName} onClose={() => setShowStatement(false)} />}
       {invoiceDetail && (
         <InvoiceDetailModal
           invoice={invoiceDetail.invoice}
           items={invoiceDetail.items}
+          payments={invoiceDetail.payments}
           clientName={clients.find((c) => c.id === invoiceDetail.invoice.client_id)?.name || "—"}
           companyName={companyName}
           onClose={() => setInvoiceDetail(null)}
           onVoid={voidInvoice}
+          onRegisterPayment={registerPayment}
+          onDeletePayment={deletePayment}
         />
       )}
       {showInvite && (
