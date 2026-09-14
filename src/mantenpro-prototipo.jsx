@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
   CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut,
-  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet
+  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet, Package, UserCheck, MessageCircle, Bell, BellOff
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend
@@ -119,6 +119,46 @@ const STATUS_CFG = {
   completada: { label: "Completada", color: C.green },
 };
 
+const ACTIVITY_TABLE_LABELS = {
+  work_orders: "Órdenes de trabajo",
+  incidents: "Incidentes",
+  equipment: "Equipos",
+  technicians: "Técnicos",
+  locations: "Ubicaciones",
+  clients: "Clientes",
+  products: "Productos",
+  client_assets: "Activos en garantía",
+  suppliers: "Proveedores",
+  purchases: "Facturas de proveedor",
+  other_expenses: "Otros gastos",
+  chart_of_accounts: "Catálogo de cuentas",
+  tax_rates: "Tasas impositivas",
+  cash_sessions: "Caja",
+  ncf_sequences: "Secuencia NCF",
+  invoices: "Facturación",
+  credit_notes: "Notas de crédito",
+  quotes: "Cotizaciones",
+  sales_orders: "Órdenes de venta",
+  tools: "Herramientas",
+  inventory_materials: "Materiales sobrantes",
+  branches: "Sucursales",
+  checklist_templates: "Checklists",
+  profiles: "Usuarios",
+  invites: "Invitaciones",
+};
+const ACTIVITY_ACTION_LABELS = {
+  INSERT: { label: "Creado", color: "#4CAF6D" },
+  UPDATE: { label: "Actualizado", color: "#F2A93B" },
+  DELETE: { label: "Eliminado", color: "#E8654F" },
+};
+
+const TOOL_STATUS_CFG = {
+  disponible: { label: "Disponible", color: C.green },
+  asignada: { label: "Asignada", color: C.blue },
+  mantenimiento: { label: "En mantenimiento", color: C.amber },
+  baja: { label: "Dada de baja", color: C.red },
+};
+
 const PRIORITY_CFG = {
   baja: { label: "Baja", color: C.muted },
   media: { label: "Media", color: C.amber },
@@ -134,9 +174,12 @@ const ROLE_CFG = {
 };
 
 const ROLE_DEFAULT_PERMISSIONS = {
-  supervisor: Object.fromEntries(["dashboard", "agenda", "orders", "incidents", "equipment", "reports", "checklists", "technicians", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "caja", "branches"].map((k) => [k, "edit"])),
+  supervisor: {
+    ...Object.fromEntries(["dashboard", "agenda", "orders", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches"].map((k) => [k, "edit"])),
+    activityLog: "view",
+  },
   vendedor: { dashboard: "edit", agenda: "edit", orders: "edit", quotes: "edit", invoices: "edit", caja: "edit" },
-  tecnico: { dashboard: "edit", agenda: "edit", orders: "edit" },
+  tecnico: { dashboard: "edit", agenda: "edit", orders: "edit", tools: "view", incidents: "view" },
 };
 
 const PERMISSION_CATALOG = [
@@ -151,6 +194,9 @@ const PERMISSION_CATALOG = [
     { key: "reports", label: "Reportes" },
     { key: "checklists", label: "Checklists" },
     { key: "technicians", label: "Técnicos" },
+    { key: "tools", label: "Herramientas" },
+    { key: "materials", label: "Materiales sobrantes" },
+    { key: "maintenanceSchedule", label: "Mantenimiento programado" },
   ] },
   { section: "Catálogo", items: [
     { key: "clients", label: "Clientes" },
@@ -172,6 +218,7 @@ const PERMISSION_CATALOG = [
     { key: "salesOrders", label: "Órdenes de Venta" },
     { key: "invoices", label: "Facturación" },
     { key: "creditNotes", label: "Notas de Crédito" },
+    { key: "recurringContracts", label: "Contratos recurrentes" },
     { key: "caja", label: "Caja" },
   ] },
   { section: "Administración / Contable", items: [
@@ -183,6 +230,9 @@ const PERMISSION_CATALOG = [
     { key: "fiscalReports", label: "Reportes fiscales" },
     { key: "ncf", label: "Secuencia NCF" },
     { key: "users", label: "Usuarios" },
+    { key: "activityLog", label: "Historial de actividad" },
+    { key: "financialReports", label: "Reportes financieros" },
+    { key: "bankReconciliation", label: "Conciliación bancaria" },
   ] },
 ];
 
@@ -245,6 +295,83 @@ function Pill({ label, color }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Historial de actividad por registro (reutilizable en cualquier modal)
+// ---------------------------------------------------------------------------
+const HISTORY_FIELD_LABELS = {
+  status: "Estado", payment_status: "Estado de pago", technician_id: "Técnico", branch_id: "Sucursal",
+  client_id: "Cliente", supplier_id: "Proveedor", equipment_id: "Equipo", location_id: "Ubicación",
+  priority: "Prioridad", findings: "Hallazgos", solution: "Solución", notes: "Notas",
+  amount: "Monto", amount_paid: "Monto pagado", total: "Total", subtotal: "Subtotal",
+  quantity: "Cantidad", price: "Precio", category: "Categoría", item_type: "Tipo",
+  name: "Nombre", title: "Título", description: "Descripción", email: "Correo", role: "Rol",
+  specialty: "Especialidad", can_create_incidents: "Puede reportar incidentes", serial_number: "No. de serie",
+  quote_id: "Cotización vinculada", work_order_id: "Orden vinculada", invoice_id: "Factura vinculada",
+  is_active: "Activo", account_type: "Tipo de cuenta", code: "Código", rnc: "RNC/Cédula", phone: "Teléfono",
+  address: "Dirección", warranty_until: "Garantía hasta", unit: "Unidad", reported_by: "Reportado por",
+};
+
+const summarizeHistoryEntry = (l, resolvers = {}, statusLabels = {}) => {
+  if (l.action === "INSERT") return "Creado";
+  if (l.action === "DELETE") return "Eliminado";
+  const before = l.old_data || {};
+  const after = l.new_data || {};
+  const skip = new Set(["updated_at", "created_at", "id", "company_id"]);
+  const keys = Array.from(new Set([...Object.keys(before), ...Object.keys(after)]));
+  const changed = keys.filter((k) => !skip.has(k) && JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+  if (changed.length === 0) return "Actualizado";
+  return changed.slice(0, 3).map((k) => {
+    const label = HISTORY_FIELD_LABELS[k] || k;
+    let val = after[k];
+    if (k === "status" && statusLabels[val]) val = statusLabels[val];
+    else if (resolvers[k]) val = resolvers[k](val);
+    if (val === null || val === undefined || val === "") val = "—";
+    if (typeof val === "boolean") val = val ? "Sí" : "No";
+    return `${label}: ${val}`;
+  }).join(" · ");
+};
+
+function ActivityHistorySection({ tableName, recordId, resolvers, statusLabels, title }) {
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    supabase.from("activity_log").select("*").eq("table_name", tableName).eq("record_id", recordId)
+      .order("changed_at", { ascending: false }).limit(50)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (!error) setHistory(data || []);
+        setLoading(false);
+      });
+    return () => { active = false; };
+  }, [tableName, recordId]);
+
+  return (
+    <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>{title || "Historial"}</div>
+      {loading ? (
+        <div className="text-xs" style={{ color: C.muted }}>Cargando...</div>
+      ) : history.length === 0 ? (
+        <div className="text-xs" style={{ color: C.muted }}>Sin actividad registrada todavía.</div>
+      ) : (
+        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+          {history.map((l) => {
+            const dt = new Date(l.changed_at);
+            return (
+              <div key={l.id} className="text-xs flex items-start gap-2" style={{ color: C.muted }}>
+                <span className="flex-shrink-0 font-mono" style={{ color: C.text }}>{dt.toLocaleDateString("es-DO")} {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</span>
+                <span>· {l.changed_by_email || "—"} · {summarizeHistoryEntry(l, resolvers, statusLabels)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function KpiCard({ label, value, accent, sub }) {
   return (
     <div className="p-4 flex-1 min-w-[150px]" style={{ background: C.panel, border: `1px solid ${C.border}`, borderLeftWidth: 3, borderLeftColor: accent }}>
@@ -255,10 +382,55 @@ function KpiCard({ label, value, accent, sub }) {
   );
 }
 
+function PushSetupInline({ onEnable }) {
+  const [activating, setActivating] = useState(false);
+  const activate = async () => {
+    setActivating(true);
+    await onEnable(VAPID_PUBLIC_KEY);
+    setActivating(false);
+  };
+  return (
+    <div>
+      <div className="text-xs mb-2" style={{ color: C.muted }}>Recibe avisos aunque no tengas la app abierta (nueva orden asignada, incidente, etc.) en este dispositivo.</div>
+      <button
+        onClick={activate}
+        disabled={activating}
+        className="text-xs px-3 py-1.5 font-semibold disabled:opacity-50"
+        style={{ background: C.amber, color: "#1A1500" }}
+      >
+        {activating ? "Activando..." : "Activar notificaciones push"}
+      </button>
+    </div>
+  );
+}
+
+function UsageQuickUpdate({ item, onUpdate }) {
+  const [value, setValue] = useState(item.current_usage ?? "");
+  const [saving, setSaving] = useState(false);
+  const dueByUsage = item.usage_interval && item.current_usage != null &&
+    (Number(item.current_usage) - Number(item.usage_last_maintenance || 0)) >= Number(item.usage_interval);
+  const save = async () => {
+    if (value === "") return;
+    setSaving(true);
+    await onUpdate(Number(value));
+    setSaving(false);
+  };
+  return (
+    <div className="flex items-center gap-2 mt-1 flex-wrap">
+      <span className="text-xs" style={{ color: dueByUsage ? C.red : C.muted }}>
+        {item.current_usage ?? 0} / próx. {Number(item.usage_last_maintenance || 0) + Number(item.usage_interval || 0)} {item.usage_unit}
+        {dueByUsage ? " (vencido por uso)" : ""}
+      </span>
+      <input type="number" step="0.1" value={value} onChange={(e) => setValue(e.target.value)} className="w-20 px-1.5 py-1 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }} placeholder="Lectura" />
+      <button onClick={save} disabled={saving} className="text-xs px-2 py-1 disabled:opacity-50" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Actualizar</button>
+    </div>
+  );
+}
+
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 px-4" style={{ background: "rgba(0,0,0,0.6)" }} onClick={onClose}>
-      <div className={`w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[85vh] overflow-y-auto`} style={{ background: C.panel, border: `1px solid ${C.border}` }} onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 px-4" style={{ background: "rgba(0,0,0,0.6)" }}>
+      <div className={`w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[85vh] overflow-y-auto`} style={{ background: C.panel, border: `1px solid ${C.border}` }}>
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
           <h3 className="font-semibold text-base" style={{ color: C.text }}>{title}</h3>
           <button onClick={onClose} className="p-1" style={{ color: C.muted }}><X size={18} /></button>
@@ -602,13 +774,14 @@ function InviteAcceptScreen({ session, inviteInfo, onDone, onSignOut }) {
 // ---------------------------------------------------------------------------
 // Modales: sucursal / técnico / equipo / ubicación (con soporte de edición)
 // ---------------------------------------------------------------------------
-function OrderFormModal({ branches, equipment, technicians, initial, attachments, onDeleteAttachment, onClose, onSave, saving }) {
+function OrderFormModal({ branches, equipment, technicians, initial, initialExtraTechIds, attachments, onDeleteAttachment, onClose, onSave, saving }) {
   const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
   const [type, setType] = useState(initial?.type || "preventivo");
   const [priority, setPriority] = useState(initial?.priority || "media");
   const [title, setTitle] = useState(initial?.title || "");
   const [equipmentId, setEquipmentId] = useState(initial?.equipment_id || "");
   const [technicianId, setTechnicianId] = useState(initial?.technician_id || "");
+  const [extraTechIds, setExtraTechIds] = useState(initialExtraTechIds || []);
   const [scheduled, setScheduled] = useState(initial?.scheduled || "");
   const [files, setFiles] = useState([]);
 
@@ -616,9 +789,11 @@ function OrderFormModal({ branches, equipment, technicians, initial, attachments
   const branchTechs = technicians.filter((t) => t.branch_id === branchId);
   const isImage = (name) => /\.(png|jpe?g|gif|webp)$/i.test(name || "");
 
+  const toggleExtraTech = (id) => setExtraTechIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+
   const submit = () => {
     if (!title.trim() || !branchId || !scheduled) return;
-    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled }, files);
+    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled }, files, extraTechIds.filter((id) => id !== technicianId));
   };
 
   return (
@@ -643,7 +818,7 @@ function OrderFormModal({ branches, equipment, technicians, initial, attachments
       </div>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Sucursal">
-          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => { setBranchId(e.target.value); setEquipmentId(""); setTechnicianId(""); }}>
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => { setBranchId(e.target.value); setEquipmentId(""); setTechnicianId(""); setExtraTechIds([]); }}>
             {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </Field>
@@ -653,13 +828,25 @@ function OrderFormModal({ branches, equipment, technicians, initial, attachments
             {branchEquip.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
           </select>
         </Field>
-        <Field label="Técnico asignado">
+        <Field label="Técnico principal">
           <select className={inputClass} style={inputStyle} value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
             <option value="">Sin asignar</option>
             {branchTechs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
       </div>
+      {branchTechs.length > 0 && (
+        <Field label="Técnicos adicionales (opcional)">
+          <div className="flex flex-wrap gap-2">
+            {branchTechs.filter((t) => t.id !== technicianId).map((t) => (
+              <label key={t.id} className="flex items-center gap-1.5 text-sm px-3 py-1.5 cursor-pointer" style={{ border: `1px solid ${C.border}`, background: extraTechIds.includes(t.id) ? C.panelAlt : "transparent", color: C.text }}>
+                <input type="checkbox" checked={extraTechIds.includes(t.id)} onChange={() => toggleExtraTech(t.id)} />
+                {t.name}
+              </label>
+            ))}
+          </div>
+        </Field>
+      )}
       {initial?.id && attachments && attachments.length > 0 && (
         <Field label="Archivos de apoyo actuales">
           <div className="grid grid-cols-2 gap-2">
@@ -698,6 +885,7 @@ function BranchFormModal({ initial, onClose, onSave, saving }) {
       <Field label="Ciudad">
         <input className={inputClass} style={inputStyle} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Ej. Punta Cana" />
       </Field>
+      {initial && <ActivityHistorySection tableName="branches" recordId={initial.id} title="Historial de esta sucursal" />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={() => name.trim() && onSave(name.trim(), city.trim())} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -712,22 +900,34 @@ function TechFormModal({ branches, initial, onClose, onSave, saving }) {
   const [name, setName] = useState(initial?.name || "");
   const [specialty, setSpecialty] = useState(initial?.specialty || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
+  const [canCreateIncidents, setCanCreateIncidents] = useState(initial?.can_create_incidents || false);
+  const [hourlyRate, setHourlyRate] = useState(initial?.hourly_rate ?? "");
   return (
     <Modal title={initial ? "Editar técnico" : "Agregar técnico"} onClose={onClose}>
       <Field label="Nombre completo">
         <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. José Manuel Cruz" />
       </Field>
-      <Field label="Especialidad">
-        <input className={inputClass} style={inputStyle} value={specialty} onChange={(e) => setSpecialty(e.target.value)} placeholder="Ej. Refrigeración industrial" />
-      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Especialidad">
+          <input className={inputClass} style={inputStyle} value={specialty} onChange={(e) => setSpecialty(e.target.value)} placeholder="Ej. Refrigeración industrial" />
+        </Field>
+        <Field label="Tarifa por hora (RD$, opcional)">
+          <input type="number" step="0.01" min="0" className={inputClass} style={inputStyle} value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} placeholder="Ej. 350" />
+        </Field>
+      </div>
       <Field label="Sucursal">
         <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
           {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </Field>
+      <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
+        <input type="checkbox" checked={canCreateIncidents} onChange={(e) => setCanCreateIncidents(e.target.checked)} />
+        Puede reportar incidentes desde la app
+      </label>
+      {initial && <ActivityHistorySection tableName="technicians" recordId={initial.id} title="Historial de este técnico" resolvers={{ branch_id: (id) => branches.find((b) => b.id === id)?.name }} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
-        <button onClick={() => name.trim() && branchId && onSave(name.trim(), specialty.trim(), branchId)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+        <button onClick={() => name.trim() && branchId && onSave(name.trim(), specialty.trim(), branchId, canCreateIncidents, hourlyRate === "" ? null : Number(hourlyRate))} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
           {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar"}
         </button>
       </div>
@@ -735,7 +935,7 @@ function TechFormModal({ branches, initial, onClose, onSave, saving }) {
   );
 }
 
-function EquipmentFormModal({ branches, locations, initial, onClose, onSave, saving, onRequestNewLocation }) {
+function EquipmentFormModal({ branches, locations, technicians, initial, onClose, onSave, saving, onRequestNewLocation }) {
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "");
   const [brand, setBrand] = useState(initial?.brand || "");
@@ -744,14 +944,28 @@ function EquipmentFormModal({ branches, locations, initial, onClose, onSave, sav
   const [installedAt, setInstalledAt] = useState(initial?.installed_at || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
   const [locationId, setLocationId] = useState(initial?.location_id || "");
+  const [maintenanceFreq, setMaintenanceFreq] = useState(initial?.maintenance_frequency_days ?? "");
+  const [nextMaintenance, setNextMaintenance] = useState(initial?.next_maintenance_date || "");
+  const [defaultTechId, setDefaultTechId] = useState(initial?.default_technician_id || "");
+  const [usageUnit, setUsageUnit] = useState(initial?.usage_unit || "");
+  const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
+  const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
 
   const branchLocations = locations.filter((l) => l.branch_id === branchId);
+  const branchTechs = technicians.filter((t) => t.branch_id === branchId);
 
   const submit = () => {
     if (!name.trim() || !branchId) return;
     onSave({
       name: name.trim(), type: type.trim() || null, brand: brand.trim() || null, model: model.trim() || null,
       serial_number: serial.trim() || null, installed_at: installedAt || null, branch_id: branchId, location_id: locationId || null,
+      maintenance_frequency_days: maintenanceFreq === "" ? null : Number(maintenanceFreq),
+      next_maintenance_date: nextMaintenance || null,
+      default_technician_id: defaultTechId || null,
+      usage_unit: usageUnit || null,
+      current_usage: currentUsage === "" ? null : Number(currentUsage),
+      usage_interval: usageInterval === "" ? null : Number(usageInterval),
+      usage_last_maintenance: initial?.usage_last_maintenance ?? null,
     });
   };
 
@@ -799,6 +1013,42 @@ function EquipmentFormModal({ branches, locations, initial, onClose, onSave, sav
           </div>
         </Field>
       </div>
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Plan de mantenimiento preventivo (opcional)</div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Frecuencia (días)">
+          <input type="number" min="1" className={inputClass} style={inputStyle} value={maintenanceFreq} onChange={(e) => setMaintenanceFreq(e.target.value)} placeholder="Ej. 30, 90, 180" />
+        </Field>
+        <Field label="Próximo mantenimiento">
+          <input type="date" className={inputClass} style={inputStyle} value={nextMaintenance} onChange={(e) => setNextMaintenance(e.target.value)} />
+        </Field>
+        <Field label="Técnico por defecto">
+          <select className={inputClass} style={inputStyle} value={defaultTechId} onChange={(e) => setDefaultTechId(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {branchTechs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Si dejas la frecuencia en blanco, este equipo no aparecerá en "Mantenimiento programado".</div>
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Mantenimiento por uso (horómetro / kilometraje, opcional)</div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Unidad de uso">
+          <select className={inputClass} style={inputStyle} value={usageUnit} onChange={(e) => setUsageUnit(e.target.value)}>
+            <option value="">Sin seguimiento por uso</option>
+            <option value="horas">Horas (horómetro)</option>
+            <option value="km">Kilómetros</option>
+          </select>
+        </Field>
+        <Field label={`Lectura actual${usageUnit ? ` (${usageUnit})` : ""}`}>
+          <input type="number" min="0" step="0.1" disabled={!usageUnit} className={inputClass} style={inputStyle} value={currentUsage} onChange={(e) => setCurrentUsage(e.target.value)} placeholder="Ej. 1250" />
+        </Field>
+        <Field label="Cada cuántas unidades">
+          <input type="number" min="1" disabled={!usageUnit} className={inputClass} style={inputStyle} value={usageInterval} onChange={(e) => setUsageInterval(e.target.value)} placeholder="Ej. 500" />
+        </Field>
+      </div>
+      {initial?.usage_last_maintenance != null && usageUnit && (
+        <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Último mantenimiento generado a las/los {initial.usage_last_maintenance} {usageUnit}. Próximo a las/los {Number(initial.usage_last_maintenance) + (Number(usageInterval) || 0)} {usageUnit}.</div>
+      )}
+      {initial && <ActivityHistorySection tableName="equipment" recordId={initial.id} title="Historial de este equipo" resolvers={{ branch_id: (id) => branches.find((b) => b.id === id)?.name, default_technician_id: (id) => branchTechs.find((t) => t.id === id)?.name }} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -865,6 +1115,7 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
       <Field label="Dirección">
         <input className={inputClass} style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Ej. Av. 27 de Febrero, Santo Domingo" />
       </Field>
+      {initial && <ActivityHistorySection tableName="clients" recordId={initial.id} title="Historial de este cliente" />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -876,6 +1127,20 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
 }
 
 const fmtMoney = (n) => `RD$ ${Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Clave pública VAPID del servidor de notificaciones push — es la misma para toda la
+// plataforma multi-empresa (identifica al servidor que envía, no a una empresa o usuario).
+// No es secreta; es seguro dejarla fija aquí.
+const VAPID_PUBLIC_KEY = "BBtlXeiE7ztiQ_3JsP0kQsF2Mfrb2b19ZEhrkQxZ5G8pcYLnDbQQgNKkYa01KiSvynyaAnLT7DSZ9hI5MOKmFtk";
+
+const waLink = (phone, text) => {
+  let digits = (phone || "").replace(/\D/g, "");
+  if (digits.length === 10) digits = `1${digits}`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
+};
+const mailtoLink = (email, subject, text) => `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+const invoiceReminderText = (companyName, clientName, inv, balance, days) =>
+  `Hola ${clientName}, le saluda ${companyName}. Le recordamos que tiene un saldo pendiente de ${fmtMoney(balance)} correspondiente a la factura NCF ${inv.ncf || inv.id} con fecha ${fmtDate(inv.invoice_date)} (${days} días de emitida). Agradecemos su pronto pago. Cualquier duda, quedamos atentos.`;
 
 // Agrupa las líneas de un documento por "capítulo" (sección), calculando el subtotal de cada grupo
 function groupItemsByChapter(items, getAmount) {
@@ -1073,12 +1338,14 @@ function checklistPrintHtml({ companyName, order, branchName, equipName, techNam
   `;
 }
 
-function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, discountPct, notes, retainedLabel, retainedAmount, legalNote }) {
+function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, discountPct, notes, retainedLabel, retainedAmount, legalNote, currency, foreignTotal, exchangeRate }) {
+  const isUsd = currency === "USD";
+  const fmtItem = (n) => isUsd ? `US$ ${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : fmtMoney(n);
   const groups = groupItemsByChapter(items, (it) => Number(it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost) ?? 0));
   const showChapters = groups.length > 1 || (groups[0] && groups[0].chapter !== "General");
-  const rowHtml = (it) => `<tr><td>${it.description || ""}${it.is_taxable ? " <span class='muted'>(ITBIS)</span>" : ""}</td><td style="text-align:right">${it.quantity}</td><td style="text-align:right">${fmtMoney(it.unit_price ?? it.unit_cost)}</td><td style="text-align:right">${fmtMoney((it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost)))}</td></tr>`;
+  const rowHtml = (it) => `<tr><td>${it.description || ""}${it.is_taxable ? " <span class='muted'>(ITBIS)</span>" : ""}</td><td style="text-align:right">${it.quantity}</td><td style="text-align:right">${fmtItem(it.unit_price ?? it.unit_cost)}</td><td style="text-align:right">${fmtItem((it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost)))}</td></tr>`;
   const rows = showChapters
-    ? groups.map((g) => `<tr><td colspan="4" style="background:#f2f2f2;font-weight:bold">${g.chapter} <span style="font-weight:normal;float:right">${fmtMoney(g.subtotal)}</span></td></tr>${g.items.map(rowHtml).join("")}`).join("")
+    ? groups.map((g) => `<tr><td colspan="4" style="background:#f2f2f2;font-weight:bold">${g.chapter} <span style="font-weight:normal;float:right">${fmtItem(g.subtotal)}</span></td></tr>${g.items.map(rowHtml).join("")}`).join("")
     : items.map(rowHtml).join("");
   return `
     <div class="header-row">
@@ -1093,6 +1360,7 @@ function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, da
       <div><span>ITBIS</span><span>${fmtMoney(itbis)}</span></div>
       ${retainedAmount ? `<div><span>${retainedLabel}</span><span>-${fmtMoney(retainedAmount)}</span></div>` : ""}
       <div class="total"><span>Total</span><span>${fmtMoney(total)}</span></div>
+      ${isUsd && foreignTotal ? `<div class="muted" style="text-align:right;margin-top:2px">≈ US$ ${Number(foreignTotal).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (tasa RD$ ${exchangeRate} por US$1)</div>` : ""}
     </div>
     ${legalNote ? `<div class="muted" style="margin-top:6px;font-weight:bold">${legalNote}</div>` : ""}
     ${notes ? `<div class="muted" style="margin-top:14px">Notas: ${notes}</div>` : ""}
@@ -1138,7 +1406,7 @@ const addMonths = (dateStr, months) => {
 };
 const daysBetween = (a, b) => Math.ceil((a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24));
 
-function ClientAssetFormModal({ clients, initial, onClose, onSave, saving, onRequestNewClient }) {
+function ClientAssetFormModal({ clients, branches, technicians, initial, onClose, onSave, saving, onRequestNewClient }) {
   const [clientId, setClientId] = useState(initial?.client_id || clients[0]?.id || "");
   const [name, setName] = useState(initial?.name || "");
   const [brand, setBrand] = useState(initial?.brand || "");
@@ -1147,12 +1415,29 @@ function ClientAssetFormModal({ clients, initial, onClose, onSave, saving, onReq
   const [installDate, setInstallDate] = useState(initial?.install_date || new Date().toISOString().slice(0, 10));
   const [warrantyMonths, setWarrantyMonths] = useState(initial?.warranty_months ?? 12);
   const [notes, setNotes] = useState(initial?.notes || "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || "");
+  const [maintenanceFreq, setMaintenanceFreq] = useState(initial?.maintenance_frequency_days ?? "");
+  const [nextMaintenance, setNextMaintenance] = useState(initial?.next_maintenance_date || "");
+  const [defaultTechId, setDefaultTechId] = useState(initial?.default_technician_id || "");
+  const [usageUnit, setUsageUnit] = useState(initial?.usage_unit || "");
+  const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
+  const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
+
+  const branchTechs = technicians.filter((t) => t.branch_id === branchId);
 
   const submit = () => {
     if (!clientId || !name.trim() || !installDate) return;
     onSave({
       client_id: clientId, name: name.trim(), brand: brand.trim() || null, model: model.trim() || null,
       serial_number: serial.trim() || null, install_date: installDate, warranty_months: Number(warrantyMonths) || 0, notes: notes.trim() || null,
+      branch_id: branchId || null,
+      maintenance_frequency_days: maintenanceFreq === "" ? null : Number(maintenanceFreq),
+      next_maintenance_date: nextMaintenance || null,
+      default_technician_id: defaultTechId || null,
+      usage_unit: usageUnit || null,
+      current_usage: currentUsage === "" ? null : Number(currentUsage),
+      usage_interval: usageInterval === "" ? null : Number(usageInterval),
+      usage_last_maintenance: initial?.usage_last_maintenance ?? null,
     });
   };
 
@@ -1194,6 +1479,50 @@ function ClientAssetFormModal({ clients, initial, onClose, onSave, saving, onReq
       <Field label="Notas (opcional)">
         <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Detalles de la instalación" />
       </Field>
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Plan de mantenimiento preventivo (opcional)</div>
+      <div className="text-xs mb-2" style={{ color: C.muted }}>Para que este activo pueda generar órdenes de trabajo, indica qué sucursal le da seguimiento.</div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Sucursal responsable">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => { setBranchId(e.target.value); setDefaultTechId(""); }}>
+            <option value="">Sin asignar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Técnico por defecto">
+          <select className={inputClass} style={inputStyle} value={defaultTechId} onChange={(e) => setDefaultTechId(e.target.value)} disabled={!branchId}>
+            <option value="">Sin asignar</option>
+            {branchTechs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Frecuencia (días)">
+          <input type="number" min="1" className={inputClass} style={inputStyle} value={maintenanceFreq} onChange={(e) => setMaintenanceFreq(e.target.value)} placeholder="Ej. 30, 90, 180" />
+        </Field>
+        <Field label="Próximo mantenimiento">
+          <input type="date" className={inputClass} style={inputStyle} value={nextMaintenance} onChange={(e) => setNextMaintenance(e.target.value)} />
+        </Field>
+      </div>
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Mantenimiento por uso (horómetro / kilometraje, opcional)</div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Unidad de uso">
+          <select className={inputClass} style={inputStyle} value={usageUnit} onChange={(e) => setUsageUnit(e.target.value)}>
+            <option value="">Sin seguimiento por uso</option>
+            <option value="horas">Horas (horómetro)</option>
+            <option value="km">Kilómetros</option>
+          </select>
+        </Field>
+        <Field label={`Lectura actual${usageUnit ? ` (${usageUnit})` : ""}`}>
+          <input type="number" min="0" step="0.1" disabled={!usageUnit} className={inputClass} style={inputStyle} value={currentUsage} onChange={(e) => setCurrentUsage(e.target.value)} placeholder="Ej. 1250" />
+        </Field>
+        <Field label="Cada cuántas unidades">
+          <input type="number" min="1" disabled={!usageUnit} className={inputClass} style={inputStyle} value={usageInterval} onChange={(e) => setUsageInterval(e.target.value)} placeholder="Ej. 500" />
+        </Field>
+      </div>
+      {initial?.usage_last_maintenance != null && usageUnit && (
+        <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Último mantenimiento generado a las/los {initial.usage_last_maintenance} {usageUnit}. Próximo a las/los {Number(initial.usage_last_maintenance) + (Number(usageInterval) || 0)} {usageUnit}.</div>
+      )}
+      {initial && <ActivityHistorySection tableName="client_assets" recordId={initial.id} title="Historial de este activo" />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -1344,6 +1673,7 @@ function ProductFormModal({ initial, existingProducts, defaultItemType, onClose,
         <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} />
         Aplica ITBIS (18%) al facturar
       </label>
+      {initial && <ActivityHistorySection tableName="products" recordId={initial.id} title={isService ? "Historial de este servicio" : "Historial de este producto"} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -1376,6 +1706,7 @@ function SupplierFormModal({ initial, onClose, onSave, saving }) {
       <Field label="Correo (opcional)">
         <input className={inputClass} style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ej. ventas@proveedor.com" />
       </Field>
+      {initial && <ActivityHistorySection tableName="suppliers" recordId={initial.id} title="Historial de este proveedor" />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={() => name.trim() && onSave({ name: name.trim(), rnc: rnc.trim() || null, phone: phone.trim() || null, email: email.trim() || null })} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -1516,10 +1847,238 @@ function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
       <Field label="Notas (opcional)">
         <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observaciones" />
       </Field>
+      {initial && <ActivityHistorySection tableName="other_expenses" recordId={initial.id} title="Historial de este gasto" resolvers={{ supplier_id: (id) => suppliers.find((s) => s.id === id)?.name }} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
           {saving ? "Guardando..." : initial ? "Guardar cambios" : "Registrar gasto"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ToolFormModal({ branches, technicians, initial, onClose, onSave, saving }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [category, setCategory] = useState(initial?.category || "");
+  const [serial, setSerial] = useState(initial?.serial_number || "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
+  const [technicianId, setTechnicianId] = useState(initial?.technician_id || "");
+  const [status, setStatus] = useState(initial?.status || "disponible");
+  const [notes, setNotes] = useState(initial?.notes || "");
+  const submit = () => {
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(),
+      category: category.trim() || null,
+      serial_number: serial.trim() || null,
+      branch_id: branchId || null,
+      technician_id: technicianId || null,
+      status: technicianId ? (status === "disponible" ? "asignada" : status) : status,
+      notes: notes.trim() || null,
+    });
+  };
+  return (
+    <Modal title={initial ? "Editar herramienta" : "Agregar herramienta"} onClose={onClose}>
+      <Field label="Nombre">
+        <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Taladro inalámbrico" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Categoría (opcional)">
+          <input className={inputClass} style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Ej. Eléctrica, Manual, Medición" />
+        </Field>
+        <Field label="No. de serie (opcional)">
+          <input className={inputClass} style={inputStyle} value={serial} onChange={(e) => setSerial(e.target.value)} />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Sucursal">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Estado">
+          <select className={inputClass} style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}>
+            {Object.entries(TOOL_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Field label="Asignar a técnico (opcional)">
+        <select className={inputClass} style={inputStyle} value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
+          <option value="">Sin asignar</option>
+          {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Notas (opcional)">
+        <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observaciones" />
+      </Field>
+      {initial && (
+        <ActivityHistorySection
+          tableName="tools"
+          recordId={initial.id}
+          title="Historial de esta herramienta"
+          resolvers={{ technician_id: (id) => technicians.find((t) => t.id === id)?.name, branch_id: (id) => branches.find((b) => b.id === id)?.name }}
+          statusLabels={Object.fromEntries(Object.entries(TOOL_STATUS_CFG).map(([k, v]) => [k, v.label]))}
+        />
+      )}
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+const MATERIAL_UNITS = ["unidad", "pieza", "metro", "kg", "litro", "galón", "caja", "rollo"];
+
+function BulkToolFormModal({ branches, technicians, onClose, onSave, saving }) {
+  const [branchId, setBranchId] = useState(branches[0]?.id || "");
+  const [categoryDefault, setCategoryDefault] = useState("");
+  const [commonTechnicianId, setCommonTechnicianId] = useState("");
+  const [rawText, setRawText] = useState("");
+  const [rows, setRows] = useState([]);
+
+  const generateRows = () => {
+    const lines = rawText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+    setRows((prev) => [
+      ...prev,
+      ...lines.map((name) => ({
+        tempId: `${Date.now()}-${Math.random()}`,
+        name,
+        category: categoryDefault,
+        serial_number: "",
+        branch_id: branchId,
+        technician_id: commonTechnicianId,
+      })),
+    ]);
+    setRawText("");
+  };
+
+  const updateRow = (tempId, patch) => setRows((prev) => prev.map((r) => (r.tempId === tempId ? { ...r, ...patch } : r)));
+  const removeRow = (tempId) => setRows((prev) => prev.filter((r) => r.tempId !== tempId));
+  const applyTechnicianToAll = () => setRows((prev) => prev.map((r) => ({ ...r, technician_id: commonTechnicianId })));
+
+  const submit = () => {
+    const valid = rows.filter((r) => r.name.trim());
+    if (valid.length === 0) return;
+    onSave(valid);
+  };
+
+  return (
+    <Modal title="Carga masiva de herramientas" onClose={onClose} wide>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Sucursal (para las herramientas nuevas)">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Categoría por defecto (opcional)">
+          <input className={inputClass} style={inputStyle} value={categoryDefault} onChange={(e) => setCategoryDefault(e.target.value)} placeholder="Ej. Eléctrica" />
+        </Field>
+        <Field label="Asignar todas a este técnico (opcional)">
+          <select className={inputClass} style={inputStyle} value={commonTechnicianId} onChange={(e) => setCommonTechnicianId(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Field label="Pega la lista de herramientas (una por línea)">
+        <textarea
+          className={inputClass} style={{ ...inputStyle, minHeight: 100 }}
+          value={rawText} onChange={(e) => setRawText(e.target.value)}
+          placeholder={"Taladro Bosch\nJuego de llaves 1/4\"\nMultímetro Fluke\nEscalera de 6 pies"}
+        />
+      </Field>
+      <div className="flex justify-end gap-2 mb-3">
+        {rows.length > 0 && (
+          <button onClick={applyTechnicianToAll} disabled={!commonTechnicianId} className="px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: "transparent", color: C.amber, border: `1px solid ${C.amber}40` }}>
+            Aplicar técnico a las {rows.length} filas
+          </button>
+        )}
+        <button onClick={generateRows} disabled={!rawText.trim()} className="px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.panelAlt, color: C.text, border: `1px solid ${C.border}` }}>
+          Agregar a la lista
+        </button>
+      </div>
+
+      {rows.length > 0 && (
+        <>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>{rows.length} herramienta{rows.length !== 1 ? "s" : ""} lista{rows.length !== 1 ? "s" : ""} para guardar</div>
+          <div className="space-y-2 mb-3 max-h-80 overflow-y-auto pr-1">
+            {rows.map((r) => (
+              <div key={r.tempId} className="grid grid-cols-12 gap-2 items-center">
+                <input className={`${inputClass} col-span-3`} style={inputStyle} value={r.name} onChange={(e) => updateRow(r.tempId, { name: e.target.value })} placeholder="Nombre" />
+                <input className={`${inputClass} col-span-2`} style={inputStyle} value={r.category} onChange={(e) => updateRow(r.tempId, { category: e.target.value })} placeholder="Categoría" />
+                <input className={`${inputClass} col-span-2`} style={inputStyle} value={r.serial_number} onChange={(e) => updateRow(r.tempId, { serial_number: e.target.value })} placeholder="No. serie" />
+                <select className={`${inputClass} col-span-2`} style={inputStyle} value={r.branch_id} onChange={(e) => updateRow(r.tempId, { branch_id: e.target.value })}>
+                  <option value="">Sin sucursal</option>
+                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <select className={`${inputClass} col-span-2`} style={inputStyle} value={r.technician_id} onChange={(e) => updateRow(r.tempId, { technician_id: e.target.value })}>
+                  <option value="">Sin asignar</option>
+                  {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <button onClick={() => removeRow(r.tempId)} className="col-span-1 flex justify-center" style={iconBtnStyle}><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving || rows.length === 0} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : `Guardar ${rows.length || ""} herramienta${rows.length !== 1 ? "s" : ""}`}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+
+function MaterialFormModal({ branches, initial, onClose, onSave, saving }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
+  const [quantity, setQuantity] = useState(initial?.quantity ?? "");
+  const [unit, setUnit] = useState(initial?.unit || MATERIAL_UNITS[0]);
+  const [notes, setNotes] = useState(initial?.notes || "");
+  const submit = () => {
+    if (!name.trim() || quantity === "") return;
+    onSave({ name: name.trim(), branch_id: branchId || null, quantity: Number(quantity), unit, notes: notes.trim() || null });
+  };
+  return (
+    <Modal title={initial ? "Editar material" : "Agregar material sobrante"} onClose={onClose}>
+      <Field label="Nombre del material">
+        <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Tubería PVC 1/2, cable THHN #12" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Cantidad">
+          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+        </Field>
+        <Field label="Unidad">
+          <select className={inputClass} style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)}>
+            {MATERIAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Field label="Sucursal">
+        <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+          <option value="">Sin asignar</option>
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </Field>
+      <Field label="Notas (opcional)">
+        <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="De qué orden sobró, condición, etc." />
+      </Field>
+      {initial && <ActivityHistorySection tableName="inventory_materials" recordId={initial.id} title="Historial de este material" resolvers={{ branch_id: (id) => branches.find((b) => b.id === id)?.name }} />}
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar"}
         </button>
       </div>
     </Modal>
@@ -1555,6 +2114,7 @@ function AccountFormModal({ initial, onClose, onSave, saving }) {
       <label className="flex items-center gap-2 text-sm mt-2" style={{ color: C.muted }}>
         <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Cuenta activa
       </label>
+      {initial && <ActivityHistorySection tableName="chart_of_accounts" recordId={initial.id} title="Historial de esta cuenta" />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -1585,6 +2145,7 @@ function TaxRateFormModal({ initial, onClose, onSave, saving }) {
         <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} /> Usar como tasa por defecto
       </label>
       <div className="text-xs mt-2" style={{ color: C.muted }}>Este catálogo es informativo por ahora — las cotizaciones y facturas siguen calculando ITBIS al 18% de forma fija.</div>
+      {initial && <ActivityHistorySection tableName="tax_rates" recordId={initial.id} title="Historial de esta tasa" />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -1950,6 +2511,14 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, companyN
         )}
       </div>
 
+      <ActivityHistorySection
+        tableName="purchases"
+        recordId={purchase.id}
+        title="Historial de esta compra"
+        resolvers={{ supplier_id: () => supplierName }}
+        statusLabels={Object.fromEntries(Object.entries(PAYABLE_STATUS_CFG).map(([k, v]) => [k, v.label]))}
+      />
+
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
@@ -2003,6 +2572,7 @@ function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
         <input type="date" className={inputClass} style={inputStyle} value={expiration} onChange={(e) => setExpiration(e.target.value)} />
       </Field>
       <div className="text-xs mb-3" style={{ color: C.muted }}>Estos rangos son los que la DGII te autorizó — cárgalos exactamente como aparecen en tu autorización.</div>
+      {initial && <ActivityHistorySection tableName="ncf_sequences" recordId={initial.id} title="Historial de esta secuencia" />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -2022,6 +2592,8 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
   const [discountPct, setDiscountPct] = useState(prefill?.discount_pct ?? 0);
   const [applyNorma0205, setApplyNorma0205] = useState(false);
   const [exemptItbis, setExemptItbis] = useState(false);
+  const [currency, setCurrency] = useState(prefill?.currency || "DOP");
+  const [exchangeRate, setExchangeRate] = useState(prefill?.exchange_rate ?? 1);
   const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true, register_asset: false, asset_serial: "", asset_warranty_months: 12 };
   const [blocks, setBlocks] = useState(() => {
     if (prefill?.items?.length) return itemsToBlocks(prefill.items, blankItem);
@@ -2075,6 +2647,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
   const itbis = exemptItbis ? 0 : grossTaxable * discountFactor * 0.18;
   const itbisRetained = applyNorma0205 ? itbis * 0.30 : 0;
   const total = subtotal + itbis - itbisRetained;
+  const rate = currency === "USD" ? (Number(exchangeRate) || 1) : 1;
   const chapterGroups = groupItemsByChapter(resolvedItems, itemAmount);
   const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const chapterSubtotal = (name) => chapterGroups.find((g) => g.chapter === (name.trim() || "General"))?.subtotal || 0;
@@ -2082,7 +2655,14 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
   const submit = () => {
     const validItems = resolvedItems.filter((it) => it.description.trim() && Number(it.quantity) > 0);
     if (!clientId || !sequenceId || validItems.length === 0) return;
-    onSave({ title: title.trim() || null, client_id: clientId, ncf_sequence_id: sequenceId, branch_id: branchId || null, invoice_date: invoiceDate, discount_pct: discountPct, subtotal, itbis, exempt_itbis: exemptItbis, applies_norma_0205: applyNorma0205, itbis_retained: itbisRetained, total }, validItems);
+    onSave({
+      title: title.trim() || null, client_id: clientId, ncf_sequence_id: sequenceId, branch_id: branchId || null, invoice_date: invoiceDate, discount_pct: discountPct,
+      subtotal: subtotal * rate, itbis: itbis * rate, exempt_itbis: exemptItbis, applies_norma_0205: applyNorma0205, itbis_retained: itbisRetained * rate, total: total * rate,
+      currency, exchange_rate: rate,
+      foreign_subtotal: currency === "USD" ? subtotal : null,
+      foreign_itbis: currency === "USD" ? itbis : null,
+      foreign_total: currency === "USD" ? total : null,
+    }, validItems);
   };
 
   return (
@@ -2120,6 +2700,22 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
         <input type="number" min="0" max={maxDiscountPct} step="0.5" className={inputClass} style={inputStyle} value={discountPct} onChange={(e) => onDiscountChange(e.target.value)} disabled={maxDiscountPct <= 0} />
         {maxDiscountPct <= 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>No tienes permiso para aplicar descuentos — pídele a un admin que te asigne un límite.</div>}
       </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Moneda">
+          <select className={inputClass} style={inputStyle} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            <option value="DOP">Pesos (RD$)</option>
+            <option value="USD">Dólares (US$)</option>
+          </select>
+        </Field>
+        {currency === "USD" && (
+          <Field label="Tasa de cambio (RD$ por US$1)">
+            <input type="number" min="0" step="0.01" className={inputClass} style={inputStyle} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} placeholder="Ej. 60.50" />
+          </Field>
+        )}
+      </div>
+      {currency === "USD" && (
+        <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Los precios de los renglones se interpretan en US$. El NCF y los reportes fiscales siempre usan el equivalente en pesos.</div>
+      )}
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
       <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
@@ -2199,12 +2795,13 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
       )}
 
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal bruto</span><span className="font-mono">{fmtMoney(grossSubtotal)}</span></div>}
-        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento ({discountPct}%)</span><span className="font-mono">-{fmtMoney(discountAmount)}</span></div>}
-        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
-        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS{exemptItbis ? " (exenta)" : " (18%)"}</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
-        {applyNorma0205 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Retención ITBIS 30% (Norma 02-05)</span><span className="font-mono">-{fmtMoney(itbisRetained)}</span></div>}
-        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(total)}</span></div>
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal bruto</span><span className="font-mono">{currency === "USD" ? `US$ ${grossSubtotal.toFixed(2)}` : fmtMoney(grossSubtotal)}</span></div>}
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento ({discountPct}%)</span><span className="font-mono">-{currency === "USD" ? `US$ ${discountAmount.toFixed(2)}` : fmtMoney(discountAmount)}</span></div>}
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{currency === "USD" ? `US$ ${subtotal.toFixed(2)}` : fmtMoney(subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS{exemptItbis ? " (exenta)" : " (18%)"}</span><span className="font-mono">{currency === "USD" ? `US$ ${itbis.toFixed(2)}` : fmtMoney(itbis)}</span></div>
+        {applyNorma0205 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Retención ITBIS 30% (Norma 02-05)</span><span className="font-mono">-{currency === "USD" ? `US$ ${itbisRetained.toFixed(2)}` : fmtMoney(itbisRetained)}</span></div>}
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{currency === "USD" ? `US$ ${total.toFixed(2)}` : fmtMoney(total)}</span></div>
+        {currency === "USD" && <div className="flex justify-between text-xs" style={{ color: C.muted }}><span>Equivalente (para el NCF)</span><span className="font-mono">{fmtMoney(total * rate)}</span></div>}
       </div>
 
       <label className="flex items-center gap-2 text-sm mt-3 p-3" style={{ color: C.text, background: C.panelAlt, border: `1px solid ${C.border}` }}>
@@ -2253,6 +2850,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
       items, subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total, discountPct: invoice.discount_pct,
       retainedLabel: "Retención ITBIS 30% (Norma 02-05)", retainedAmount: invoice.itbis_retained || 0,
       legalNote: [invoice.exempt_itbis ? "Factura exenta de ITBIS." : null, invoice.applies_norma_0205 ? "Aplica Norma 02-05 — Retención del 30% del ITBIS." : null].filter(Boolean).join(" ") || null,
+      currency: invoice.currency, foreignTotal: invoice.foreign_total, exchangeRate: invoice.exchange_rate,
     });
     printDocument(`Factura ${invoice.ncf}`, html);
   };
@@ -2275,6 +2873,11 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
         </div>
         <Pill label={invoice.status === "anulada" ? "Anulada" : "Emitida"} color={statusColor} />
       </div>
+      {invoice.currency === "USD" && (
+        <div className="text-xs mb-2 px-2 py-1 inline-block" style={{ background: C.blue + "1A", color: C.blue }}>
+          Cotizada en US$ — tasa RD$ {invoice.exchange_rate} · Total ≈ US$ {Number(invoice.foreign_total || 0).toFixed(2)}
+        </div>
+      )}
       {invoice.title && <div className="text-sm mb-2" style={{ color: C.text }}>{invoice.title}</div>}
       {invoice.applies_norma_0205 && <div className="text-xs mb-2 font-semibold" style={{ color: C.amber }}>Aplica Norma 02-05 — Retención del 30% del ITBIS.</div>}
       <div className="mb-4"><Pill label={payCfg.label} color={payCfg.color} /></div>
@@ -2376,6 +2979,14 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
           </div>
         </div>
       )}
+
+      <ActivityHistorySection
+        tableName="invoices"
+        recordId={invoice.id}
+        title="Historial de esta factura"
+        resolvers={{ client_id: () => clientName }}
+        statusLabels={Object.fromEntries(Object.entries(PAYMENT_STATUS_CFG).map(([k, v]) => [k, v.label]))}
+      />
 
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         {canEdit && invoice.status !== "anulada" && balance > 0 && !showPaymentForm && (
@@ -2515,6 +3126,86 @@ const CREDIT_NOTE_STATUS_CFG = {
   emitida: { label: "Emitida", color: "#4FA8D8" },
 };
 
+function RecurringContractFormModal({ clients, branches, ncfSequences, initial, onClose, onSave, saving }) {
+  const [clientId, setClientId] = useState(initial?.client_id || clients[0]?.id || "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || "");
+  const [ncfSequenceId, setNcfSequenceId] = useState(initial?.ncf_sequence_id || "");
+  const [title, setTitle] = useState(initial?.title || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [amount, setAmount] = useState(initial?.amount ?? "");
+  const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
+  const [frequencyDays, setFrequencyDays] = useState(initial?.frequency_days ?? 30);
+  const [nextInvoiceDate, setNextInvoiceDate] = useState(initial?.next_invoice_date || new Date().toISOString().slice(0, 10));
+  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [notes, setNotes] = useState(initial?.notes || "");
+
+  const b02Sequences = ncfSequences.filter((s) => s.ncf_type === "B02" && s.next_number <= s.range_end);
+
+  const submit = () => {
+    if (!clientId || !title.trim() || !amount || !frequencyDays || !nextInvoiceDate) return;
+    onSave({
+      client_id: clientId, branch_id: branchId || null, ncf_sequence_id: ncfSequenceId || null,
+      title: title.trim(), description: description.trim() || null, amount: Number(amount), is_taxable: isTaxable,
+      frequency_days: Number(frequencyDays), next_invoice_date: nextInvoiceDate, is_active: isActive, notes: notes.trim() || null,
+    });
+  };
+
+  return (
+    <Modal title={initial ? "Editar contrato recurrente" : "Nuevo contrato recurrente"} onClose={onClose} wide>
+      <Field label="Cliente">
+        <SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} />
+      </Field>
+      <Field label="Título del servicio">
+        <input className={inputClass} style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Mantenimiento preventivo mensual" />
+      </Field>
+      <Field label="Descripción para la factura (opcional)">
+        <input className={inputClass} style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Se usa como descripción del renglón en la factura" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Monto (RD$, antes de ITBIS)">
+          <input type="number" step="0.01" min="0" className={inputClass} style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
+        </Field>
+        <Field label="Cada cuántos días facturar">
+          <input type="number" min="1" className={inputClass} style={inputStyle} value={frequencyDays} onChange={(e) => setFrequencyDays(e.target.value)} placeholder="Ej. 30" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Sucursal (opcional)">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">Sin especificar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Secuencia NCF (B02)">
+          <select className={inputClass} style={inputStyle} value={ncfSequenceId} onChange={(e) => setNcfSequenceId(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {b02Sequences.map((s) => <option key={s.id} value={s.id}>{s.prefix} (disp. {s.range_end - s.next_number + 1})</option>)}
+          </select>
+        </Field>
+      </div>
+      <Field label="Próxima fecha de facturación">
+        <input type="date" className={inputClass} style={inputStyle} value={nextInvoiceDate} onChange={(e) => setNextInvoiceDate(e.target.value)} />
+      </Field>
+      <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
+        <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} /> Aplica ITBIS (18%)
+      </label>
+      <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
+        <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Contrato activo (si se desmarca, deja de generar facturas)
+      </label>
+      <Field label="Notas internas (opcional)">
+        <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Detalles del acuerdo" />
+      </Field>
+      {initial && <ActivityHistorySection tableName="recurring_contracts" recordId={initial.id} title="Historial de este contrato" resolvers={{ client_id: (id) => clients.find((c) => c.id === id)?.name, branch_id: (id) => branches.find((b) => b.id === id)?.name }} />}
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Crear contrato"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function CreditNoteDetailModal({ note, items, invoice, clientName, companyName, onClose }) {
   const doPrint = () => {
     const html = invoiceLikeHtml({
@@ -2547,6 +3238,12 @@ function CreditNoteDetailModal({ note, items, invoice, clientName, companyName, 
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(note.itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(note.total)}</span></div>
       </div>
+      <ActivityHistorySection
+        tableName="credit_notes"
+        recordId={note.id}
+        title="Historial de esta nota de crédito"
+        resolvers={{ client_id: () => clientName }}
+      />
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
@@ -2560,6 +3257,7 @@ const QUOTE_STATUS_CFG = {
   aprobada: { label: "Aprobada", color: "#4CAF6D" },
   rechazada: { label: "Rechazada", color: "#E8654F" },
   en_orden: { label: "En orden de trabajo", color: "#4FA8D8" },
+  parcial: { label: "Facturada parcialmente", color: "#4FA8D8" },
   convertida: { label: "Convertida en factura", color: "#F2A93B" },
 };
 
@@ -2575,6 +3273,8 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
   const [quoteDate, setQuoteDate] = useState(initial?.quote_date || (() => new Date().toISOString().slice(0, 10))());
   const [validUntil, setValidUntil] = useState(initial?.valid_until || "");
   const [discountPct, setDiscountPct] = useState(initial?.discount_pct ?? 0);
+  const [currency, setCurrency] = useState(initial?.currency || "DOP");
+  const [exchangeRate, setExchangeRate] = useState(initial?.exchange_rate ?? 1);
   const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true };
   const [blocks, setBlocks] = useState(() => {
     if (initial) return itemsToBlocks(initialItems, blankItem);
@@ -2627,6 +3327,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
   const subtotal = grossSubtotal * discountFactor;
   const itbis = grossTaxable * discountFactor * 0.18;
   const total = subtotal + itbis;
+  const rate = currency === "USD" ? (Number(exchangeRate) || 1) : 1;
   const chapterGroups = groupItemsByChapter(resolvedItems, itemAmount);
   const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const chapterSubtotal = (name) => chapterGroups.find((g) => g.chapter === (name.trim() || "General"))?.subtotal || 0;
@@ -2634,7 +3335,14 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
   const submit = () => {
     const validItems = resolvedItems.filter((it) => it.description.trim() && Number(it.quantity) > 0);
     if (!clientId || validItems.length === 0) return;
-    onSave({ title: title.trim() || null, client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, discount_pct: discountPct, subtotal, itbis, total }, validItems);
+    onSave({
+      title: title.trim() || null, client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, discount_pct: discountPct,
+      subtotal: subtotal * rate, itbis: itbis * rate, total: total * rate,
+      currency, exchange_rate: rate,
+      foreign_subtotal: currency === "USD" ? subtotal : null,
+      foreign_itbis: currency === "USD" ? itbis : null,
+      foreign_total: currency === "USD" ? total : null,
+    }, validItems);
   };
 
   return (
@@ -2660,6 +3368,22 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
         <input type="number" min="0" max={maxDiscountPct} step="0.5" className={inputClass} style={inputStyle} value={discountPct} onChange={(e) => onDiscountChange(e.target.value)} disabled={maxDiscountPct <= 0} />
         {maxDiscountPct <= 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>No tienes permiso para aplicar descuentos — pídele a un admin que te asigne un límite.</div>}
       </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Moneda">
+          <select className={inputClass} style={inputStyle} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            <option value="DOP">Pesos (RD$)</option>
+            <option value="USD">Dólares (US$)</option>
+          </select>
+        </Field>
+        {currency === "USD" && (
+          <Field label="Tasa de cambio (RD$ por US$1)">
+            <input type="number" min="0" step="0.01" className={inputClass} style={inputStyle} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} placeholder="Ej. 60.50" />
+          </Field>
+        )}
+      </div>
+      {currency === "USD" && (
+        <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Los precios de los renglones se interpretan en US$. El total en pesos (obligatorio para fines fiscales) se calcula con la tasa indicada.</div>
+      )}
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
       <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
@@ -2726,17 +3450,85 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
       )}
 
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal bruto</span><span className="font-mono">{fmtMoney(grossSubtotal)}</span></div>}
-        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento ({discountPct}%)</span><span className="font-mono">-{fmtMoney(discountAmount)}</span></div>}
-        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
-        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS (18%)</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
-        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(total)}</span></div>
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal bruto</span><span className="font-mono">{currency === "USD" ? `US$ ${grossSubtotal.toFixed(2)}` : fmtMoney(grossSubtotal)}</span></div>}
+        {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento ({discountPct}%)</span><span className="font-mono">-{currency === "USD" ? `US$ ${discountAmount.toFixed(2)}` : fmtMoney(discountAmount)}</span></div>}
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{currency === "USD" ? `US$ ${subtotal.toFixed(2)}` : fmtMoney(subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS (18%)</span><span className="font-mono">{currency === "USD" ? `US$ ${itbis.toFixed(2)}` : fmtMoney(itbis)}</span></div>
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{currency === "USD" ? `US$ ${total.toFixed(2)}` : fmtMoney(total)}</span></div>
+        {currency === "USD" && <div className="flex justify-between text-xs" style={{ color: C.muted }}><span>Equivalente (para fines fiscales)</span><span className="font-mono">{fmtMoney(total * rate)}</span></div>}
       </div>
 
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
           {saving ? "Guardando..." : initial ? "Guardar cambios" : "Crear cotización"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function PartialInvoiceModal({ quote, items, onClose, onConfirm }) {
+  const invoiceable = items.map((it) => {
+    const remaining = Number(it.quantity) - Number(it.quantity_invoiced || 0);
+    return { ...it, remaining };
+  }).filter((it) => it.remaining > 0.0001);
+
+  const [quantities, setQuantities] = useState(() => Object.fromEntries(invoiceable.map((it) => [it.id, it.remaining])));
+
+  const setQty = (id, value, max) => {
+    const v = Math.max(0, Math.min(Number(value) || 0, max));
+    setQuantities((prev) => ({ ...prev, [id]: v }));
+  };
+
+  const selectedItems = invoiceable.filter((it) => (quantities[it.id] || 0) > 0.0001);
+  const subtotal = selectedItems.reduce((sum, it) => sum + (quantities[it.id] || 0) * Number(it.unit_price), 0);
+  const itbis = selectedItems.filter((it) => it.is_taxable).reduce((sum, it) => sum + (quantities[it.id] || 0) * Number(it.unit_price) * 0.18, 0);
+  const isFullInvoice = invoiceable.every((it) => Math.abs((quantities[it.id] || 0) - it.remaining) < 0.0001);
+
+  const confirm = () => {
+    if (selectedItems.length === 0) return;
+    onConfirm(quote, selectedItems.map((it) => ({
+      quote_item_id: it.id,
+      product_id: it.product_id || "",
+      description: it.description,
+      quantity: quantities[it.id],
+      unit_price: it.unit_price,
+      is_taxable: it.is_taxable,
+      chapter: it.chapter || "",
+    })));
+  };
+
+  return (
+    <Modal title={`Facturar cotización ${quote.quote_number || ""}`} onClose={onClose} wide>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>
+        Ajusta la cantidad a facturar en cada renglón (por defecto, lo que falta por facturar). Si reduces alguna cantidad, la cotización queda marcada como "Facturada parcialmente" y podrás facturar el resto después.
+      </div>
+      <div className="space-y-2 mb-3">
+        {invoiceable.map((it) => (
+          <div key={it.id} className="grid grid-cols-12 gap-2 items-center px-3 py-2 text-sm" style={{ background: C.panelAlt }}>
+            <div className="col-span-5 truncate">{it.description}</div>
+            <div className="col-span-3 text-xs text-right" style={{ color: C.muted }}>Pendiente: {it.remaining} de {it.quantity}</div>
+            <div className="col-span-2">
+              <input type="number" min="0" max={it.remaining} step="0.01" className={inputClass} style={inputStyle} value={quantities[it.id] ?? 0} onChange={(e) => setQty(it.id, e.target.value, it.remaining)} />
+            </div>
+            <div className="col-span-2 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney((quantities[it.id] || 0) * Number(it.unit_price))}</div>
+          </div>
+        ))}
+        {invoiceable.length === 0 && <div className="text-sm text-center py-4" style={{ color: C.muted }}>Esta cotización ya se facturó por completo.</div>}
+      </div>
+      <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal a facturar ahora</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
+        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
+        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total a facturar ahora</span><span className="font-mono">{fmtMoney(subtotal + itbis)}</span></div>
+      </div>
+      <div className="text-xs mt-2" style={{ color: isFullInvoice ? C.green : C.amber }}>
+        {invoiceable.length > 0 && (isFullInvoice ? "Se facturará el total restante de la cotización." : "Quedará un saldo de la cotización sin facturar.")}
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={confirm} disabled={selectedItems.length === 0} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          Continuar a factura
         </button>
       </div>
     </Modal>
@@ -2753,6 +3545,7 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
       dateLabel: "Fecha", dateValue: fmtDate(quote.quote_date),
       extraMeta: quote.valid_until ? `<br/>Válida hasta: ${fmtDate(quote.valid_until)}` : "",
       items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, discountPct: quote.discount_pct,
+      currency: quote.currency, foreignTotal: quote.foreign_total, exchangeRate: quote.exchange_rate,
     });
     printDocument(`Cotización ${quote.quote_number || ""}`, html);
   };
@@ -2763,6 +3556,7 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
       extraMeta: quote.valid_until ? `<br/>Válida hasta: ${fmtDate(quote.valid_until)}` : "",
       items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, discountPct: quote.discount_pct,
       notes: "Este documento es una Factura Pro-Forma sin valor fiscal — únicamente para fines informativos, no constituye un comprobante válido ante la DGII.",
+      currency: quote.currency, foreignTotal: quote.foreign_total, exchangeRate: quote.exchange_rate,
     });
     printDocument(`Factura Pro-Forma ${quote.quote_number || ""}`, html);
   };
@@ -2772,6 +3566,11 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
         <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span></div>
         <Pill label={s.label} color={s.color} />
       </div>
+      {quote.currency === "USD" && (
+        <div className="text-xs mb-2 px-2 py-1 inline-block" style={{ background: C.blue + "1A", color: C.blue }}>
+          Cotizada en US$ — tasa RD$ {quote.exchange_rate} · Total ≈ US$ {Number(quote.foreign_total || 0).toFixed(2)}
+        </div>
+      )}
       {quote.title && <div className="text-sm font-semibold mb-2" style={{ color: C.text }}>{quote.title}</div>}
       {orderInfo && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Orden de venta generada: <span className="font-mono">{orderInfo.order_number}</span></div>}
       <div className="grid grid-cols-2 gap-3 text-xs mb-4" style={{ color: C.muted }}>
@@ -2804,6 +3603,13 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(quote.itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(quote.total)}</span></div>
       </div>
+      <ActivityHistorySection
+        tableName="quotes"
+        recordId={quote.id}
+        title="Historial de esta cotización"
+        resolvers={{ client_id: () => clientName }}
+        statusLabels={Object.fromEntries(Object.entries(QUOTE_STATUS_CFG).map(([k, v]) => [k, v.label]))}
+      />
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         {canEdit && quote.status === "pendiente" && (
           <>
@@ -2816,9 +3622,9 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
             <Layers size={14} /> Pasar a Orden de Venta
           </button>
         )}
-        {canEdit && (quote.status === "pendiente" || quote.status === "aprobada") && (
+        {canEdit && (quote.status === "pendiente" || quote.status === "aprobada" || quote.status === "parcial") && (
           <button onClick={() => onConvert(quote, items)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
-            Convertir en factura
+            {quote.status === "parcial" ? "Facturar el resto" : "Convertir en factura"}
           </button>
         )}
         {canEdit && quote.status !== "convertida" && quote.status !== "en_orden" && (
@@ -2884,6 +3690,13 @@ function SalesOrderDetailModal({ order, items, clientName, companyName, workOrde
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(order.itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(order.total)}</span></div>
       </div>
+      <ActivityHistorySection
+        tableName="sales_orders"
+        recordId={order.id}
+        title="Historial de esta orden de venta"
+        resolvers={{ client_id: () => clientName }}
+        statusLabels={Object.fromEntries(Object.entries(SALES_ORDER_STATUS_CFG).map(([k, v]) => [k, v.label]))}
+      />
       <div className="flex flex-wrap justify-end gap-2 mt-4">
         {canEdit && order.status === "en_proceso" && !workOrderInfo && (
           <button onClick={() => onGenerateWorkOrder(order)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.blue, color: "#08202E" }}>
@@ -2909,12 +3722,12 @@ function SalesOrderDetailModal({ order, items, clientName, companyName, workOrde
 const INCIDENT_STATUS_CFG = {
   abierto: { label: "Abierto", color: "#E8654F" },
   en_revision: { label: "En revisión", color: "#F2A93B" },
-  resuelto: { label: "Resuelto", color: "#4CAF6D" },
+  resuelto: { label: "Completado", color: "#4CAF6D" },
   descartado: { label: "Descartado", color: "#8B92A0" },
   convertido: { label: "Convertido", color: "#4FA8D8" },
 };
 
-function IncidentFormModal({ branches, equipment, clients, initial, onClose, onSave, saving, onRequestNewClient }) {
+function IncidentFormModal({ branches, equipment, clients, technicians, initial, onClose, onSave, saving, onRequestNewClient }) {
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || "");
@@ -2922,6 +3735,7 @@ function IncidentFormModal({ branches, equipment, clients, initial, onClose, onS
   const [clientId, setClientId] = useState(initial?.client_id || "");
   const [reportedBy, setReportedBy] = useState(initial?.reported_by || "");
   const [priority, setPriority] = useState(initial?.priority || "media");
+  const [technicianId, setTechnicianId] = useState(initial?.technician_id || "");
 
   const branchEquip = equipment.filter((e) => e.branch_id === branchId);
 
@@ -2930,6 +3744,7 @@ function IncidentFormModal({ branches, equipment, clients, initial, onClose, onS
     onSave({
       title: title.trim(), description: description.trim() || null, branch_id: branchId || null,
       equipment_id: equipmentId || null, client_id: clientId || null, reported_by: reportedBy.trim() || null, priority,
+      technician_id: technicianId || null,
     });
   };
 
@@ -2951,6 +3766,12 @@ function IncidentFormModal({ branches, equipment, clients, initial, onClose, onS
           </select>
         </Field>
       </div>
+      <Field label="Asignar a técnico (opcional)">
+        <select className={inputClass} style={inputStyle} value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
+          <option value="">Sin asignar</option>
+          {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </Field>
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Vincular a (opcional)</div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Sucursal / equipo interno">
@@ -2982,11 +3803,40 @@ function IncidentFormModal({ branches, equipment, clients, initial, onClose, onS
   );
 }
 
-function IncidentDetailModal({ incident, branchName, equipName, clientName, orders, quotes, canEdit, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete }) {
+function IncidentDetailModal({ incident, branchName, equipName, clientName, techName, technicians, orders, quotes, canEdit, isTecnico, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete, onSaveProgress, onComplete, onEdit, onAssignTechnician, onReopen }) {
   const s = INCIDENT_STATUS_CFG[incident.status] || INCIDENT_STATUS_CFG.abierto;
   const p = PRIORITY_CFG[incident.priority] || PRIORITY_CFG.media;
   const linkedOrder = incident.work_order_id ? orders.find((o) => o.id === incident.work_order_id) : null;
   const linkedQuote = incident.quote_id ? quotes.find((q) => q.id === incident.quote_id) : null;
+
+  // El rol técnico solo puede llenar "Lo encontrado" mientras el incidente no esté completado ni descartado —
+  // no puede crear, borrar, convertir, completar ni editar la solución, sin importar el permiso configurado.
+  // Admin/Supervisor siempre pueden editar hallazgos y solución, en cualquier estado, incluido "Convertido".
+  const canManage = canEdit && !isTecnico; // eliminar / descartar / convertir
+  const canEditBasics = canEdit && !isTecnico; // editar título, descripción, etc.
+  const canEditFull = canEdit && !isTecnico; // hallazgos + solución + marcar completado (admin/supervisor)
+  const techCanEditFindings = isTecnico && incident.status !== "resuelto" && incident.status !== "descartado";
+  const canEditFindingsField = canEditFull || techCanEditFindings;
+
+  const [findings, setFindings] = useState(incident.findings || "");
+  const [savingProgress, setSavingProgress] = useState(false);
+
+  const saveProgress = async () => {
+    setSavingProgress(true);
+    await onSaveProgress(incident, findings.trim() || null);
+    setSavingProgress(false);
+  };
+  const complete = async () => {
+    setSavingProgress(true);
+    await onComplete(incident, findings.trim() || null);
+    setSavingProgress(false);
+    onClose();
+  };
+  const discard = () => {
+    onMarkStatus(incident, "descartado");
+    onClose();
+  };
+  const reopen = () => onReopen(incident);
 
   return (
     <Modal title={incident.title} onClose={onClose} wide>
@@ -3000,28 +3850,76 @@ function IncidentDetailModal({ incident, branchName, equipName, clientName, orde
         <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(incident.created_at?.slice(0, 10))}</span></div>
         <div>Sucursal / equipo<br /><span style={{ color: C.text }}>{branchName(incident.branch_id)}{incident.equipment_id ? ` · ${equipName(incident.equipment_id)}` : ""}</span></div>
         <div>Cliente<br /><span style={{ color: C.text }}>{incident.client_id ? clientName(incident.client_id) : "Sin especificar"}</span></div>
+        <div>
+          Técnico asignado<br />
+          {canManage ? (
+            <select value={incident.technician_id || ""} onChange={(e) => onAssignTechnician(incident.id, e.target.value)} className="mt-1 px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+              <option value="">Sin asignar</option>
+              {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          ) : (
+            <span style={{ color: C.text }}>{techName(incident.technician_id)}</span>
+          )}
+        </div>
       </div>
+
+      {(incident.attended_at || incident.completed_at) && (
+        <div className="flex gap-4 text-xs mb-4" style={{ color: C.muted }}>
+          {incident.attended_at && <div>Atendido en <span style={{ color: C.text }}>{((new Date(incident.attended_at) - new Date(incident.created_at)) / 3600000).toFixed(1)} h</span></div>}
+          {incident.completed_at && <div>Resuelto en <span style={{ color: C.text }}>{((new Date(incident.completed_at) - new Date(incident.created_at)) / 3600000).toFixed(1)} h</span></div>}
+        </div>
+      )}
 
       {linkedOrder && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Orden vinculada: <span className="font-mono">{linkedOrder.code}</span></div>}
       {linkedQuote && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Cotización vinculada: <span className="font-mono">{linkedQuote.quote_number}</span></div>}
 
-      <div className="flex flex-wrap justify-end gap-2 mt-4">
-        {canEdit && incident.status === "abierto" && (
-          <>
-            <button onClick={() => onMarkStatus(incident, "en_revision")} className="px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.amber}40` }}>Marcar en revisión</button>
-            <button onClick={() => onMarkStatus(incident, "descartado")} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>Descartar</button>
-          </>
+      <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Hallazgos</div>
+        <Field label="Lo encontrado">
+          {canEditFindingsField ? (
+            <textarea rows={3} className={inputClass} style={inputStyle} value={findings} onChange={(e) => setFindings(e.target.value)} placeholder="Qué se encontró al revisar el incidente" />
+          ) : (
+            <div className="text-sm px-3 py-2" style={{ background: C.panelAlt, color: findings ? C.text : C.muted }}>{findings || "Sin registrar"}</div>
+          )}
+        </Field>
+        {canEditFindingsField && (
+          <div className="flex justify-end gap-2 mt-1">
+            <button onClick={saveProgress} disabled={savingProgress} className="px-3 py-2 text-sm disabled:opacity-50" style={{ color: C.text, border: `1px solid ${C.border}` }}>
+              Guardar avance
+            </button>
+            <button onClick={complete} disabled={savingProgress} className="px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.green, color: "#0E1512" }}>
+              Marcar como completado
+            </button>
+          </div>
         )}
-        {canEdit && incident.status !== "descartado" && incident.status !== "convertido" && (
-          <button onClick={() => onMarkStatus(incident, "resuelto")} className="px-4 py-2 text-sm" style={{ color: C.green, border: `1px solid ${C.green}40` }}>Marcar resuelto</button>
+      </div>
+
+      <ActivityHistorySection
+        tableName="incidents"
+        recordId={incident.id}
+        title="Historial de este incidente"
+        resolvers={{ technician_id: techName }}
+        statusLabels={Object.fromEntries(Object.entries(INCIDENT_STATUS_CFG).map(([k, v]) => [k, v.label]))}
+      />
+
+      <div className="flex flex-wrap justify-end gap-2 mt-4 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        {canEdit && !isTecnico && incident.status === "abierto" && (
+          <button onClick={() => onMarkStatus(incident, "en_revision")} className="px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.amber}40` }}>Marcar en revisión</button>
         )}
-        {canEdit && !incident.work_order_id && (
+        {canManage && incident.status === "abierto" && (
+          <button onClick={discard} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}>Descartar</button>
+        )}
+        {canManage && (incident.status === "resuelto" || incident.status === "descartado") && (
+          <button onClick={reopen} className="px-4 py-2 text-sm" style={{ color: C.blue, border: `1px solid ${C.blue}40` }}>Reabrir incidente</button>
+        )}
+        {canManage && !incident.work_order_id && (
           <button onClick={() => onConvertOrder(incident)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Convertir en orden de trabajo</button>
         )}
-        {canEdit && !incident.quote_id && (
+        {canManage && !incident.quote_id && (
           <button onClick={() => onConvertQuote(incident)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Convertir en cotización</button>
         )}
-        {canEdit && <button onClick={() => onDelete(incident.id)} style={iconBtnStyle}><Trash2 size={16} /></button>}
+        {canEditBasics && <button onClick={() => onEdit(incident)} className="px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}>Editar datos</button>}
+        {canManage && <button onClick={() => onDelete(incident.id)} style={iconBtnStyle}><Trash2 size={16} /></button>}
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
       </div>
     </Modal>
@@ -3286,6 +4184,7 @@ function ChecklistTemplateFormModal({ initial, onClose, onSave, saving }) {
         <button onClick={addItemRow} className="flex items-center gap-2 text-sm" style={{ color: C.amber }}><Plus size={14} /> Agregar punto</button>
         <button onClick={addSectionRow} className="flex items-center gap-2 text-sm" style={{ color: C.text }}><Layers size={14} /> Agregar tema</button>
       </div>
+      {initial && <ActivityHistorySection tableName="checklist_templates" recordId={initial.id} title="Historial de este checklist" />}
       <div className="flex justify-end gap-2">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
@@ -3418,12 +4317,143 @@ function BulkOrderFormModal({ branches, equipment, technicians, onClose, onSave,
   );
 }
 
-function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, techName, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
+function SignaturePad({ onSave, saving }) {
+  const canvasRef = useRef(null);
+  const [isEmpty, setIsEmpty] = useState(true);
+  const drawing = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - rect.left) * (canvas.width / rect.width), y: (clientY - rect.top) * (canvas.height / rect.height) };
+  };
+  const start = (e) => {
+    e.preventDefault();
+    drawing.current = true;
+    lastPos.current = getPos(e);
+  };
+  const move = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const ctx = canvasRef.current.getContext("2d");
+    const pos = getPos(e);
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(lastPos.current.x, lastPos.current.y);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    lastPos.current = pos;
+    setIsEmpty(false);
+  };
+  const end = () => { drawing.current = false; };
+  const clear = () => {
+    const canvas = canvasRef.current;
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    setIsEmpty(true);
+  };
+  const save = () => {
+    if (isEmpty) return;
+    onSave(canvasRef.current.toDataURL("image/png"));
+  };
+
+  return (
+    <div>
+      <canvas
+        ref={canvasRef}
+        width={600}
+        height={200}
+        style={{ background: "#fff", touchAction: "none", width: "100%", maxWidth: 500, display: "block", border: `1px solid ${C.border}` }}
+        onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+        onTouchStart={start} onTouchMove={move} onTouchEnd={end}
+      />
+      <div className="flex gap-2 mt-2">
+        <button type="button" onClick={clear} className="px-3 py-1.5 text-xs" style={{ border: `1px solid ${C.border}`, color: C.muted }}>Limpiar</button>
+        <button type="button" onClick={save} disabled={isEmpty || saving} className="px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : "Guardar firma"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, techName, technicians, extraTechnicianIds, materials, onConsumeMaterial, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(order.photo_url || "");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const t = TYPE_CFG[order.type], p = PRIORITY_CFG[order.priority], s = STATUS_CFG[order.status];
+
+  const technician = technicians.find((tc) => tc.id === order.technician_id);
+  const [laborHours, setLaborHours] = useState(order.labor_hours ?? "");
+  const [laborRate, setLaborRate] = useState(order.labor_rate_used ?? (technician?.hourly_rate ?? ""));
+
+  const [usedMaterials, setUsedMaterials] = useState([]);
+  const [loadingMaterials, setLoadingMaterials] = useState(true);
+  const [newMaterialSource, setNewMaterialSource] = useState("");
+  const [newMaterialName, setNewMaterialName] = useState("");
+  const [newMaterialQty, setNewMaterialQty] = useState("");
+  const [newMaterialUnit, setNewMaterialUnit] = useState("");
+  const [newMaterialCost, setNewMaterialCost] = useState("");
+  const [savingMaterial, setSavingMaterial] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingMaterials(true);
+    supabase.from("work_order_materials").select("*").eq("work_order_id", order.id).order("created_at")
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (!error) setUsedMaterials(data || []);
+        setLoadingMaterials(false);
+      });
+    return () => { active = false; };
+  }, [order.id]);
+
+  const addUsedMaterial = async () => {
+    const fromStock = newMaterialSource ? materials.find((m) => m.id === newMaterialSource) : null;
+    const name = fromStock ? fromStock.name : newMaterialName.trim();
+    const qty = Number(newMaterialQty);
+    if (!name || !qty) return;
+    setSavingMaterial(true);
+    const payload = {
+      work_order_id: order.id,
+      material_id: fromStock ? fromStock.id : null,
+      name,
+      quantity: qty,
+      unit: fromStock ? fromStock.unit : (newMaterialUnit.trim() || null),
+      unit_cost: newMaterialCost === "" ? 0 : Number(newMaterialCost),
+    };
+    const { data, error } = await supabase.from("work_order_materials").insert(payload).select().single();
+    setSavingMaterial(false);
+    if (error) return;
+    setUsedMaterials((prev) => [...prev, data]);
+    if (fromStock) onConsumeMaterial(fromStock.id, qty);
+    setNewMaterialSource(""); setNewMaterialName(""); setNewMaterialQty(""); setNewMaterialUnit(""); setNewMaterialCost("");
+  };
+  const removeUsedMaterial = async (id) => {
+    const { error } = await supabase.from("work_order_materials").delete().eq("id", id);
+    if (error) return;
+    setUsedMaterials((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  const materialsCost = usedMaterials.reduce((sum, m) => sum + Number(m.quantity || 0) * Number(m.unit_cost || 0), 0);
+  const laborCost = (Number(laborHours) || 0) * (Number(laborRate) || 0);
+  const totalCost = materialsCost + laborCost;
+
+  const [signerName, setSignerName] = useState(order.client_signature_name || "");
+  const [resigning, setResigning] = useState(false);
+  const [savingSignature, setSavingSignature] = useState(false);
+  const handleSaveSignature = async (dataUrl) => {
+    if (!signerName.trim()) return;
+    setSavingSignature(true);
+    await onSaveSignature(order, dataUrl, signerName.trim());
+    setSavingSignature(false);
+    setResigning(false);
+  };
 
   const onFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -3454,7 +4484,13 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
       <div className="grid grid-cols-3 gap-3 text-xs mb-4" style={{ color: C.muted }}>
         <div>Sucursal<br /><span style={{ color: C.text }}>{branchName(order.branch_id)}</span></div>
         <div>Equipo<br /><span style={{ color: C.text }}>{equipName(order.equipment_id)}</span></div>
-        <div>Técnico<br /><span style={{ color: C.text }}>{techName(order.technician_id)}</span></div>
+        <div>
+          Técnico(s)<br />
+          <span style={{ color: C.text }}>{techName(order.technician_id)}</span>
+          {extraTechnicianIds && extraTechnicianIds.length > 0 && (
+            <span style={{ color: C.muted }}> + {extraTechnicianIds.map((id) => techName(id)).join(", ")}</span>
+          )}
+        </div>
       </div>
 
       {!isTecnico && !readOnly && checklistItems && checklistItems.length === 0 && checklistTemplates && checklistTemplates.length > 0 && (
@@ -3571,10 +4607,106 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         )}
       </Field>
 
+      <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Materiales usados</div>
+        {!loadingMaterials && usedMaterials.length > 0 && (
+          <div className="mb-2 space-y-1">
+            {usedMaterials.map((m) => (
+              <div key={m.id} className="flex items-center justify-between text-sm px-3 py-1.5" style={{ background: C.panelAlt }}>
+                <span>{m.name} — {m.quantity} {m.unit || ""}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono" style={{ color: C.muted }}>{fmtMoney(Number(m.quantity || 0) * Number(m.unit_cost || 0))}</span>
+                  {!readOnly && <button onClick={() => removeUsedMaterial(m.id)} style={iconBtnStyle}><X size={13} /></button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!loadingMaterials && usedMaterials.length === 0 && <div className="text-xs mb-2" style={{ color: C.muted }}>Todavía no se ha registrado ningún material.</div>}
+        {!readOnly && (
+          <div className="grid grid-cols-12 gap-2 items-end">
+            <div className="col-span-3">
+              <select className={`${inputClass} text-xs`} style={inputStyle} value={newMaterialSource} onChange={(e) => { setNewMaterialSource(e.target.value); setNewMaterialName(""); }}>
+                <option value="">Material libre...</option>
+                {materials.map((m) => <option key={m.id} value={m.id}>{m.name} ({Number(m.quantity || 0)} disp.)</option>)}
+              </select>
+            </div>
+            {!newMaterialSource && (
+              <input className={`${inputClass} col-span-3 text-xs`} style={inputStyle} value={newMaterialName} onChange={(e) => setNewMaterialName(e.target.value)} placeholder="Nombre del material" />
+            )}
+            <input type="number" step="0.01" className={`${inputClass} ${newMaterialSource ? "col-span-3" : "col-span-2"} text-xs`} style={inputStyle} value={newMaterialQty} onChange={(e) => setNewMaterialQty(e.target.value)} placeholder="Cant." />
+            {!newMaterialSource && (
+              <input className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={newMaterialUnit} onChange={(e) => setNewMaterialUnit(e.target.value)} placeholder="Unidad" />
+            )}
+            <input type="number" step="0.01" className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={newMaterialCost} onChange={(e) => setNewMaterialCost(e.target.value)} placeholder="Costo c/u" />
+            <button onClick={addUsedMaterial} disabled={savingMaterial} className="col-span-2 px-2 py-2 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+              <Plus size={13} className="inline" /> Agregar
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Mano de obra</div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Horas trabajadas">
+            <input type="number" step="0.25" min="0" disabled={readOnly} className={inputClass} style={inputStyle} value={laborHours} onChange={(e) => setLaborHours(e.target.value)} placeholder="Ej. 2.5" />
+          </Field>
+          <Field label="Tarifa por hora (RD$)">
+            <input type="number" step="0.01" min="0" disabled={readOnly} className={inputClass} style={inputStyle} value={laborRate} onChange={(e) => setLaborRate(e.target.value)} placeholder={technician?.hourly_rate ? String(technician.hourly_rate) : "0.00"} />
+          </Field>
+        </div>
+      </div>
+
+      <div className="mt-2 p-3 flex justify-between items-center text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <span style={{ color: C.muted }}>Costo total de esta orden</span>
+        <div className="text-right">
+          <div className="font-mono font-bold">{fmtMoney(totalCost)}</div>
+          <div className="text-xs" style={{ color: C.muted }}>Materiales {fmtMoney(materialsCost)} · Mano de obra {fmtMoney(laborCost)}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Firma del cliente</div>
+        {order.client_signature_url && !resigning ? (
+          <div>
+            <img src={order.client_signature_url} alt="Firma del cliente" className="mb-2" style={{ background: "#fff", maxWidth: 300, border: `1px solid ${C.border}` }} />
+            <div className="text-xs" style={{ color: C.muted }}>
+              Firmado por <span style={{ color: C.text }}>{order.client_signature_name}</span> — {fmtDate(order.client_signature_at?.slice(0, 10))} {order.client_signature_at ? new Date(order.client_signature_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" }) : ""}
+            </div>
+            {!readOnly && (
+              <button onClick={() => setResigning(true)} className="mt-2 text-xs px-3 py-1.5" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Firmar de nuevo</button>
+            )}
+          </div>
+        ) : !readOnly ? (
+          <div>
+            <Field label="Nombre de quien firma">
+              <input className={inputClass} style={inputStyle} value={signerName} onChange={(e) => setSignerName(e.target.value)} placeholder="Nombre del cliente o encargado" />
+            </Field>
+            {signerName.trim() ? (
+              <SignaturePad onSave={handleSaveSignature} saving={savingSignature} />
+            ) : (
+              <div className="text-xs" style={{ color: C.muted }}>Escribe el nombre de quien va a firmar para habilitar el cuadro de firma.</div>
+            )}
+            {resigning && <button onClick={() => setResigning(false)} className="mt-2 text-xs px-3 py-1.5" style={{ border: `1px solid ${C.border}`, color: C.muted }}>Cancelar</button>}
+          </div>
+        ) : (
+          <div className="text-xs" style={{ color: C.muted }}>Sin firma registrada.</div>
+        )}
+      </div>
+
+      <ActivityHistorySection
+        tableName="work_orders"
+        recordId={order.id}
+        title="Historial de esta orden"
+        resolvers={{ technician_id: techName, branch_id: branchName, equipment_id: equipName }}
+        statusLabels={Object.fromEntries(Object.entries(STATUS_CFG).map(([k, v]) => [k, v.label]))}
+      />
+
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{readOnly ? "Cerrar" : "Cancelar"}</button>
         {!readOnly && (
-          <button onClick={() => onSave(order, notes, photoFile)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          <button onClick={() => onSave(order, notes, photoFile, undefined, laborHours, laborRate)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
             {saving ? "Guardando..." : "Guardar"}
           </button>
         )}
@@ -3582,7 +4714,7 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
           <button
             onClick={() => {
               if (!window.confirm("¿Cerrar esta orden de trabajo? Se guardará la nota y la foto, y quedará marcada como Completada.")) return;
-              onSave(order, notes, photoFile, "completada");
+              onSave(order, notes, photoFile, "completada", laborHours, laborRate);
             }}
             disabled={saving}
             className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50"
@@ -3650,6 +4782,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [equipment, setEquipment] = useState([]);
   const [locations, setLocations] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [orderTechnicians, setOrderTechnicians] = useState([]);
   const [profiles, setProfiles] = useState([]);
   const [invites, setInvites] = useState([]);
   const [clients, setClients] = useState([]);
@@ -3675,6 +4808,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [suppliers, setSuppliers] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [otherExpenses, setOtherExpenses] = useState([]);
+  const [tools, setTools] = useState([]);
+  const [materials, setMaterials] = useState([]);
   const [chartOfAccounts, setChartOfAccounts] = useState([]);
   const [taxRates, setTaxRates] = useState([]);
   const [cashSessions, setCashSessions] = useState([]);
@@ -3682,11 +4817,35 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [ncfSequences, setNcfSequences] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [creditNotes, setCreditNotes] = useState([]);
+  const [recurringContracts, setRecurringContracts] = useState([]);
+  const [bankTransactions, setBankTransactions] = useState([]);
+  const [importingBankStatement, setImportingBankStatement] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
   const [quotes, setQuotes] = useState([]);
   const [salesOrders, setSalesOrders] = useState([]);
   const [selectedSalesOrders, setSelectedSalesOrders] = useState(new Set());
   const [selectedOrders, setSelectedOrders] = useState(new Set());
   const [selectedIncidents, setSelectedIncidents] = useState(new Set());
+  const [incidentTechnicianFilter, setIncidentTechnicianFilter] = useState("all");
+  const [activityLog, setActivityLog] = useState([]);
+  const [loadingActivityLog, setLoadingActivityLog] = useState(false);
+  const [activityTableFilter, setActivityTableFilter] = useState("all");
+  const [activityActionFilter, setActivityActionFilter] = useState("all");
+  const [activityUserFilter, setActivityUserFilter] = useState("all");
+  const [activityDateFrom, setActivityDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
+  const [activityDateTo, setActivityDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [financialDateFrom, setFinancialDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
+  const [financialDateTo, setFinancialDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [invoicePaymentsAll, setInvoicePaymentsAll] = useState([]);
+  const [purchasePaymentsAll, setPurchasePaymentsAll] = useState([]);
+  const [loadingFinancial, setLoadingFinancial] = useState(false);
+  const [incidentEquipmentFilter, setIncidentEquipmentFilter] = useState("all");
+  const [incidentDateFrom, setIncidentDateFrom] = useState("");
+  const [incidentDateTo, setIncidentDateTo] = useState("");
+  const [incidentCompletedFrom, setIncidentCompletedFrom] = useState("");
+  const [incidentCompletedTo, setIncidentCompletedTo] = useState("");
   const [selectedQuotes, setSelectedQuotes] = useState(new Set());
   const [incidents, setIncidents] = useState([]);
 
@@ -3734,6 +4893,14 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [purchaseDetail, setPurchaseDetail] = useState(null);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
+  const [showAddTool, setShowAddTool] = useState(false);
+  const [showBulkTools, setShowBulkTools] = useState(false);
+  const [editingTool, setEditingTool] = useState(null);
+  const [toolStatusFilter, setToolStatusFilter] = useState("all");
+  const [toolTechnicianFilter, setToolTechnicianFilter] = useState("all");
+  const [groupToolsByTechnician, setGroupToolsByTechnician] = useState(false);
+  const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [editingMaterial, setEditingMaterial] = useState(null);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
   const [showAddTaxRate, setShowAddTaxRate] = useState(false);
@@ -3747,9 +4914,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [showAddNcf, setShowAddNcf] = useState(false);
   const [editingNcf, setEditingNcf] = useState(null);
   const [showAddInvoice, setShowAddInvoice] = useState(false);
+  const [showAddContract, setShowAddContract] = useState(false);
+  const [editingContract, setEditingContract] = useState(null);
   const [showStatement, setShowStatement] = useState(false);
   const [invoiceDetail, setInvoiceDetail] = useState(null);
   const [invoicePrefill, setInvoicePrefill] = useState(null);
+  const [partialInvoiceFor, setPartialInvoiceFor] = useState(null);
   const [showAddCreditNote, setShowAddCreditNote] = useState(false);
   const [creditNoteDetail, setCreditNoteDetail] = useState(null);
   const [showAddQuote, setShowAddQuote] = useState(false);
@@ -3769,10 +4939,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [technicianFilter, setTechnicianFilter] = useState("all");
+  const [orderEquipmentFilter, setOrderEquipmentFilter] = useState("all");
+  const [orderDateFrom, setOrderDateFrom] = useState("");
+  const [orderDateTo, setOrderDateTo] = useState("");
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess] = await Promise.all([
+    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, mats, wot, rcon, banktx] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
@@ -3798,6 +4971,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       supabase.from("chart_of_accounts").select("*").eq("company_id", companyId).order("code"),
       supabase.from("tax_rates").select("*").eq("company_id", companyId).order("name"),
       supabase.from("cash_sessions").select("*").eq("company_id", companyId).order("opened_at", { ascending: false }),
+      supabase.from("tools").select("*").eq("company_id", companyId).order("name"),
+      supabase.from("inventory_materials").select("*").eq("company_id", companyId).order("name"),
+      supabase.from("work_order_technicians").select("*").eq("company_id", companyId),
+      supabase.from("recurring_contracts").select("*").eq("company_id", companyId).order("next_invoice_date"),
+      supabase.from("bank_transactions").select("*").eq("company_id", companyId).order("transaction_date", { ascending: false }),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -3824,16 +5002,264 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setChartOfAccounts(coa.data || []);
     setTaxRates(txr.data || []);
     setCashSessions(csess.data || []);
+    setTools(tls.data || []);
+    setMaterials(mats.data || []);
+    setOrderTechnicians(wot.data || []);
+    setRecurringContracts(rcon.data || []);
+    setBankTransactions(banktx.data || []);
     setLoadingScope(false);
   };
 
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [companyId]);
 
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => { /* silencioso: la app funciona igual sin esto */ });
+    }
+  }, []);
+
+  const loadNotifications = async () => {
+    if (!profile?.id) return;
+    const { data } = await supabase.from("notifications").select("*").eq("profile_id", profile.id).order("created_at", { ascending: false }).limit(50);
+    setNotifications(data || []);
+  };
+  useEffect(() => { loadNotifications(); /* eslint-disable-next-line */ }, [profile?.id, companyId]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (!reg) return;
+        const sub = await reg.pushManager.getSubscription();
+        setPushSubscribed(!!sub);
+      } catch { /* silencioso */ }
+    })();
+  }, []);
+
+  const createNotification = async (targetProfileId, { title, body, link_view, category }) => {
+    if (!targetProfileId) return;
+    const { data, error } = await supabase.from("notifications").insert({
+      company_id: companyId, profile_id: targetProfileId, title, body: body || null, link_view: link_view || null, category: category || "general",
+    }).select().single();
+    if (error || !data) return;
+    if (targetProfileId === profile.id) setNotifications((prev) => [data, ...prev]);
+    try {
+      const targetProfile = profiles.find((p) => p.id === targetProfileId);
+      if (targetProfile?.notify_email !== false) {
+        supabase.functions.invoke("send-notification-email", { body: { notification_id: data.id, to_profile_id: targetProfileId, title, body: body || "" } })
+          .then(({ error: fnError }) => supabase.from("notifications").update({ email_status: fnError ? "failed" : "sent" }).eq("id", data.id))
+          .catch(() => supabase.from("notifications").update({ email_status: "failed" }).eq("id", data.id));
+      }
+      if (targetProfile?.notify_push !== false) {
+        supabase.functions.invoke("send-web-push", { body: { profile_id: targetProfileId, title, body: body || "" } })
+          .then(({ error: fnError }) => supabase.from("notifications").update({ push_status: fnError ? "failed" : "sent" }).eq("id", data.id))
+          .catch(() => supabase.from("notifications").update({ push_status: "failed" }).eq("id", data.id));
+      }
+    } catch { /* el envío real es best-effort; la notificación ya quedó visible en la app */ }
+  };
+
+  const notifyManyTechnicians = async (technicianIds, payload) => {
+    const uniqueIds = Array.from(new Set(technicianIds.filter(Boolean)));
+    for (const techId of uniqueIds) {
+      const targetProfile = profiles.find((p) => p.technician_id === techId);
+      if (targetProfile) await createNotification(targetProfile.id, payload);
+    }
+  };
+
+  const markNotificationRead = async (id) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+    await supabase.from("notifications").update({ is_read: true }).eq("id", id);
+  };
+  const markAllNotificationsRead = async () => {
+    const unreadIds = notifications.filter((n) => !n.is_read).map((n) => n.id);
+    if (unreadIds.length === 0) return;
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    await supabase.from("notifications").update({ is_read: true }).in("id", unreadIds);
+  };
+
+  const urlBase64ToUint8Array = (base64String) => {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const rawData = window.atob(base64);
+    return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+  };
+
+  const enablePushNotifications = async (vapidPublicKey) => {
+    try {
+      if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        setErrorMsg("Este navegador no soporta notificaciones push.");
+        return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { setErrorMsg("No se concedió permiso de notificaciones."); return; }
+      await navigator.serviceWorker.register("/sw.js");
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) });
+      const json = sub.toJSON();
+      await supabase.from("push_subscriptions").upsert({
+        company_id: companyId, profile_id: profile.id, endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth,
+      }, { onConflict: "endpoint" });
+      setPushSubscribed(true);
+    } catch (err) {
+      setErrorMsg("No se pudo activar el push: " + err.message);
+    }
+  };
+  const disablePushNotifications = async () => {
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = await reg?.pushManager.getSubscription();
+      if (sub) {
+        await supabase.from("push_subscriptions").delete().eq("endpoint", sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setPushSubscribed(false);
+    } catch { /* silencioso */ }
+  };
+
+  const loadActivityLog = async () => {
+    setLoadingActivityLog(true);
+    let query = supabase.from("activity_log").select("*").eq("company_id", companyId).order("changed_at", { ascending: false }).limit(2000);
+    if (activityDateFrom) query = query.gte("changed_at", `${activityDateFrom}T00:00:00`);
+    if (activityDateTo) query = query.lte("changed_at", `${activityDateTo}T23:59:59`);
+    const { data, error } = await query;
+    setLoadingActivityLog(false);
+    if (error) { setErrorMsg(error.message); return; }
+    setActivityLog(data || []);
+  };
+  useEffect(() => {
+    if (view === "activityLog" && hasPerm("activityLog")) loadActivityLog();
+    // eslint-disable-next-line
+  }, [view, activityDateFrom, activityDateTo, companyId]);
+
+  const activityLogFiltered = useMemo(() => activityLog.filter((l) =>
+    (activityTableFilter === "all" || l.table_name === activityTableFilter) &&
+    (activityActionFilter === "all" || l.action === activityActionFilter) &&
+    (activityUserFilter === "all" || l.changed_by_email === activityUserFilter)
+  ), [activityLog, activityTableFilter, activityActionFilter, activityUserFilter]);
+
+  const activityUsers = useMemo(() => Array.from(new Set(activityLog.map((l) => l.changed_by_email).filter(Boolean))).sort(), [activityLog]);
+  const activityTablesPresent = useMemo(() => Array.from(new Set(activityLog.map((l) => l.table_name))).sort(), [activityLog]);
+
+  const describeActivityEntry = (l) => {
+    const d = l.new_data || l.old_data || {};
+    return d.title || d.name || d.quote_number || d.invoice_number || d.code || d.number || "";
+  };
+
+  const loadFinancialData = async () => {
+    setLoadingFinancial(true);
+    const fromIso = `${financialDateFrom}T00:00:00`;
+    const toIso = `${financialDateTo}T23:59:59`;
+    const [ip, pp] = await Promise.all([
+      supabase.from("invoice_payments").select("id, amount, method, payment_date, invoice_id").gte("payment_date", fromIso).lte("payment_date", toIso),
+      supabase.from("purchase_payments").select("id, amount, payment_date, purchase_id").gte("payment_date", fromIso).lte("payment_date", toIso),
+    ]);
+    setLoadingFinancial(false);
+    if (ip.error) { setErrorMsg(ip.error.message); return; }
+    if (pp.error) { setErrorMsg(pp.error.message); return; }
+    setInvoicePaymentsAll(ip.data || []);
+    setPurchasePaymentsAll(pp.data || []);
+  };
+  useEffect(() => {
+    if ((view === "financialReports" || view === "bankReconciliation") && (hasPerm("financialReports") || hasPerm("bankReconciliation"))) loadFinancialData();
+    // eslint-disable-next-line
+  }, [view, financialDateFrom, financialDateTo, companyId]);
+
+  const financialPnl = useMemo(() => {
+    const inRange = (dateStr) => dateStr && dateStr >= financialDateFrom && dateStr <= financialDateTo;
+    const revenue = invoices.filter((i) => i.status !== "anulada" && inRange(i.invoice_date)).reduce((sum, i) => sum + Number(i.subtotal || 0), 0);
+    const creditNotesTotal = creditNotes.filter((n) => inRange(n.note_date)).reduce((sum, n) => sum + Number(n.subtotal || 0), 0);
+    const netRevenue = revenue - creditNotesTotal;
+    const purchasesCost = purchases.filter((p) => inRange(p.purchase_date)).reduce((sum, p) => sum + (Number(p.total || 0) - Number(p.itbis_amount || 0)), 0);
+    const otherExpensesCost = otherExpenses.filter((e) => inRange(e.expense_date)).reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const netIncome = netRevenue - purchasesCost - otherExpensesCost;
+    return { revenue, creditNotesTotal, netRevenue, purchasesCost, otherExpensesCost, netIncome };
+  }, [invoices, creditNotes, purchases, otherExpenses, financialDateFrom, financialDateTo]);
+
+  const financialCashFlow = useMemo(() => {
+    const cashIn = invoicePaymentsAll.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const cashOutSuppliers = purchasePaymentsAll.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const inRange = (dateStr) => dateStr && dateStr >= financialDateFrom && dateStr <= financialDateTo;
+    const cashOutExpenses = otherExpenses.filter((e) => inRange(e.expense_date)).reduce((sum, e) => sum + Number(e.amount || 0), 0);
+    const cashOut = cashOutSuppliers + cashOutExpenses;
+    return { cashIn, cashOutSuppliers, cashOutExpenses, cashOut, net: cashIn - cashOut };
+  }, [invoicePaymentsAll, purchasePaymentsAll, otherExpenses, financialDateFrom, financialDateTo]);
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const dueContracts = useMemo(
+    () => recurringContracts.filter((c) => c.is_active && c.next_invoice_date <= todayStr)
+      .sort((a, b) => (a.next_invoice_date || "").localeCompare(b.next_invoice_date || "")),
+    [recurringContracts, todayStr]
+  );
+
+  const overdueReceivables = useMemo(() => {
+    const pending = invoices.filter((inv) => inv.status !== "anulada" && (Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0)) > 0.009)
+      .map((inv) => ({ ...inv, balance: Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0), days: Math.max(0, Math.floor((Date.now() - new Date(inv.invoice_date).getTime()) / 86400000)) }));
+    const overdue = pending.filter((inv) => inv.days > 30);
+    return { count: overdue.length, total: overdue.reduce((s, inv) => s + inv.balance, 0) };
+  }, [invoices]);
+
+  const financialMonthlyChart = useMemo(() => {
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
+      months.push({ key: d.toISOString().slice(0, 7), label: d.toLocaleDateString("es-DO", { month: "short", year: "2-digit" }) });
+    }
+    return months.map((m) => {
+      const rev = invoices.filter((i) => i.status !== "anulada" && (i.invoice_date || "").slice(0, 7) === m.key).reduce((sum, i) => sum + Number(i.subtotal || 0), 0);
+      const exp = purchases.filter((p) => (p.purchase_date || "").slice(0, 7) === m.key).reduce((sum, p) => sum + (Number(p.total || 0) - Number(p.itbis_amount || 0)), 0)
+        + otherExpenses.filter((e) => (e.expense_date || "").slice(0, 7) === m.key).reduce((sum, e) => sum + Number(e.amount || 0), 0);
+      return { name: m.label, Ingresos: rev, Gastos: exp };
+    });
+  }, [invoices, purchases, otherExpenses]);
+
+  const myOrderIdsAsSecondary = useMemo(
+    () => new Set(orderTechnicians.filter((wt) => wt.technician_id === profile.technician_id).map((wt) => wt.work_order_id)),
+    [orderTechnicians, profile.technician_id]
+  );
   const visibleOrders = useMemo(
-    () => isTecnico ? orders.filter((o) => o.technician_id === profile.technician_id) : orders,
-    [orders, isTecnico, profile.technician_id]
+    () => isTecnico ? orders.filter((o) => o.technician_id === profile.technician_id || myOrderIdsAsSecondary.has(o.id)) : orders,
+    [orders, isTecnico, profile.technician_id, myOrderIdsAsSecondary]
   );
   const scopedOrders = useMemo(() => visibleOrders.filter((o) => branchFilter === "all" || o.branch_id === branchFilter), [visibleOrders, branchFilter]);
+
+  const visibleIncidents = useMemo(
+    () => isTecnico ? incidents.filter((i) => i.technician_id === profile.technician_id) : incidents,
+    [incidents, isTecnico, profile.technician_id]
+  );
+  const incidentsFiltered = useMemo(() => visibleIncidents.filter((i) =>
+    (incidentTechnicianFilter === "all" || (incidentTechnicianFilter === "none" ? !i.technician_id : i.technician_id === incidentTechnicianFilter)) &&
+    (incidentEquipmentFilter === "all" || i.equipment_id === incidentEquipmentFilter) &&
+    (!incidentDateFrom || (i.created_at && i.created_at.slice(0, 10) >= incidentDateFrom)) &&
+    (!incidentDateTo || (i.created_at && i.created_at.slice(0, 10) <= incidentDateTo)) &&
+    (!incidentCompletedFrom || (i.completed_at && i.completed_at.slice(0, 10) >= incidentCompletedFrom)) &&
+    (!incidentCompletedTo || (i.completed_at && i.completed_at.slice(0, 10) <= incidentCompletedTo))
+  ), [visibleIncidents, incidentTechnicianFilter, incidentEquipmentFilter, incidentDateFrom, incidentDateTo, incidentCompletedFrom, incidentCompletedTo]);
+  // Un técnico solo puede reportar incidentes si su ficha de técnico tiene esa casilla activada;
+  // admin/supervisor siguen controlados por el permiso general de la sección.
+  const canReportIncident = isTecnico
+    ? !!technicians.find((t) => t.id === profile.technician_id)?.can_create_incidents
+    : canEdit("incidents");
+
+  const visibleTools = useMemo(
+    () => isTecnico ? tools.filter((t) => t.technician_id === profile.technician_id) : tools,
+    [tools, isTecnico, profile.technician_id]
+  );
+  const toolsFiltered = useMemo(() => visibleTools.filter((t) =>
+    (toolStatusFilter === "all" || t.status === toolStatusFilter) &&
+    (toolTechnicianFilter === "all" || (toolTechnicianFilter === "none" ? !t.technician_id : t.technician_id === toolTechnicianFilter))
+  ), [visibleTools, toolStatusFilter, toolTechnicianFilter]);
+  const toolGroups = useMemo(() => {
+    if (!groupToolsByTechnician) return null;
+    const map = new Map();
+    technicians.forEach((tech) => map.set(tech.id, { id: tech.id, name: tech.name, tools: [] }));
+    map.set("none", { id: "none", name: "Sin asignar", tools: [] });
+    toolsFiltered.forEach((t) => {
+      const key = t.technician_id && map.has(t.technician_id) ? t.technician_id : "none";
+      map.get(key).tools.push(t);
+    });
+    return Array.from(map.values()).filter((g) => g.tools.length > 0);
+  }, [groupToolsByTechnician, toolsFiltered, technicians]);
 
   const ordersByDate = useMemo(() => {
     const map = {};
@@ -3862,9 +5288,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     if (typeFilter !== "all" && o.type !== typeFilter) return false;
     if (statusFilter !== "all" && o.status !== statusFilter) return false;
     if (technicianFilter !== "all" && o.technician_id !== technicianFilter) return false;
+    if (orderEquipmentFilter !== "all" && o.equipment_id !== orderEquipmentFilter) return false;
+    if (orderDateFrom && (!o.scheduled || o.scheduled < orderDateFrom)) return false;
+    if (orderDateTo && (!o.scheduled || o.scheduled > orderDateTo)) return false;
     if (search && !o.title.toLowerCase().includes(search.toLowerCase()) && !(o.code || "").toLowerCase().includes(search.toLowerCase())) return false;
     return true;
-  }), [scopedOrders, typeFilter, statusFilter, technicianFilter, search]);
+  }), [scopedOrders, typeFilter, statusFilter, technicianFilter, orderEquipmentFilter, orderDateFrom, orderDateTo, search]);
 
   const kpi = useMemo(() => {
     const pend = scopedOrders.filter((o) => o.status === "pendiente").length;
@@ -3885,6 +5314,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const techStats = useMemo(() => technicians.map((t) => {
     const own = orders.filter((o) => o.technician_id === t.id);
+    const ownIncidents = incidents.filter((i) => i.technician_id === t.id);
     return {
       ...t,
       total: own.length,
@@ -3893,19 +5323,83 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       preventivo: own.filter((o) => o.type === "preventivo").length,
       correctivo: own.filter((o) => o.type === "correctivo").length,
       predictivo: own.filter((o) => o.type === "predictivo").length,
+      incidentesTotal: ownIncidents.length,
+      incidentesAbiertos: ownIncidents.filter((i) => i.status === "abierto" || i.status === "en_revision").length,
+      incidentesCompletados: ownIncidents.filter((i) => i.status === "resuelto").length,
     };
-  }), [technicians, orders]);
+  }), [technicians, orders, incidents]);
 
   const equipStats = useMemo(() => equipment.map((eq) => {
     const own = orders.filter((o) => o.equipment_id === eq.id);
-    return { ...eq, total: own.length, correctivo: own.filter((o) => o.type === "correctivo").length, open: own.filter((o) => o.status !== "completada").length };
-  }), [equipment, orders]);
+    const ownIncidents = incidents.filter((i) => i.equipment_id === eq.id);
+    return {
+      ...eq,
+      total: own.length,
+      correctivo: own.filter((o) => o.type === "correctivo").length,
+      open: own.filter((o) => o.status !== "completada").length,
+      incidentesTotal: ownIncidents.length,
+      incidentesAbiertos: ownIncidents.filter((i) => i.status === "abierto" || i.status === "en_revision").length,
+    };
+  }), [equipment, orders, incidents]);
 
   const techChartData = useMemo(() => techStats.map((t) => ({ name: t.name.split(" ")[0], Preventivo: t.preventivo, Correctivo: t.correctivo, Predictivo: t.predictivo })), [techStats]);
   const equipChartData = useMemo(
     () => [...equipStats].sort((a, b) => b.correctivo - a.correctivo).slice(0, 8).map((eq) => ({ name: eq.name, Correctivos: eq.correctivo })),
     [equipStats]
   );
+  const incidentEquipChartData = useMemo(
+    () => [...equipStats].sort((a, b) => b.incidentesTotal - a.incidentesTotal).slice(0, 8).filter((eq) => eq.incidentesTotal > 0).map((eq) => ({ name: eq.name, Incidentes: eq.incidentesTotal })),
+    [equipStats]
+  );
+
+  const incidentSlaStats = useMemo(() => {
+    const hoursBetween = (a, b) => (new Date(b).getTime() - new Date(a).getTime()) / (1000 * 60 * 60);
+    const byPriority = {};
+    Object.keys(PRIORITY_CFG).forEach((k) => { byPriority[k] = { responseHours: [], resolutionHours: [] }; });
+    incidents.forEach((i) => {
+      const bucket = byPriority[i.priority] || (byPriority[i.priority] = { responseHours: [], resolutionHours: [] });
+      if (i.attended_at && i.created_at) bucket.responseHours.push(hoursBetween(i.created_at, i.attended_at));
+      if (i.completed_at && i.created_at) bucket.resolutionHours.push(hoursBetween(i.created_at, i.completed_at));
+    });
+    const avg = (arr) => arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+    const fmtHours = (h) => h === null ? "—" : h < 48 ? `${h.toFixed(1)} h` : `${(h / 24).toFixed(1)} días`;
+    return Object.entries(byPriority).map(([key, v]) => ({
+      key,
+      label: PRIORITY_CFG[key]?.label || key,
+      color: PRIORITY_CFG[key]?.color || C.muted,
+      avgResponseHours: avg(v.responseHours),
+      avgResolutionHours: avg(v.resolutionHours),
+      responseLabel: fmtHours(avg(v.responseHours)),
+      resolutionLabel: fmtHours(avg(v.resolutionHours)),
+      nResponse: v.responseHours.length,
+      nResolution: v.resolutionHours.length,
+    }));
+  }, [incidents]);
+
+  const isDueByUsage = (item) => item.usage_unit && item.usage_interval && item.current_usage != null &&
+    (Number(item.current_usage) - Number(item.usage_last_maintenance || 0)) >= Number(item.usage_interval);
+  const isDueByDate = (item) => item.maintenance_frequency_days && item.next_maintenance_date && item.next_maintenance_date <= todayStr;
+
+  const dueEquipment = useMemo(
+    () => equipment.filter((e) => isDueByDate(e) || isDueByUsage(e))
+      .sort((a, b) => (a.next_maintenance_date || "").localeCompare(b.next_maintenance_date || "")),
+    [equipment, todayStr]
+  );
+  const dueClientAssets = useMemo(
+    () => clientAssets.filter((a) => isDueByDate(a) || isDueByUsage(a))
+      .sort((a, b) => (a.next_maintenance_date || "").localeCompare(b.next_maintenance_date || "")),
+    [clientAssets, todayStr]
+  );
+  const upcomingEquipment = useMemo(() => {
+    const in7 = new Date(); in7.setDate(in7.getDate() + 7);
+    const in7Str = in7.toISOString().slice(0, 10);
+    return equipment.filter((e) => !isDueByDate(e) && !isDueByUsage(e) && e.maintenance_frequency_days && e.next_maintenance_date && e.next_maintenance_date > todayStr && e.next_maintenance_date <= in7Str);
+  }, [equipment, todayStr]);
+  const upcomingClientAssets = useMemo(() => {
+    const in7 = new Date(); in7.setDate(in7.getDate() + 7);
+    const in7Str = in7.toISOString().slice(0, 10);
+    return clientAssets.filter((a) => !isDueByDate(a) && !isDueByUsage(a) && a.maintenance_frequency_days && a.next_maintenance_date && a.next_maintenance_date > todayStr && a.next_maintenance_date <= in7Str);
+  }, [clientAssets, todayStr]);
 
   const filteredClients = useMemo(() => {
     if (!clientSearch.trim()) return clients;
@@ -3962,7 +5456,17 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   }, [clientAssets]);
 
   // ---- Órdenes ----
-  const createOrder = async (payload, files, linkedIncidentId, linkedSalesOrderId) => {
+  const syncOrderTechnicians = async (workOrderId, techIds) => {
+    await supabase.from("work_order_technicians").delete().eq("work_order_id", workOrderId);
+    setOrderTechnicians((prev) => prev.filter((wt) => wt.work_order_id !== workOrderId));
+    if (techIds && techIds.length > 0) {
+      const rows = techIds.map((technician_id) => ({ company_id: companyId, work_order_id: workOrderId, technician_id }));
+      const { data, error } = await supabase.from("work_order_technicians").insert(rows).select();
+      if (!error && data) setOrderTechnicians((prev) => [...prev, ...data]);
+    }
+  };
+
+  const createOrder = async (payload, files, extraTechIds, linkedIncidentId, linkedSalesOrderId) => {
     setSaving(true);
     const code = `OT-${String(orders.length + 1).padStart(4, "0")}`;
     const { data, error } = await supabase.from("work_orders").insert({ ...payload, code, company_id: companyId, status: "pendiente" }).select().single();
@@ -3971,6 +5475,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setShowOrderForm(false);
     setOrderFromIncident(null);
     setOrderFromSalesOrder(null);
+    if (extraTechIds && extraTechIds.length > 0) await syncOrderTechnicians(data.id, extraTechIds);
+    await notifyManyTechnicians([data.technician_id, ...(extraTechIds || [])], {
+      title: `Nueva orden asignada: ${data.code}`,
+      body: data.title,
+      link_view: "orders",
+      category: "order_assigned",
+    });
     if (linkedIncidentId) {
       await supabase.from("incidents").update({ work_order_id: data.id, status: "convertido" }).eq("id", linkedIncidentId);
       setIncidents((prev) => prev.map((i) => (i.id === linkedIncidentId ? { ...i, work_order_id: data.id, status: "convertido" } : i)));
@@ -4038,11 +5549,21 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     });
   };
 
-  const updateOrder = async (payload, files) => {
+  const updateOrder = async (payload, files, extraTechIds) => {
     setSaving(true);
+    const previousTechnicianId = editingOrder.technician_id;
     const { data, error } = await supabase.from("work_orders").update(payload).eq("id", editingOrder.id).select().single();
     if (error) { setSaving(false); setErrorMsg(error.message); return; }
     setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+    await syncOrderTechnicians(editingOrder.id, extraTechIds || []);
+    if (data.technician_id && data.technician_id !== previousTechnicianId) {
+      await notifyManyTechnicians([data.technician_id], {
+        title: `Te asignaron la orden ${data.code}`,
+        body: data.title,
+        link_view: "orders",
+        category: "order_assigned",
+      });
+    }
     if (files && files.length > 0) {
       for (const file of files) {
         const ext = file.name.split(".").pop();
@@ -4119,7 +5640,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setDetailOrderChecklist([]);
   };
 
-  const saveOrderDetail = async (order, notes, photoFile, newStatus) => {
+  const saveOrderDetail = async (order, notes, photoFile, newStatus, laborHours, laborRate) => {
     setSaving(true);
     let photo_url = order.photo_url || null;
     if (photoFile) {
@@ -4132,11 +5653,29 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     }
     const payload = { resolution_notes: notes, photo_url };
     if (newStatus) payload.status = newStatus;
+    if (laborHours !== undefined) payload.labor_hours = laborHours === "" ? null : Number(laborHours);
+    if (laborRate !== undefined) payload.labor_rate_used = laborRate === "" ? null : Number(laborRate);
     const { data, error } = await supabase.from("work_orders").update(payload).eq("id", order.id).select().single();
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
     setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
     setDetailOrder(null);
+  };
+
+  const saveClientSignature = async (order, dataUrl, signerName) => {
+    const blob = await (await fetch(dataUrl)).blob();
+    const path = `signatures/${companyId}/${order.id}-${Date.now()}.png`;
+    const { error: upError } = await supabase.storage.from("evidence").upload(path, blob, { contentType: "image/png", upsert: true });
+    if (upError) { setErrorMsg(upError.message); return; }
+    const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
+    const { data, error } = await supabase.from("work_orders").update({
+      client_signature_url: pub.publicUrl,
+      client_signature_name: signerName,
+      client_signature_at: new Date().toISOString(),
+    }).eq("id", order.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+    setDetailOrder((prev) => (prev ? data : prev));
   };
 
   // ---- Sucursales ----
@@ -4214,6 +5753,78 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setClientAssets((prev) => prev.filter((a) => a.id !== id));
   };
 
+  // ---- Mantenimiento preventivo recurrente ----
+  const generateMaintenanceOrder = async (source, sourceType, code) => {
+    const isEquip = sourceType === "equipment";
+    if (!source.branch_id) {
+      setErrorMsg(`"${source.name}" no tiene sucursal responsable asignada. Edítalo primero para indicarla.`);
+      return false;
+    }
+    const payload = {
+      company_id: companyId,
+      branch_id: source.branch_id,
+      equipment_id: isEquip ? source.id : null,
+      client_asset_id: isEquip ? null : source.id,
+      client_id: isEquip ? null : source.client_id,
+      technician_id: source.default_technician_id || null,
+      type: "preventivo",
+      priority: "media",
+      title: `Mantenimiento preventivo — ${source.name}`,
+      scheduled: todayStr,
+      code,
+      status: "pendiente",
+    };
+    const { data, error } = await supabase.from("work_orders").insert(payload).select().single();
+    if (error) { setErrorMsg(error.message); return false; }
+    setOrders((prev) => [data, ...prev]);
+
+    const updatePayload = {};
+    if (source.maintenance_frequency_days && source.next_maintenance_date) {
+      const nextDate = new Date(`${todayStr}T00:00:00`);
+      nextDate.setDate(nextDate.getDate() + Number(source.maintenance_frequency_days));
+      updatePayload.next_maintenance_date = nextDate.toISOString().slice(0, 10);
+    }
+    if (source.usage_unit && source.usage_interval && source.current_usage != null) {
+      updatePayload.usage_last_maintenance = source.current_usage;
+    }
+    const table = isEquip ? "equipment" : "client_assets";
+    const { data: updated, error: updError } = await supabase.from(table).update(updatePayload).eq("id", source.id).select().single();
+    if (!updError && updated) {
+      if (isEquip) setEquipment((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
+      else setClientAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    }
+    return true;
+  };
+
+  const generateOneMaintenanceOrder = async (source, sourceType) => {
+    setSaving(true);
+    const code = `OT-${String(orders.length + 1).padStart(4, "0")}`;
+    await generateMaintenanceOrder(source, sourceType, code);
+    setSaving(false);
+  };
+
+  const generateAllDueMaintenance = async () => {
+    setSaving(true);
+    let counter = orders.length;
+    for (const eq of dueEquipment) {
+      counter += 1;
+      await generateMaintenanceOrder(eq, "equipment", `OT-${String(counter).padStart(4, "0")}`);
+    }
+    for (const asset of dueClientAssets) {
+      counter += 1;
+      await generateMaintenanceOrder(asset, "client_asset", `OT-${String(counter).padStart(4, "0")}`);
+    }
+    setSaving(false);
+  };
+
+  const updateUsageReading = async (source, sourceType, newValue) => {
+    const table = sourceType === "equipment" ? "equipment" : "client_assets";
+    const { data, error } = await supabase.from(table).update({ current_usage: newValue }).eq("id", source.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    if (sourceType === "equipment") setEquipment((prev) => prev.map((e) => (e.id === data.id ? data : e)));
+    else setClientAssets((prev) => prev.map((a) => (a.id === data.id ? data : a)));
+  };
+
   // ---- Catálogo de productos ----
   const saveProduct = async (payload) => {
     setSaving(true);
@@ -4286,6 +5897,96 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     const { error } = await supabase.from("other_expenses").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); return; }
     setOtherExpenses((prev) => prev.filter((e) => e.id !== id));
+  };
+
+  // ---- Inventario: Herramientas ----
+  const saveTool = async (payload) => {
+    setSaving(true);
+    if (editingTool) {
+      const technicianChanged = (payload.technician_id || null) !== (editingTool.technician_id || null);
+      const finalPayload = technicianChanged ? { ...payload, received_at: null } : payload;
+      const { data, error } = await supabase.from("tools").update(finalPayload).eq("id", editingTool.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setTools((prev) => prev.map((t) => (t.id === data.id ? data : t)));
+      setEditingTool(null);
+    } else {
+      const { data, error } = await supabase.from("tools").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setTools((prev) => [data, ...prev]);
+      setShowAddTool(false);
+    }
+  };
+  const deleteTool = async (id) => {
+    if (!window.confirm("¿Eliminar esta herramienta?")) return;
+    const { error } = await supabase.from("tools").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => prev.filter((t) => t.id !== id));
+  };
+  const createBulkTools = async (rows) => {
+    if (rows.length === 0) return;
+    setSaving(true);
+    const payload = rows.map((r) => ({
+      company_id: companyId,
+      name: r.name.trim(),
+      category: r.category?.trim() || null,
+      serial_number: r.serial_number?.trim() || null,
+      branch_id: r.branch_id || null,
+      technician_id: r.technician_id || null,
+      status: r.technician_id ? "asignada" : "disponible",
+    }));
+    const { data, error } = await supabase.from("tools").insert(payload).select();
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => [...(data || []), ...prev]);
+    setShowBulkTools(false);
+  };
+  const assignTool = async (id, technicianId) => {
+    const { data, error } = await supabase.from("tools")
+      .update({ technician_id: technicianId || null, status: technicianId ? "asignada" : "disponible", received_at: null })
+      .eq("id", id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => prev.map((t) => (t.id === data.id ? data : t)));
+  };
+  const confirmToolReceipt = async (id) => {
+    const { data, error } = await supabase.from("tools")
+      .update({ received_at: new Date().toISOString() })
+      .eq("id", id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => prev.map((t) => (t.id === data.id ? data : t)));
+  };
+
+  // ---- Inventario: Materiales sobrantes ----
+  const saveMaterial = async (payload) => {
+    setSaving(true);
+    if (editingMaterial) {
+      const { data, error } = await supabase.from("inventory_materials").update(payload).eq("id", editingMaterial.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setMaterials((prev) => prev.map((m) => (m.id === data.id ? data : m)));
+      setEditingMaterial(null);
+    } else {
+      const { data, error } = await supabase.from("inventory_materials").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setMaterials((prev) => [data, ...prev]);
+      setShowAddMaterial(false);
+    }
+  };
+  const deleteMaterial = async (id) => {
+    if (!window.confirm("¿Eliminar este material?")) return;
+    const { error } = await supabase.from("inventory_materials").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setMaterials((prev) => prev.filter((m) => m.id !== id));
+  };
+  const consumeMaterialStock = async (materialId, quantityUsed) => {
+    const mat = materials.find((m) => m.id === materialId);
+    if (!mat) return;
+    const newQty = Math.max(0, Number(mat.quantity || 0) - Number(quantityUsed || 0));
+    const { data, error } = await supabase.from("inventory_materials").update({ quantity: newQty }).eq("id", materialId).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setMaterials((prev) => prev.map((m) => (m.id === data.id ? data : m)));
   };
 
   // ---- Catálogo de cuentas ----
@@ -4636,7 +6337,26 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     }
 
     if (invoicePrefill?.sourceQuoteId) {
-      await supabase.from("quotes").update({ status: "convertida" }).eq("id", invoicePrefill.sourceQuoteId);
+      if (invoicePrefill.partialInvoice && invoicePrefill.partialSelections?.length > 0) {
+        const { data: qItems } = await supabase.from("quote_items").select("*").eq("quote_id", invoicePrefill.sourceQuoteId);
+        let allDone = true;
+        for (const sel of invoicePrefill.partialSelections) {
+          const qi = (qItems || []).find((x) => x.id === sel.quote_item_id);
+          if (!qi) continue;
+          const newInvoiced = Number(qi.quantity_invoiced || 0) + Number(sel.quantity);
+          await supabase.from("quote_items").update({ quantity_invoiced: newInvoiced }).eq("id", qi.id);
+          if (newInvoiced < Number(qi.quantity) - 0.0001) allDone = false;
+        }
+        (qItems || []).forEach((qi) => {
+          const touched = invoicePrefill.partialSelections.find((s) => s.quote_item_id === qi.id);
+          if (!touched && Number(qi.quantity_invoiced || 0) < Number(qi.quantity) - 0.0001) allDone = false;
+        });
+        const { data: updatedQuote } = await supabase.from("quotes").update({ status: allDone ? "convertida" : "parcial" }).eq("id", invoicePrefill.sourceQuoteId).select().single();
+        if (updatedQuote) setQuotes((prev) => prev.map((q) => (q.id === updatedQuote.id ? updatedQuote : q)));
+      } else {
+        const { data: updatedQuote } = await supabase.from("quotes").update({ status: "convertida" }).eq("id", invoicePrefill.sourceQuoteId).select().single();
+        if (updatedQuote) setQuotes((prev) => prev.map((q) => (q.id === updatedQuote.id ? updatedQuote : q)));
+      }
     }
     if (invoicePrefill?.sourceOrderId) {
       const { data: updatedOrder, error: orderUpdateError } = await supabase.from("sales_orders").update({ status: "facturada", invoice_id: invoice.id }).eq("id", invoicePrefill.sourceOrderId).select().single();
@@ -4659,6 +6379,157 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setInvoicePrefill(null);
     setShowAddInvoice(false);
     loadAll();
+  };
+
+  // ---- Contratos recurrentes ----
+  const saveRecurringContract = async (payload) => {
+    setSaving(true);
+    if (editingContract) {
+      const { data, error } = await supabase.from("recurring_contracts").update(payload).eq("id", editingContract.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setRecurringContracts((prev) => prev.map((c) => (c.id === data.id ? data : c)));
+      setEditingContract(null);
+    } else {
+      const { data, error } = await supabase.from("recurring_contracts").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setRecurringContracts((prev) => [...prev, data]);
+      setShowAddContract(false);
+    }
+  };
+  const deleteRecurringContract = async (id) => {
+    if (!window.confirm("¿Eliminar este contrato recurrente? Esto no afecta las facturas ya generadas.")) return;
+    const { error } = await supabase.from("recurring_contracts").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setRecurringContracts((prev) => prev.filter((c) => c.id !== id));
+  };
+  const generateContractInvoice = async (contract) => {
+    if (!contract.ncf_sequence_id) {
+      setErrorMsg(`El contrato "${contract.title}" no tiene una secuencia NCF asignada. Edítalo primero para indicarla.`);
+      return false;
+    }
+    const subtotal = Number(contract.amount);
+    const itbis = contract.is_taxable ? subtotal * 0.18 : 0;
+    const payload = {
+      title: contract.title,
+      client_id: contract.client_id,
+      ncf_sequence_id: contract.ncf_sequence_id,
+      branch_id: contract.branch_id || null,
+      invoice_date: todayStr,
+      discount_pct: 0,
+      subtotal,
+      itbis,
+      exempt_itbis: !contract.is_taxable,
+      applies_norma_0205: false,
+      itbis_retained: false,
+      total: subtotal + itbis,
+    };
+    const items = [{ product_id: null, description: contract.description || contract.title, quantity: 1, unit_price: subtotal, is_taxable: contract.is_taxable, chapter: null }];
+    await createInvoice(payload, items);
+    const nextDate = new Date(`${todayStr}T00:00:00`);
+    nextDate.setDate(nextDate.getDate() + Number(contract.frequency_days));
+    const { data: updated, error: updError } = await supabase.from("recurring_contracts").update({ next_invoice_date: nextDate.toISOString().slice(0, 10) }).eq("id", contract.id).select().single();
+    if (!updError && updated) setRecurringContracts((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+    return true;
+  };
+  const generateOneContractInvoice = async (contract) => {
+    setSaving(true);
+    await generateContractInvoice(contract);
+    setSaving(false);
+  };
+  const generateAllDueContracts = async () => {
+    setSaving(true);
+    for (const c of dueContracts) await generateContractInvoice(c);
+    setSaving(false);
+  };
+
+  // ---- Conciliación bancaria ----
+  const importBankStatement = async (file) => {
+    setImportingBankStatement(true);
+    setErrorMsg("");
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: "array" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+      const pick = (row, names) => { for (const n of names) if (row[n] !== undefined && row[n] !== "") return row[n]; return ""; };
+      const parseDate = (v) => {
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        if (typeof v === "number") { const d = XLSX.SSF.parse_date_code(v); return `${d.y}-${String(d.m).padStart(2, "0")}-${String(d.d).padStart(2, "0")}`; }
+        const s = String(v).trim();
+        const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+        if (m) return `${m[3]}-${String(m[1]).padStart(2, "0")}-${String(m[2]).padStart(2, "0")}`;
+        return s.slice(0, 10);
+      };
+      const parsedRows = rows.map((row) => {
+        const dateVal = pick(row, ["Fecha", "Date", "fecha"]);
+        const desc = pick(row, ["Descripción", "Descripcion", "Description", "Concepto", "descripcion"]);
+        let amount = pick(row, ["Monto", "Amount", "monto"]);
+        if (amount === "") {
+          const credit = Number(pick(row, ["Crédito", "Credito", "Credit", "Depósito", "Deposito"])) || 0;
+          const debit = Number(pick(row, ["Débito", "Debito", "Debit", "Retiro"])) || 0;
+          amount = credit - debit;
+        }
+        return { transaction_date: parseDate(dateVal), description: String(desc || "").trim() || null, amount: Number(amount) || 0 };
+      }).filter((r) => r.transaction_date && r.amount !== 0);
+
+      if (parsedRows.length === 0) {
+        setErrorMsg("No se encontraron filas válidas. El archivo debe tener columnas de Fecha, Descripción y Monto (o Crédito/Débito por separado).");
+        return;
+      }
+      const { data, error } = await supabase.from("bank_transactions").insert(parsedRows.map((r) => ({ ...r, company_id: companyId }))).select();
+      if (error) { setErrorMsg(error.message); return; }
+      setBankTransactions((prev) => [...(data || []), ...prev]);
+    } catch (err) {
+      setErrorMsg("No se pudo leer el archivo: " + err.message);
+    } finally {
+      setImportingBankStatement(false);
+    }
+  };
+
+  const bankMatchCandidate = (tx) => {
+    const txDate = new Date(`${tx.transaction_date}T00:00:00`).getTime();
+    const withinDays = (dateStr, days) => Math.abs(new Date(dateStr).getTime() - txDate) <= days * 86400000;
+    const closeAmount = (a, b) => Math.abs(Number(a) - Number(b)) < 1;
+    if (tx.amount > 0) {
+      const candidates = invoicePaymentsAll.filter((p) => closeAmount(p.amount, tx.amount) && withinDays(p.payment_date, 5));
+      if (candidates.length === 0) return null;
+      const inv = (id) => invoices.find((i) => i.id === id);
+      const best = candidates.sort((a, b) => Math.abs(new Date(a.payment_date) - txDate) - Math.abs(new Date(b.payment_date) - txDate))[0];
+      return { type: "invoice_payment", id: best.id, label: `Cobro factura ${inv(best.invoice_id)?.ncf || ""} — ${fmtMoney(best.amount)}` };
+    } else {
+      const absAmt = Math.abs(tx.amount);
+      const ppCandidates = purchasePaymentsAll.filter((p) => closeAmount(p.amount, absAmt) && withinDays(p.payment_date, 5));
+      if (ppCandidates.length > 0) {
+        const sup = (purchaseId) => { const pu = purchases.find((x) => x.id === purchaseId); return suppliers.find((s) => s.id === pu?.supplier_id)?.name || ""; };
+        const best = ppCandidates.sort((a, b) => Math.abs(new Date(a.payment_date) - txDate) - Math.abs(new Date(b.payment_date) - txDate))[0];
+        return { type: "purchase_payment", id: best.id, label: `Pago a ${sup(best.purchase_id)} — ${fmtMoney(best.amount)}` };
+      }
+      const expCandidates = otherExpenses.filter((e) => closeAmount(e.amount, absAmt) && withinDays(e.expense_date, 5));
+      if (expCandidates.length > 0) {
+        const best = expCandidates.sort((a, b) => Math.abs(new Date(a.expense_date) - txDate) - Math.abs(new Date(b.expense_date) - txDate))[0];
+        return { type: "other_expense", id: best.id, label: `Gasto: ${best.description} — ${fmtMoney(best.amount)}` };
+      }
+      return null;
+    }
+  };
+
+  const reconcileTransaction = async (tx, matchedType, matchedId) => {
+    const { data, error } = await supabase.from("bank_transactions").update({ is_reconciled: true, matched_type: matchedType, matched_id: matchedId }).eq("id", tx.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setBankTransactions((prev) => prev.map((t) => (t.id === data.id ? data : t)));
+  };
+  const unreconcileTransaction = async (tx) => {
+    const { data, error } = await supabase.from("bank_transactions").update({ is_reconciled: false, matched_type: null, matched_id: null }).eq("id", tx.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setBankTransactions((prev) => prev.map((t) => (t.id === data.id ? data : t)));
+  };
+  const deleteBankTransaction = async (id) => {
+    if (!window.confirm("¿Eliminar esta transacción bancaria importada?")) return;
+    const { error } = await supabase.from("bank_transactions").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setBankTransactions((prev) => prev.filter((t) => t.id !== id));
   };
 
   const voidInvoice = async (invoice) => {
@@ -4886,12 +6757,21 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   };
 
   const convertQuoteToInvoice = (quote, items) => {
+    setQuoteDetail(null);
+    setPartialInvoiceFor({ quote, items });
+  };
+
+  const confirmPartialInvoice = (quote, selectedItems) => {
     setInvoicePrefill({
       client_id: quote.client_id,
       sourceQuoteId: quote.id,
-      items: items.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable, chapter: it.chapter || "" })),
+      partialInvoice: true,
+      partialSelections: selectedItems.map((it) => ({ quote_item_id: it.quote_item_id, quantity: it.quantity })),
+      currency: quote.currency,
+      exchange_rate: quote.exchange_rate,
+      items: selectedItems.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable, chapter: it.chapter || "" })),
     });
-    setQuoteDetail(null);
+    setPartialInvoiceFor(null);
     setShowAddInvoice(true);
   };
 
@@ -5047,7 +6927,43 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   };
 
   const markIncidentStatus = async (incident, status) => {
-    const { data, error } = await supabase.from("incidents").update({ status }).eq("id", incident.id).select().single();
+    const payload = { status };
+    if (status === "en_revision" && !incident.attended_at) payload.attended_at = new Date().toISOString();
+    const { data, error } = await supabase.from("incidents").update(payload).eq("id", incident.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setIncidents((prev) => prev.map((i) => (i.id === data.id ? data : i)));
+    setIncidentDetail((prev) => (prev ? data : prev));
+  };
+  const saveIncidentProgress = async (incident, findings) => {
+    const { data, error } = await supabase.from("incidents").update({ findings }).eq("id", incident.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setIncidents((prev) => prev.map((i) => (i.id === data.id ? data : i)));
+    setIncidentDetail((prev) => (prev ? data : prev));
+  };
+  const assignIncidentTechnician = async (id, technicianId) => {
+    const { data, error } = await supabase.from("incidents").update({ technician_id: technicianId || null }).eq("id", id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setIncidents((prev) => prev.map((i) => (i.id === data.id ? data : i)));
+    setIncidentDetail((prev) => (prev ? data : prev));
+    if (technicianId) {
+      await notifyManyTechnicians([technicianId], {
+        title: `Te asignaron el incidente: ${data.title}`,
+        body: data.description || "",
+        link_view: "incidents",
+        category: "incident_assigned",
+      });
+    }
+  };
+  const completeIncident = async (incident, findings) => {
+    const payload = { findings, status: "resuelto", completed_at: new Date().toISOString() };
+    if (!incident.attended_at) payload.attended_at = payload.completed_at;
+    const { data, error } = await supabase.from("incidents").update(payload).eq("id", incident.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setIncidents((prev) => prev.map((i) => (i.id === data.id ? data : i)));
+    setIncidentDetail((prev) => (prev ? data : prev));
+  };
+  const reopenIncident = async (incident) => {
+    const { data, error } = await supabase.from("incidents").update({ status: "abierto", completed_at: null }).eq("id", incident.id).select().single();
     if (error) { setErrorMsg(error.message); return; }
     setIncidents((prev) => prev.map((i) => (i.id === data.id ? data : i)));
     setIncidentDetail((prev) => (prev ? data : prev));
@@ -5085,16 +7001,16 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   };
 
   // ---- Técnicos ----
-  const saveTech = async (name, specialty, branchId) => {
+  const saveTech = async (name, specialty, branchId, canCreateIncidents, hourlyRate) => {
     setSaving(true);
     if (editingTech) {
-      const { data, error } = await supabase.from("technicians").update({ name, specialty, branch_id: branchId }).eq("id", editingTech.id).select().single();
+      const { data, error } = await supabase.from("technicians").update({ name, specialty, branch_id: branchId, can_create_incidents: canCreateIncidents, hourly_rate: hourlyRate }).eq("id", editingTech.id).select().single();
       setSaving(false);
       if (error) { setErrorMsg(error.message); return; }
       setTechnicians((prev) => prev.map((t) => (t.id === data.id ? data : t)));
       setEditingTech(null);
     } else {
-      const { data, error } = await supabase.from("technicians").insert({ company_id: companyId, branch_id: branchId, name, specialty }).select().single();
+      const { data, error } = await supabase.from("technicians").insert({ company_id: companyId, branch_id: branchId, name, specialty, can_create_incidents: canCreateIncidents, hourly_rate: hourlyRate }).select().single();
       setSaving(false);
       if (error) { setErrorMsg(error.message); return; }
       setTechnicians((prev) => [...prev, data]);
@@ -5177,12 +7093,14 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setInvites((prev) => prev.filter((i) => i.id !== id));
   };
 
+  const INVENTORY_CHILD_KEYS = ["tools", "materials"];
   const CATALOG_CHILD_KEYS = ["clients", "products", "services", "warranty"];
-  const SALES_CHILD_KEYS = ["quotes", "salesOrders", "invoices", "creditNotes", "caja"];
+  const SALES_CHILD_KEYS = ["quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja"];
   const COMPRAS_CHILD_KEYS = ["suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger"];
   const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "payables", "chartOfAccounts", "taxRates", "fiscalReports"];
   const _urlView = new URLSearchParams(window.location.search).get("view") || "dashboard";
   const [openSubmenus, setOpenSubmenus] = useState(() => ({
+    inventoryMenu: INVENTORY_CHILD_KEYS.includes(_urlView),
     catalog: CATALOG_CHILD_KEYS.includes(_urlView),
     salesMenu: SALES_CHILD_KEYS.includes(_urlView),
     purchasesMenu: COMPRAS_CHILD_KEYS.includes(_urlView),
@@ -5202,6 +7120,14 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     { key: "reports", label: "Reportes", Icon: BarChart3 },
     { key: "checklists", label: "Checklists", Icon: ClipboardCheck },
     { key: "technicians", label: "Técnicos", Icon: Users },
+    {
+      key: "inventoryMenu", label: "Inventario", Icon: Package,
+      children: [
+        { key: "tools", label: "Herramientas", Icon: Wrench },
+        { key: "materials", label: "Materiales sobrantes", Icon: Boxes },
+      ],
+    },
+    { key: "maintenanceSchedule", label: "Mantenimiento programado", Icon: CalendarDays },
     { section: "Comercial" },
     {
       key: "catalog", label: "Catálogo", Icon: Boxes,
@@ -5231,6 +7157,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
         { key: "salesOrders", label: "Órdenes de Venta", Icon: Layers },
         { key: "invoices", label: "Facturación", Icon: Receipt },
         { key: "creditNotes", label: "Notas de Crédito", Icon: RotateCcw },
+        { key: "recurringContracts", label: "Contratos recurrentes", Icon: CalendarDays },
         { key: "caja", label: "Caja", Icon: Wallet },
       ],
     },
@@ -5244,10 +7171,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
         { key: "payables", label: "Cuentas por Pagar", Icon: ShoppingCart },
         { key: "taxRates", label: "Tasas impositivas", Icon: Hash },
         { key: "fiscalReports", label: "Reportes fiscales", Icon: BarChart3 },
+        { key: "financialReports", label: "Reportes financieros", Icon: BarChart3 },
+        { key: "bankReconciliation", label: "Conciliación bancaria", Icon: Wallet },
         { key: "ncf", label: "Secuencia NCF", Icon: Hash },
       ],
     },
     { key: "users", label: "Usuarios", Icon: ShieldCheck },
+    { key: "activityLog", label: "Historial de actividad", Icon: History },
   ];
   const NAV = [];
   {
@@ -5274,6 +7204,52 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     if (firstAllowed) changeView(firstAllowed);
     // eslint-disable-next-line
   }, [view, JSON.stringify(effectivePermissions)]);
+
+  const renderToolRow = (t) => (
+    <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+      <div className="col-span-3">
+        <div className="font-medium">{t.name}</div>
+        {t.serial_number && <div className="text-xs" style={{ color: C.muted }}>S/N {t.serial_number}</div>}
+      </div>
+      <div className="col-span-2 truncate" style={{ color: C.muted }}>{t.category || "—"}</div>
+      <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(t.branch_id)}</div>
+      <div className="col-span-2"><Pill label={TOOL_STATUS_CFG[t.status]?.label || "Disponible"} color={TOOL_STATUS_CFG[t.status]?.color || C.green} /></div>
+      <div className="col-span-2">
+        {canEdit("tools") ? (
+          <div>
+            <select value={t.technician_id || ""} onChange={(e) => assignTool(t.id, e.target.value)} className="w-full px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+              <option value="">Sin asignar</option>
+              {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+            </select>
+            {t.technician_id && (
+              <div className="text-[10px] mt-1" style={{ color: t.received_at ? C.green : C.amber }}>
+                {t.received_at ? `Confirmada ${fmtDate(t.received_at.slice(0, 10))}` : "Pendiente de confirmación"}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div>
+            <span style={{ color: C.muted }}>{techName(t.technician_id)}</span>
+            {t.technician_id && (
+              t.received_at ? (
+                <div className="text-[10px] mt-1" style={{ color: C.green }}>✓ Confirmada {fmtDate(t.received_at.slice(0, 10))}</div>
+              ) : isTecnico && t.technician_id === profile.technician_id ? (
+                <button onClick={() => confirmToolReceipt(t.id)} className="mt-1 flex items-center gap-1 text-[11px] px-2 py-1" style={{ background: C.green + "20", color: C.green, border: `1px solid ${C.green}40` }}>
+                  <CheckCircle2 size={12} /> Confirmar recepción
+                </button>
+              ) : (
+                <div className="text-[10px] mt-1" style={{ color: C.amber }}>Pendiente de confirmación</div>
+              )
+            )}
+          </div>
+        )}
+      </div>
+      <div className="col-span-1 flex items-center justify-end gap-2">
+        {canEdit("tools") && <button onClick={() => setEditingTool(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
+        {canEdit("tools") && <button onClick={() => deleteTool(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+      </div>
+    </div>
+  );
 
   return (
     <div className="w-full min-h-[720px] flex" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -5363,16 +7339,64 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
-          {canManage && (
-            <div className="flex gap-2">
-              <button onClick={() => setShowBulkOrders(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
-                <Layers size={16} /> Crear varias
+          <div className="flex gap-2 items-center">
+            <div className="relative">
+              <button onClick={() => setShowNotifPanel((v) => !v)} className="relative p-2" style={{ color: C.text }}>
+                <Bell size={20} />
+                {notifications.filter((n) => !n.is_read).length > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center text-[10px] font-bold rounded-full" style={{ background: C.red, color: "#fff", width: 16, height: 16 }}>
+                    {notifications.filter((n) => !n.is_read).length > 9 ? "9+" : notifications.filter((n) => !n.is_read).length}
+                  </span>
+                )}
               </button>
-              <button onClick={() => setShowOrderForm(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
-                <Plus size={16} /> Nueva orden
-              </button>
+              {showNotifPanel && (
+                <div className="absolute right-0 mt-2 w-96 z-50" style={{ background: C.panel, border: `1px solid ${C.border}`, maxHeight: 480, overflowY: "auto" }}>
+                  <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="text-sm font-semibold">Notificaciones</div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={markAllNotificationsRead} className="text-xs" style={{ color: C.amber }}>Marcar todas leídas</button>
+                      <button onClick={() => setShowNotifPanel(false)} style={iconBtnStyle}><X size={14} /></button>
+                    </div>
+                  </div>
+                  {notifications.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>No tienes notificaciones todavía.</div>}
+                  {notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      onClick={() => { markNotificationRead(n.id); if (n.link_view) { changeView(n.link_view); setShowNotifPanel(false); } }}
+                      className="px-4 py-3 text-sm cursor-pointer"
+                      style={{ borderBottom: `1px solid ${C.border}`, background: n.is_read ? "transparent" : C.panelAlt }}
+                    >
+                      <div className="flex items-start gap-2">
+                        {!n.is_read && <span className="mt-1.5 flex-shrink-0" style={{ width: 6, height: 6, borderRadius: "50%", background: C.amber }} />}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{n.title}</div>
+                          {n.body && <div className="text-xs truncate" style={{ color: C.muted }}>{n.body}</div>}
+                          <div className="text-[10px] mt-0.5" style={{ color: C.muted }}>{new Date(n.created_at).toLocaleString("es-DO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="px-4 py-3" style={{ borderTop: `1px solid ${C.border}` }}>
+                    {pushSubscribed ? (
+                      <button onClick={disablePushNotifications} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}><BellOff size={13} /> Desactivar notificaciones push en este dispositivo</button>
+                    ) : (
+                      <PushSetupInline onEnable={enablePushNotifications} />
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-          )}
+            {canManage && (
+              <>
+                <button onClick={() => setShowBulkOrders(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                  <Layers size={16} /> Crear varias
+                </button>
+                <button onClick={() => setShowOrderForm(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={16} /> Nueva orden
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
@@ -5387,6 +7411,24 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     Tienes {overdueOrders.length} orden{overdueOrders.length !== 1 ? "es" : ""} vencida{overdueOrders.length !== 1 ? "s" : ""} — la fecha programada ya pasó.
                   </div>
                   <button onClick={() => changeView("agenda")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.red}40`, color: C.red }}>Ver en agenda</button>
+                </div>
+              )}
+              {hasPerm("maintenanceSchedule") && (dueEquipment.length + dueClientAssets.length) > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2E14", border: `1px solid ${C.amber}40` }}>
+                  <div className="flex items-center gap-2 text-sm" style={{ color: C.amber }}>
+                    <CalendarDays size={16} />
+                    {dueEquipment.length + dueClientAssets.length} equipo{(dueEquipment.length + dueClientAssets.length) !== 1 ? "s/activos" : ""} con mantenimiento preventivo vencido, listo{(dueEquipment.length + dueClientAssets.length) !== 1 ? "s" : ""} para generar orden.
+                  </div>
+                  <button onClick={() => changeView("maintenanceSchedule")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.amber}40`, color: C.amber }}>Ver mantenimiento programado</button>
+                </div>
+              )}
+              {hasPerm("receivables") && overdueReceivables.count > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2020", border: `1px solid ${C.red}40` }}>
+                  <div className="flex items-center gap-2 text-sm" style={{ color: C.red }}>
+                    <AlertTriangle size={16} />
+                    Tienes {overdueReceivables.count} factura{overdueReceivables.count !== 1 ? "s" : ""} vencida{overdueReceivables.count !== 1 ? "s" : ""} (+30 días) por {fmtMoney(overdueReceivables.total)}.
+                  </div>
+                  <button onClick={() => changeView("receivables")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.red}40`, color: C.red }}>Ver Cuentas por Cobrar</button>
                 </div>
               )}
               <div className="flex gap-3 flex-wrap mb-6">
@@ -5529,7 +7571,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <FileText size={14} /> {selectedOrders.size > 0 ? `Imprimir selección (${selectedOrders.size})` : "Imprimir lista"}
                 </button>
               </div>
-              <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-2">
                 <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[200px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                   <Search size={14} color={C.muted} />
                   <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por título o código..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
@@ -5547,6 +7589,28 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     <option value="all">Todos los técnicos</option>
                     {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
+                )}
+                <select value={orderEquipmentFilter} onChange={(e) => setOrderEquipmentFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los equipos</option>
+                  {equipment.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-wrap items-end gap-3 mb-4">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Fecha desde</div>
+                  <input type="date" value={orderDateFrom} onChange={(e) => setOrderDateFrom(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Fecha hasta</div>
+                  <input type="date" value={orderDateTo} onChange={(e) => setOrderDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                {(orderEquipmentFilter !== "all" || orderDateFrom || orderDateTo) && (
+                  <button
+                    onClick={() => { setOrderEquipmentFilter("all"); setOrderDateFrom(""); setOrderDateTo(""); }}
+                    className="px-3 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}
+                  >
+                    Limpiar filtros
+                  </button>
                 )}
               </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -5575,7 +7639,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         </div>
                         <div className="col-span-2"><Pill label={t.label} color={t.color} /></div>
                         <div className="col-span-1 truncate" style={{ color: C.muted }}>{branchName(o.branch_id)}</div>
-                        <div className="col-span-2 truncate">{techName(o.technician_id)}</div>
+                        <div className="col-span-2 truncate">
+                          {techName(o.technician_id)}
+                          {orderTechnicians.filter((wt) => wt.work_order_id === o.id).length > 0 && (
+                            <span className="ml-1 text-xs" style={{ color: C.amber }}>+{orderTechnicians.filter((wt) => wt.work_order_id === o.id).length}</span>
+                          )}
+                        </div>
                         <div className="col-span-1"><Pill label={p.label} color={p.color} /></div>
                         <div className="col-span-1 text-xs" style={{ color: C.muted }}>{fmtDate(o.scheduled)}</div>
                         <div className="col-span-2 flex items-center justify-end gap-2">
@@ -5607,45 +7676,86 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && hasPerm("incidents") && view === "incidents" && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{incidents.length} incidentes{selectedIncidents.size > 0 ? ` · ${selectedIncidents.size} seleccionados` : ""}</div>
-                <div className="flex gap-2">
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {incidentsFiltered.length} incidente{incidentsFiltered.length !== 1 ? "s" : ""}{isTecnico ? " asignado" + (incidentsFiltered.length !== 1 ? "s" : "") + " a ti" : ""}{selectedIncidents.size > 0 ? ` · ${selectedIncidents.size} seleccionados` : ""}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {!isTecnico && (
+                    <select value={incidentTechnicianFilter} onChange={(e) => setIncidentTechnicianFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                      <option value="all">Todos los técnicos</option>
+                      <option value="none">Sin asignar</option>
+                      {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+                    </select>
+                  )}
                   <button
                     onClick={() => {
-                      const list = selectedIncidents.size > 0 ? incidents.filter((i) => selectedIncidents.has(i.id)) : incidents;
-                      printDocument("Incidentes", listHtml("Listado de incidentes", companyName, ["Incidente", "Sucursal", "Cliente", "Prioridad", "Fecha", "Estado"], list.map((inc) => [inc.title, branchName(inc.branch_id), inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—", (PRIORITY_CFG[inc.priority] || PRIORITY_CFG.media)?.label, fmtDate(inc.created_at?.slice(0, 10)), (INCIDENT_STATUS_CFG[inc.status] || INCIDENT_STATUS_CFG.abierto)?.label])));
+                      const list = selectedIncidents.size > 0 ? incidentsFiltered.filter((i) => selectedIncidents.has(i.id)) : incidentsFiltered;
+                      printDocument("Incidentes", listHtml("Listado de incidentes", companyName, ["Incidente", "Sucursal", "Técnico", "Cliente", "Prioridad", "Fecha", "Estado"], list.map((inc) => [inc.title, branchName(inc.branch_id), techName(inc.technician_id), inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—", (PRIORITY_CFG[inc.priority] || PRIORITY_CFG.media)?.label, fmtDate(inc.created_at?.slice(0, 10)), (INCIDENT_STATUS_CFG[inc.status] || INCIDENT_STATUS_CFG.abierto)?.label])));
                     }}
                     className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
                   >
                     <FileText size={14} /> {selectedIncidents.size > 0 ? `Imprimir selección (${selectedIncidents.size})` : "Imprimir lista"}
                   </button>
-                  <button onClick={() => setShowAddIncident(true)} disabled={!canEdit("incidents")} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                  <button onClick={() => setShowAddIncident(true)} disabled={!canReportIncident} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                     <Plus size={14} /> Reportar incidente
                   </button>
                 </div>
               </div>
+              <div className="flex flex-wrap items-end gap-3 mb-4">
+                <select value={incidentEquipmentFilter} onChange={(e) => setIncidentEquipmentFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los equipos</option>
+                  {equipment.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
+                </select>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Reportado desde</div>
+                  <input type="date" value={incidentDateFrom} onChange={(e) => setIncidentDateFrom(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Reportado hasta</div>
+                  <input type="date" value={incidentDateTo} onChange={(e) => setIncidentDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Completado desde</div>
+                  <input type="date" value={incidentCompletedFrom} onChange={(e) => setIncidentCompletedFrom(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Completado hasta</div>
+                  <input type="date" value={incidentCompletedTo} onChange={(e) => setIncidentCompletedTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                {(incidentEquipmentFilter !== "all" || incidentDateFrom || incidentDateTo || incidentCompletedFrom || incidentCompletedTo) && (
+                  <button
+                    onClick={() => { setIncidentEquipmentFilter("all"); setIncidentDateFrom(""); setIncidentDateTo(""); setIncidentCompletedFrom(""); setIncidentCompletedTo(""); }}
+                    className="px-3 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input type="checkbox" checked={incidents.length > 0 && selectedIncidents.size === incidents.length} onChange={() => setSelectedIncidents(selectedIncidents.size === incidents.length ? new Set() : new Set(incidents.map((i) => i.id)))} />
+                  <input type="checkbox" checked={incidentsFiltered.length > 0 && selectedIncidents.size === incidentsFiltered.length} onChange={() => setSelectedIncidents(selectedIncidents.size === incidentsFiltered.length ? new Set() : new Set(incidentsFiltered.map((i) => i.id)))} />
                   <div className="flex-1 grid grid-cols-12 gap-2">
-                    <div className="col-span-4">Incidente</div>
+                    <div className="col-span-3">Incidente</div>
                     <div className="col-span-2">Sucursal</div>
-                    <div className="col-span-2">Cliente</div>
+                    <div className="col-span-2">Técnico</div>
+                    <div className="col-span-1">Cliente</div>
                     <div className="col-span-1">Prioridad</div>
                     <div className="col-span-1">Fecha</div>
                     <div className="col-span-2 text-right">Estado</div>
                   </div>
                 </div>
-                {incidents.map((inc) => {
+                {incidentsFiltered.map((inc) => {
                   const s = INCIDENT_STATUS_CFG[inc.status] || INCIDENT_STATUS_CFG.abierto;
                   const p = PRIORITY_CFG[inc.priority] || PRIORITY_CFG.media;
                   return (
                     <div key={inc.id} onClick={() => setIncidentDetail(inc)} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${s.color}` }}>
                       <input type="checkbox" checked={selectedIncidents.has(inc.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedIncidents((prev) => { const next = new Set(prev); next.has(inc.id) ? next.delete(inc.id) : next.add(inc.id); return next; })} />
                       <div className="flex-1 grid grid-cols-12 gap-2 items-center">
-                        <div className="col-span-4 truncate">{inc.title}</div>
+                        <div className="col-span-3 truncate">{inc.title}</div>
                         <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(inc.branch_id)}</div>
-                        <div className="col-span-2 truncate" style={{ color: C.muted }}>{inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—"}</div>
+                        <div className="col-span-2 truncate" style={{ color: inc.technician_id ? C.text : C.muted }}>{techName(inc.technician_id)}</div>
+                        <div className="col-span-1 truncate" style={{ color: C.muted }}>{inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—"}</div>
                         <div className="col-span-1"><Pill label={p.label} color={p.color} /></div>
                         <div className="col-span-1 text-xs" style={{ color: C.muted }}>{fmtDate(inc.created_at?.slice(0, 10))}</div>
                         <div className="col-span-2 text-right"><Pill label={s.label} color={s.color} /></div>
@@ -5653,7 +7763,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     </div>
                   );
                 })}
-                {incidents.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay incidentes reportados.</div>}
+                {incidentsFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>{isTecnico ? "No tienes incidentes asignados todavía." : "Todavía no hay incidentes reportados."}</div>}
               </div>
             </div>
           )}
@@ -5724,13 +7834,232 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       </div>
                       <div className="text-sm mt-0.5" style={{ color: C.muted }}>{t.specialty}</div>
                       <div className="flex items-center gap-1 text-xs mt-3" style={{ color: C.muted }}><MapPin size={12} /> {branchName(t.branch_id)}</div>
-                      <div className="mt-3 text-xs px-2 py-1 inline-block" style={{ background: C.panelAlt, color: active > 0 ? C.amber : C.muted }}>
-                        {active} orden{active !== 1 ? "es" : ""} activa{active !== 1 ? "s" : ""}
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
+                        <div className="text-xs px-2 py-1 inline-block" style={{ background: C.panelAlt, color: active > 0 ? C.amber : C.muted }}>
+                          {active} orden{active !== 1 ? "es" : ""} activa{active !== 1 ? "s" : ""}
+                        </div>
+                        {t.can_create_incidents && (
+                          <div className="text-xs px-2 py-1 inline-block" style={{ background: C.blue + "1A", color: C.blue }}>
+                            Puede reportar incidentes
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 })}
                 {branches.length === 0 && <div className="text-sm" style={{ color: C.muted }}>Primero crea una sucursal para poder agregar técnicos.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && hasPerm("tools") && view === "tools" && (
+            <div>
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {toolsFiltered.length} herramienta{toolsFiltered.length !== 1 ? "s" : ""}{isTecnico ? " asignada" + (toolsFiltered.length !== 1 ? "s" : "") + " a ti" : ""}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {!isTecnico && (
+                    <select value={toolTechnicianFilter} onChange={(e) => setToolTechnicianFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                      <option value="all">Todos los técnicos</option>
+                      <option value="none">Sin asignar</option>
+                      {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+                    </select>
+                  )}
+                  <select value={toolStatusFilter} onChange={(e) => setToolStatusFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                    <option value="all">Todos los estados</option>
+                    {Object.entries(TOOL_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                  {!isTecnico && (
+                    <label className="flex items-center gap-1.5 text-sm px-3 py-2 cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                      <input type="checkbox" checked={groupToolsByTechnician} onChange={(e) => setGroupToolsByTechnician(e.target.checked)} />
+                      Agrupar por técnico
+                    </label>
+                  )}
+                  {canEdit("tools") && (
+                    <button onClick={() => setShowBulkTools(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.panelAlt, color: C.text, border: `1px solid ${C.border}` }}>
+                      <Upload size={14} /> Carga masiva
+                    </button>
+                  )}
+                  {canEdit("tools") && (
+                    <button onClick={() => setShowAddTool(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                      <Plus size={14} /> Agregar herramienta
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {groupToolsByTechnician && toolGroups ? (
+                <div className="space-y-4">
+                  {toolGroups.map((g) => (
+                    <div key={g.id}>
+                      <div className="flex items-center gap-2 mb-1.5 px-1">
+                        <UserCheck size={14} style={{ color: C.amber }} />
+                        <span className="text-sm font-semibold">{g.name}</span>
+                        <span className="text-xs" style={{ color: C.muted }}>({g.tools.length})</span>
+                      </div>
+                      <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                        <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                          <div className="col-span-3">Herramienta</div>
+                          <div className="col-span-2">Categoría</div>
+                          <div className="col-span-2">Sucursal</div>
+                          <div className="col-span-2">Estado</div>
+                          <div className="col-span-2">Asignada a</div>
+                          <div className="col-span-1 text-right">Acciones</div>
+                        </div>
+                        {g.tools.map(renderToolRow)}
+                      </div>
+                    </div>
+                  ))}
+                  {toolGroups.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay herramientas para este filtro.</div>}
+                </div>
+              ) : (
+                <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-3">Herramienta</div>
+                    <div className="col-span-2">Categoría</div>
+                    <div className="col-span-2">Sucursal</div>
+                    <div className="col-span-2">Estado</div>
+                    <div className="col-span-2">Asignada a</div>
+                    <div className="col-span-1 text-right">Acciones</div>
+                  </div>
+                  {toolsFiltered.map(renderToolRow)}
+                  {toolsFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>{isTecnico ? "No tienes herramientas asignadas todavía." : "Todavía no hay herramientas para este filtro."}</div>}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!loadingScope && hasPerm("materials") && view === "materials" && (
+            <div>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-sm" style={{ color: C.muted }}>{materials.length} material{materials.length !== 1 ? "es" : ""} sobrante{materials.length !== 1 ? "s" : ""}</div>
+                {canEdit("materials") && (
+                  <button onClick={() => setShowAddMaterial(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                    <Plus size={14} /> Agregar material
+                  </button>
+                )}
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-4">Material</div>
+                  <div className="col-span-2">Sucursal</div>
+                  <div className="col-span-2 text-right">Cantidad</div>
+                  <div className="col-span-2">Unidad</div>
+                  <div className="col-span-2 text-right">Acciones</div>
+                </div>
+                {materials.map((m) => (
+                  <div key={m.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-4">
+                      <div className="font-medium">{m.name}</div>
+                      {m.notes && <div className="text-xs" style={{ color: C.muted }}>{m.notes}</div>}
+                    </div>
+                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(m.branch_id)}</div>
+                    <div className="col-span-2 text-right font-mono">{Number(m.quantity || 0).toLocaleString("es-DO")}</div>
+                    <div className="col-span-2" style={{ color: C.muted }}>{m.unit || "—"}</div>
+                    <div className="col-span-2 flex items-center justify-end gap-2">
+                      {canEdit("materials") && <button onClick={() => setEditingMaterial(m)} style={iconBtnStyle}><Pencil size={14} /></button>}
+                      {canEdit("materials") && <button onClick={() => deleteMaterial(m.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                    </div>
+                  </div>
+                ))}
+                {materials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay materiales sobrantes registrados.</div>}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && hasPerm("maintenanceSchedule") && view === "maintenanceSchedule" && (
+            <div>
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {dueEquipment.length + dueClientAssets.length} pendiente{(dueEquipment.length + dueClientAssets.length) !== 1 ? "s" : ""} de generar
+                </div>
+                {canEdit("maintenanceSchedule") && (dueEquipment.length + dueClientAssets.length) > 0 && (
+                  <button onClick={generateAllDueMaintenance} disabled={saving} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+                    <Plus size={14} /> Generar todas las vencidas ({dueEquipment.length + dueClientAssets.length})
+                  </button>
+                )}
+              </div>
+
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Equipos — plan de mantenimiento</div>
+              <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Equipo</div>
+                  <div className="col-span-2">Sucursal</div>
+                  <div className="col-span-2">Próximo mantenimiento</div>
+                  <div className="col-span-2">Técnico por defecto</div>
+                  <div className="col-span-1 text-center">Cada</div>
+                  <div className="col-span-2 text-right">Acción</div>
+                </div>
+                {[...dueEquipment, ...upcomingEquipment].map((e) => {
+                  const dueByDate = e.next_maintenance_date && e.next_maintenance_date <= todayStr;
+                  const dueByUsage = e.usage_unit && e.usage_interval && e.current_usage != null &&
+                    (Number(e.current_usage) - Number(e.usage_last_maintenance || 0)) >= Number(e.usage_interval);
+                  const isDue = dueByDate || dueByUsage;
+                  return (
+                    <div key={e.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-start text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-3 truncate">{e.name}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(e.branch_id)}</div>
+                      <div className="col-span-2">
+                        {e.next_maintenance_date ? (
+                          <div className="font-mono" style={{ color: dueByDate ? C.red : C.amber }}>{fmtDate(e.next_maintenance_date)} {dueByDate ? "(vencido)" : "(próximo)"}</div>
+                        ) : (
+                          <div className="text-xs" style={{ color: C.muted }}>Sin fecha (solo por uso)</div>
+                        )}
+                        {e.usage_unit && <UsageQuickUpdate item={e} onUpdate={(v) => updateUsageReading(e, "equipment", v)} />}
+                      </div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{techName(e.default_technician_id)}</div>
+                      <div className="col-span-1 text-center font-mono" style={{ color: C.muted }}>{e.maintenance_frequency_days ? `${e.maintenance_frequency_days}d` : "—"}</div>
+                      <div className="col-span-2 text-right">
+                        {canEdit("maintenanceSchedule") && (
+                          <button onClick={() => generateOneMaintenanceOrder(e, "equipment")} disabled={saving} className="text-xs px-2 py-1.5 font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+                            Generar orden
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {dueEquipment.length === 0 && upcomingEquipment.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Ningún equipo tiene mantenimiento vencido o próximo (7 días). Configura la frecuencia desde "Gestión de Equipos".</div>}
+              </div>
+
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Activos instalados en clientes — plan de mantenimiento</div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Activo</div>
+                  <div className="col-span-2">Cliente</div>
+                  <div className="col-span-2">Próximo mantenimiento</div>
+                  <div className="col-span-2">Técnico por defecto</div>
+                  <div className="col-span-1 text-center">Cada</div>
+                  <div className="col-span-2 text-right">Acción</div>
+                </div>
+                {[...dueClientAssets, ...upcomingClientAssets].map((a) => {
+                  const dueByDate = a.next_maintenance_date && a.next_maintenance_date <= todayStr;
+                  return (
+                    <div key={a.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-start text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-3 truncate">{a.name}</div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === a.client_id)?.name || "—"}</div>
+                      <div className="col-span-2">
+                        {a.next_maintenance_date ? (
+                          <div className="font-mono" style={{ color: dueByDate ? C.red : C.amber }}>{fmtDate(a.next_maintenance_date)} {dueByDate ? "(vencido)" : "(próximo)"}</div>
+                        ) : (
+                          <div className="text-xs" style={{ color: C.muted }}>Sin fecha (solo por uso)</div>
+                        )}
+                        {a.usage_unit && <UsageQuickUpdate item={a} onUpdate={(v) => updateUsageReading(a, "client_asset", v)} />}
+                      </div>
+                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{techName(a.default_technician_id)}</div>
+                      <div className="col-span-1 text-center font-mono" style={{ color: C.muted }}>{a.maintenance_frequency_days ? `${a.maintenance_frequency_days}d` : "—"}</div>
+                      <div className="col-span-2 text-right">
+                        {canEdit("maintenanceSchedule") && (
+                          <button onClick={() => generateOneMaintenanceOrder(a, "client_asset")} disabled={saving} className="text-xs px-2 py-1.5 font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+                            Generar orden
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {dueClientAssets.length === 0 && upcomingClientAssets.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Ningún activo de cliente tiene mantenimiento vencido o próximo (7 días). Configura la frecuencia desde "Activos en Garantía".</div>}
               </div>
             </div>
           )}
@@ -5893,6 +8222,34 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && hasPerm("reports") && view === "reports" && (
             <div>
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Incidentes — resumen general</div>
+              <div className="flex flex-wrap gap-3 mb-6">
+                <KpiCard label="Abiertos" value={incidents.filter((i) => i.status === "abierto").length} accent={C.red} sub="Sin atender aún" />
+                <KpiCard label="En revisión" value={incidents.filter((i) => i.status === "en_revision").length} accent={C.amber} sub="En proceso" />
+                <KpiCard label="Completados" value={incidents.filter((i) => i.status === "resuelto").length} accent={C.green} sub="Con hallazgos registrados" />
+                <KpiCard label="Descartados" value={incidents.filter((i) => i.status === "descartado").length} accent={C.muted} sub="No procedían" />
+                <KpiCard label="Total de incidentes" value={incidents.length} accent={C.blue} sub="Histórico completo" />
+              </div>
+
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>SLA — tiempos promedio por prioridad</div>
+              <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Prioridad</div>
+                  <div className="col-span-4">Tiempo promedio de atención</div>
+                  <div className="col-span-5">Tiempo promedio de resolución</div>
+                </div>
+                {incidentSlaStats.map((s) => (
+                  <div key={s.key} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-3"><Pill label={s.label} color={s.color} /></div>
+                    <div className="col-span-4 font-mono">{s.responseLabel} <span className="text-xs" style={{ color: C.muted }}>({s.nResponse})</span></div>
+                    <div className="col-span-5 font-mono">{s.resolutionLabel} <span className="text-xs" style={{ color: C.muted }}>({s.nResolution})</span></div>
+                  </div>
+                ))}
+                <div className="px-4 py-2 text-xs" style={{ color: C.muted }}>
+                  Atención = desde que se reportó hasta que se marcó "En revisión" (o se completó directo). Resolución = desde que se reportó hasta que se marcó "Completado". El número entre paréntesis es cuántos incidentes se usaron para el promedio.
+                </div>
+              </div>
+
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Desempeño por técnico — por tipo de mantenimiento</div>
               <div className="p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <ResponsiveContainer width="100%" height={220}>
@@ -5910,11 +8267,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Técnico</div>
-                  <div className="col-span-2 text-center">Preventivo</div>
-                  <div className="col-span-2 text-center">Correctivo</div>
-                  <div className="col-span-2 text-center">Predictivo</div>
-                  <div className="col-span-1 text-center">Total</div>
-                  <div className="col-span-2 text-right">Historial</div>
+                  <div className="col-span-1 text-center">Prev.</div>
+                  <div className="col-span-1 text-center">Correc.</div>
+                  <div className="col-span-1 text-center">Predic.</div>
+                  <div className="col-span-2 text-center">Incidentes</div>
+                  <div className="col-span-1 text-center">Total OT</div>
+                  <div className="col-span-3 text-right">Historial</div>
                 </div>
                 {techStats.map((t) => (
                   <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -5922,11 +8280,15 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       <div>{t.name}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{t.specialty}</div>
                     </div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: C.green }}>{t.preventivo}</div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: C.red }}>{t.correctivo}</div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: C.blue }}>{t.predictivo}</div>
+                    <div className="col-span-1 text-center font-mono" style={{ color: C.green }}>{t.preventivo}</div>
+                    <div className="col-span-1 text-center font-mono" style={{ color: C.red }}>{t.correctivo}</div>
+                    <div className="col-span-1 text-center font-mono" style={{ color: C.blue }}>{t.predictivo}</div>
+                    <div className="col-span-2 text-center font-mono">
+                      {t.incidentesTotal}
+                      {t.incidentesAbiertos > 0 && <span style={{ color: C.amber }}> ({t.incidentesAbiertos} abiertos)</span>}
+                    </div>
                     <div className="col-span-1 text-center font-mono">{t.total}</div>
-                    <div className="col-span-2 text-right">
+                    <div className="col-span-3 text-right">
                       <button onClick={() => setHistoryFor({ title: `Historial de ${t.name}`, orders: orders.filter((o) => o.technician_id === t.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
                         <History size={13} /> Ver
                       </button>
@@ -5950,23 +8312,40 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              {incidentEquipChartData.length > 0 && (
+                <div className="p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="text-xs mb-2" style={{ color: C.muted }}>Equipos con más incidentes reportados</div>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={incidentEquipChartData} margin={{ left: -20 }}>
+                      <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 11 }} axisLine={{ stroke: C.border }} tickLine={false} interval={0} angle={-20} textAnchor="end" height={60} />
+                      <YAxis allowDecimals={false} tick={{ fill: C.muted, fontSize: 12 }} axisLine={{ stroke: C.border }} tickLine={false} />
+                      <Tooltip contentStyle={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }} cursor={{ fill: C.panelAlt }} />
+                      <Bar dataKey="Incidentes" radius={[2, 2, 0, 0]}>
+                        {incidentEquipChartData.map((_, i) => <Cell key={i} fill={C.amber} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
               <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-4">Equipo</div>
+                  <div className="col-span-3">Equipo</div>
                   <div className="col-span-2 text-center">Abiertas</div>
                   <div className="col-span-2 text-center">Correctivas</div>
-                  <div className="col-span-2 text-center">Total</div>
+                  <div className="col-span-2 text-center">Incidentes</div>
+                  <div className="col-span-1 text-center">Total OT</div>
                   <div className="col-span-2 text-right">Historial</div>
                 </div>
                 {equipStats.map((eq) => (
                   <div key={eq.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-4">
+                    <div className="col-span-3">
                       <div>{eq.name}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{branchName(eq.branch_id)}</div>
                     </div>
                     <div className="col-span-2 text-center font-mono" style={{ color: eq.open > 0 ? C.amber : C.muted }}>{eq.open}</div>
                     <div className="col-span-2 text-center font-mono" style={{ color: eq.correctivo > 0 ? C.red : C.muted }}>{eq.correctivo}</div>
-                    <div className="col-span-2 text-center font-mono">{eq.total}</div>
+                    <div className="col-span-2 text-center font-mono" style={{ color: eq.incidentesAbiertos > 0 ? C.amber : C.muted }}>{eq.incidentesTotal}</div>
+                    <div className="col-span-1 text-center font-mono">{eq.total}</div>
                     <div className="col-span-2 text-right">
                       <button onClick={() => setHistoryFor({ title: `Historial de ${eq.name}`, orders: orders.filter((o) => o.equipment_id === eq.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
                         <History size={13} /> Ver
@@ -6463,6 +8842,158 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && hasPerm("financialReports") && view === "financialReports" && (
+            <div>
+              <div className="flex flex-wrap items-end gap-3 mb-4">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Desde</div>
+                  <input type="date" value={financialDateFrom} onChange={(e) => setFinancialDateFrom(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Hasta</div>
+                  <input type="date" value={financialDateTo} onChange={(e) => setFinancialDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                {loadingFinancial && <div className="text-sm" style={{ color: C.muted }}>Calculando flujo de caja...</div>}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                <div className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="text-sm font-semibold mb-3">Estado de resultados (devengado)</div>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between"><span style={{ color: C.muted }}>Ingresos por facturación</span><span className="font-mono">{fmtMoney(financialPnl.revenue)}</span></div>
+                    {financialPnl.creditNotesTotal > 0 && (
+                      <div className="flex justify-between"><span style={{ color: C.muted }}>Notas de crédito</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.creditNotesTotal)}</span></div>
+                    )}
+                    <div className="flex justify-between font-semibold pt-1" style={{ borderTop: `1px solid ${C.border}` }}><span>Ingresos netos</span><span className="font-mono">{fmtMoney(financialPnl.netRevenue)}</span></div>
+                    <div className="flex justify-between pt-2"><span style={{ color: C.muted }}>Compras a proveedores</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.purchasesCost)}</span></div>
+                    <div className="flex justify-between"><span style={{ color: C.muted }}>Otros gastos</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.otherExpensesCost)}</span></div>
+                    <div className="flex justify-between font-bold text-base pt-2" style={{ borderTop: `1px solid ${C.border}`, color: financialPnl.netIncome >= 0 ? C.green : C.red }}>
+                      <span>Utilidad neta</span><span className="font-mono">{fmtMoney(financialPnl.netIncome)}</span>
+                    </div>
+                  </div>
+                  <div className="text-xs mt-3" style={{ color: C.muted }}>Montos sin ITBIS. No incluye mano de obra ni materiales consumidos en órdenes (eso se ve por orden en Departamento Técnico).</div>
+                </div>
+
+                <div className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="text-sm font-semibold mb-3">Flujo de caja (efectivo real)</div>
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex justify-between"><span style={{ color: C.muted }}>Entradas (cobros de facturas)</span><span className="font-mono" style={{ color: C.green }}>{fmtMoney(financialCashFlow.cashIn)}</span></div>
+                    <div className="flex justify-between pt-2"><span style={{ color: C.muted }}>Salidas — pagos a proveedores</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialCashFlow.cashOutSuppliers)}</span></div>
+                    <div className="flex justify-between"><span style={{ color: C.muted }}>Salidas — otros gastos</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialCashFlow.cashOutExpenses)}</span></div>
+                    <div className="flex justify-between font-bold text-base pt-2" style={{ borderTop: `1px solid ${C.border}`, color: financialCashFlow.net >= 0 ? C.green : C.red }}>
+                      <span>Flujo neto</span><span className="font-mono">{fmtMoney(financialCashFlow.net)}</span>
+                    </div>
+                  </div>
+                  <div className="text-xs mt-3" style={{ color: C.muted }}>Basado en pagos realmente cobrados/pagados en el rango, sin importar cuándo se emitió la factura o compra.</div>
+                </div>
+              </div>
+
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Ingresos vs. gastos — últimos 6 meses</div>
+              <div className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={financialMonthlyChart} margin={{ left: -20 }}>
+                    <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 12 }} axisLine={{ stroke: C.border }} tickLine={false} />
+                    <YAxis tick={{ fill: C.muted, fontSize: 12 }} axisLine={{ stroke: C.border }} tickLine={false} />
+                    <Tooltip contentStyle={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }} cursor={{ fill: C.panelAlt }} formatter={(v) => fmtMoney(v)} />
+                    <Legend wrapperStyle={{ fontSize: 12, color: C.muted }} />
+                    <Bar dataKey="Ingresos" fill={C.green} radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="Gastos" fill={C.red} radius={[2, 2, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && hasPerm("bankReconciliation") && view === "bankReconciliation" && (
+            <div>
+              {(() => {
+                const inRange = (d) => d >= financialDateFrom && d <= financialDateTo;
+                const txInRange = bankTransactions.filter((t) => inRange(t.transaction_date));
+                const reconciled = txInRange.filter((t) => t.is_reconciled);
+                const pending = txInRange.filter((t) => !t.is_reconciled);
+                const totalBank = txInRange.reduce((s, t) => s + Number(t.amount), 0);
+                return (
+                  <>
+                    <div className="flex flex-wrap items-end gap-3 mb-4">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Desde</div>
+                        <input type="date" value={financialDateFrom} onChange={(e) => setFinancialDateFrom(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                      </div>
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Hasta</div>
+                        <input type="date" value={financialDateTo} onChange={(e) => setFinancialDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                      </div>
+                      {canEdit("bankReconciliation") && (
+                        <label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
+                          <Upload size={14} /> {importingBankStatement ? "Importando..." : "Importar estado de cuenta"}
+                          <input type="file" accept=".csv,.xlsx,.xls" className="hidden" disabled={importingBankStatement} onChange={(e) => { if (e.target.files?.[0]) importBankStatement(e.target.files[0]); e.target.value = ""; }} />
+                        </label>
+                      )}
+                      {loadingFinancial && <div className="text-sm" style={{ color: C.muted }}>Buscando posibles coincidencias...</div>}
+                    </div>
+                    <div className="text-xs mb-4" style={{ color: C.muted }}>
+                      Sube el estado de cuenta exportado de tu banco (CSV o Excel) con columnas de Fecha, Descripción y Monto (o Crédito/Débito por separado). El sistema busca automáticamente un cobro, pago o gasto registrado con el mismo monto y una fecha cercana.
+                    </div>
+
+                    <div className="flex gap-3 flex-wrap mb-6">
+                      <KpiCard label="Movimientos del banco" value={txInRange.length} accent={C.blue} sub={fmtMoney(totalBank)} />
+                      <KpiCard label="Conciliados" value={reconciled.length} accent={C.green} sub="Ya vinculados al sistema" />
+                      <KpiCard label="Pendientes" value={pending.length} accent={C.amber} sub="Necesitan revisión" />
+                    </div>
+
+                    <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                        <div className="col-span-2">Fecha</div>
+                        <div className="col-span-3">Descripción</div>
+                        <div className="col-span-2 text-right">Monto</div>
+                        <div className="col-span-3">Coincidencia</div>
+                        <div className="col-span-2 text-right">Acciones</div>
+                      </div>
+                      {txInRange.map((tx) => {
+                        const candidate = !tx.is_reconciled ? bankMatchCandidate(tx) : null;
+                        return (
+                          <div key={tx.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                            <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(tx.transaction_date)}</div>
+                            <div className="col-span-3 truncate">{tx.description || "—"}</div>
+                            <div className="col-span-2 text-right font-mono" style={{ color: tx.amount >= 0 ? C.green : C.red }}>{fmtMoney(tx.amount)}</div>
+                            <div className="col-span-3">
+                              {tx.is_reconciled ? (
+                                <Pill label="Conciliado" color={C.green} />
+                              ) : candidate ? (
+                                <div className="text-xs" style={{ color: C.amber }}>{candidate.label}</div>
+                              ) : (
+                                <div className="text-xs" style={{ color: C.muted }}>Sin coincidencia</div>
+                              )}
+                            </div>
+                            <div className="col-span-2 flex items-center justify-end gap-2">
+                              {canEdit("bankReconciliation") && !tx.is_reconciled && candidate && (
+                                <button onClick={() => reconcileTransaction(tx, candidate.type, candidate.id)} className="text-xs px-2 py-1.5 font-semibold" style={{ background: C.green, color: "#0B1F13" }}>
+                                  Conciliar
+                                </button>
+                              )}
+                              {canEdit("bankReconciliation") && !tx.is_reconciled && !candidate && (
+                                <button onClick={() => reconcileTransaction(tx, "manual", null)} className="text-xs px-2 py-1.5" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                                  Marcar conciliado
+                                </button>
+                              )}
+                              {canEdit("bankReconciliation") && tx.is_reconciled && (
+                                <button onClick={() => unreconcileTransaction(tx)} className="text-xs px-2 py-1.5" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+                                  Deshacer
+                                </button>
+                              )}
+                              {canEdit("bankReconciliation") && <button onClick={() => deleteBankTransaction(tx.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {txInRange.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay movimientos importados en este rango. Sube un estado de cuenta para comenzar.</div>}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {!loadingScope && hasPerm("supplierReceipts") && view === "supplierReceipts" && (
             <div>
               <div className="text-sm mb-3" style={{ color: C.muted }}>{allPurchasePayments.length} recibo{allPurchasePayments.length !== 1 ? "s" : ""} de pago a proveedores</div>
@@ -6556,18 +9087,37 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         <div className="col-span-2 text-right">Saldo</div>
                         <div className="col-span-2 text-right">Acciones</div>
                       </div>
-                      {pending.map((inv) => (
-                        <div key={inv.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                          <div className="col-span-3 truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
-                          <div className="col-span-2 truncate" style={{ color: C.muted }}>{inv.ncf}</div>
-                          <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
-                          <div className="col-span-1 text-right" style={{ color: inv.days > 60 ? C.red : C.muted }}>{inv.days}</div>
-                          <div className="col-span-2 text-right font-mono" style={{ color: C.red }}>{fmtMoney(inv.balance)}</div>
-                          <div className="col-span-2 flex items-center justify-end gap-3">
-                            <button onClick={() => openInvoiceDetail(inv)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
+                      {pending.map((inv) => {
+                        const cli = clients.find((c) => c.id === inv.client_id);
+                        const reminderText = invoiceReminderText(companyName, cli?.name || "Cliente", inv, inv.balance, inv.days);
+                        return (
+                          <div key={inv.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                            <div className="col-span-3 truncate">{cli?.name || "—"}</div>
+                            <div className="col-span-2 truncate" style={{ color: C.muted }}>{inv.ncf}</div>
+                            <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
+                            <div className="col-span-1 text-right" style={{ color: inv.days > 60 ? C.red : C.muted }}>{inv.days}</div>
+                            <div className="col-span-2 text-right font-mono" style={{ color: C.red }}>{fmtMoney(inv.balance)}</div>
+                            <div className="col-span-2 flex items-center justify-end gap-3">
+                              {cli?.phone && (
+                                <a href={waLink(cli.phone, reminderText)} target="_blank" rel="noreferrer" title="Recordar por WhatsApp" style={{ color: C.green }}><MessageCircle size={15} /></a>
+                              )}
+                              {cli?.email && (
+                                <a href={mailtoLink(cli.email, `Recordatorio de pago — Factura ${inv.ncf || ""}`, reminderText)} title="Recordar por correo (abre tu correo)" style={{ color: C.amber }}><Mail size={15} /></a>
+                              )}
+                              {cli?.email && (
+                                <button
+                                  onClick={() => supabase.functions.invoke("send-client-email", { body: { to: cli.email, subject: `Recordatorio de pago — Factura ${inv.ncf || ""}`, text: reminderText } })}
+                                  title="Enviar recordatorio automático por correo (sin abrir tu correo)"
+                                  className="text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.blue }}
+                                >
+                                  Enviar auto
+                                </button>
+                              )}
+                              <button onClick={() => openInvoiceDetail(inv)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                       {pending.length === 0 && (
                         <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay cuentas por cobrar pendientes.</div>
                       )}
@@ -7005,6 +9555,65 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && hasPerm("recurringContracts") && view === "recurringContracts" && (
+            <div>
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {recurringContracts.length} contrato{recurringContracts.length !== 1 ? "s" : ""} · {dueContracts.length} pendiente{dueContracts.length !== 1 ? "s" : ""} de facturar
+                </div>
+                <div className="flex gap-2">
+                  {canEdit("recurringContracts") && dueContracts.length > 0 && (
+                    <button onClick={generateAllDueContracts} disabled={saving} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.green, color: "#0B1F13" }}>
+                      <FileText size={14} /> Generar todas las vencidas ({dueContracts.length})
+                    </button>
+                  )}
+                  {canEdit("recurringContracts") && (
+                    <button onClick={() => setShowAddContract(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                      <Plus size={14} /> Nuevo contrato
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Cliente / título</div>
+                  <div className="col-span-2 text-right">Monto</div>
+                  <div className="col-span-2">Frecuencia</div>
+                  <div className="col-span-2">Próxima factura</div>
+                  <div className="col-span-1 text-center">Estado</div>
+                  <div className="col-span-2 text-right">Acciones</div>
+                </div>
+                {recurringContracts.map((c) => {
+                  const due = c.is_active && c.next_invoice_date <= todayStr;
+                  return (
+                    <div key={c.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-3">
+                        <div className="truncate">{clients.find((cl) => cl.id === c.client_id)?.name || "—"}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>{c.title}</div>
+                      </div>
+                      <div className="col-span-2 text-right font-mono">{fmtMoney(c.amount)}{c.is_taxable ? " +ITBIS" : ""}</div>
+                      <div className="col-span-2" style={{ color: C.muted }}>Cada {c.frequency_days} días</div>
+                      <div className="col-span-2 font-mono" style={{ color: due ? C.red : C.muted }}>{fmtDate(c.next_invoice_date)}{due ? " (vencido)" : ""}</div>
+                      <div className="col-span-1 text-center">
+                        {c.is_active ? <Pill label="Activo" color={C.green} /> : <Pill label="Inactivo" color={C.muted} />}
+                      </div>
+                      <div className="col-span-2 flex items-center justify-end gap-2">
+                        {canEdit("recurringContracts") && due && (
+                          <button onClick={() => generateOneContractInvoice(c)} disabled={saving} className="text-xs px-2 py-1.5 font-semibold disabled:opacity-50" style={{ background: C.green, color: "#0B1F13" }}>
+                            Facturar
+                          </button>
+                        )}
+                        {canEdit("recurringContracts") && <button onClick={() => setEditingContract(c)} style={iconBtnStyle}><Pencil size={14} /></button>}
+                        {canEdit("recurringContracts") && <button onClick={() => deleteRecurringContract(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {recurringContracts.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay contratos recurrentes. Ideal para clientes con mantenimiento mensual fijo.</div>}
+              </div>
+            </div>
+          )}
+
           {!loadingScope && hasPerm("users") && view === "users" && (
             <div>
               <div className="flex justify-between items-center mb-4">
@@ -7060,12 +9669,95 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               </div>
             </div>
           )}
+
+          {!loadingScope && hasPerm("activityLog") && view === "activityLog" && (
+            <div>
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {loadingActivityLog ? "Cargando..." : `${activityLogFiltered.length} registro${activityLogFiltered.length !== 1 ? "s" : ""}`}
+                </div>
+                <button
+                  onClick={() => {
+                    const header = ["Fecha", "Hora", "Módulo", "Acción", "Usuario", "Detalle"];
+                    const rows = activityLogFiltered.map((l) => {
+                      const dt = new Date(l.changed_at);
+                      return [
+                        dt.toLocaleDateString("es-DO"),
+                        dt.toLocaleTimeString("es-DO"),
+                        ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name,
+                        ACTIVITY_ACTION_LABELS[l.action]?.label || l.action,
+                        l.changed_by_email || "—",
+                        describeActivityEntry(l),
+                      ];
+                    });
+                    const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+                    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a");
+                    a.href = url; a.download = `historial-actividad_${activityDateFrom}_a_${activityDateTo}.csv`; a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                  disabled={activityLogFiltered.length === 0}
+                  className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}
+                >
+                  <FileText size={14} /> Descargar historial (CSV)
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-end gap-3 mb-4">
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Desde</div>
+                  <input type="date" value={activityDateFrom} onChange={(e) => setActivityDateFrom(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Hasta</div>
+                  <input type="date" value={activityDateTo} onChange={(e) => setActivityDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <select value={activityTableFilter} onChange={(e) => setActivityTableFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los módulos</option>
+                  {activityTablesPresent.map((tn) => <option key={tn} value={tn}>{ACTIVITY_TABLE_LABELS[tn] || tn}</option>)}
+                </select>
+                <select value={activityActionFilter} onChange={(e) => setActivityActionFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todas las acciones</option>
+                  {Object.entries(ACTIVITY_ACTION_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+                <select value={activityUserFilter} onChange={(e) => setActivityUserFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los usuarios</option>
+                  {activityUsers.map((email) => <option key={email} value={email}>{email}</option>)}
+                </select>
+              </div>
+
+              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-2">Fecha y hora</div>
+                  <div className="col-span-2">Módulo</div>
+                  <div className="col-span-2">Acción</div>
+                  <div className="col-span-3">Usuario</div>
+                  <div className="col-span-3">Detalle</div>
+                </div>
+                {activityLogFiltered.map((l) => {
+                  const a = ACTIVITY_ACTION_LABELS[l.action] || { label: l.action, color: C.muted };
+                  const dt = new Date(l.changed_at);
+                  return (
+                    <div key={l.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-2 text-xs" style={{ color: C.muted }}>{dt.toLocaleDateString("es-DO")} · {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</div>
+                      <div className="col-span-2 truncate">{ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name}</div>
+                      <div className="col-span-2"><Pill label={a.label} color={a.color} /></div>
+                      <div className="col-span-3 truncate" style={{ color: C.muted }}>{l.changed_by_email || "—"}</div>
+                      <div className="col-span-3 truncate" style={{ color: C.muted }}>{describeActivityEntry(l) || "—"}</div>
+                    </div>
+                  );
+                })}
+                {!loadingActivityLog && activityLogFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay actividad registrada en este rango.</div>}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowOrderForm(false)} onSave={createOrder} saving={saving} />}
       {showBulkOrders && <BulkOrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowBulkOrders(false)} onSave={createBulkOrders} saving={saving} />}
-      {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} initial={editingOrder} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
+      {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} initial={editingOrder} initialExtraTechIds={orderTechnicians.filter((wt) => wt.work_order_id === editingOrder.id).map((wt) => wt.technician_id)} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
       {orderFromIncident && (
         <OrderFormModal
           branches={branches}
@@ -7073,7 +9765,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           technicians={technicians}
           initial={{ title: orderFromIncident.title, branch_id: orderFromIncident.branch_id, equipment_id: orderFromIncident.equipment_id }}
           onClose={() => setOrderFromIncident(null)}
-          onSave={(payload, files) => createOrder(payload, files, orderFromIncident.incidentId)}
+          onSave={(payload, files, extraTechIds) => createOrder(payload, files, extraTechIds, orderFromIncident.incidentId)}
           saving={saving}
         />
       )}
@@ -7084,7 +9776,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           technicians={technicians}
           initial={{ title: orderFromSalesOrder.title, branch_id: orderFromSalesOrder.branch_id, equipment_id: orderFromSalesOrder.equipment_id }}
           onClose={() => setOrderFromSalesOrder(null)}
-          onSave={(payload, files) => createOrder(payload, files, null, orderFromSalesOrder.salesOrderId)}
+          onSave={(payload, files, extraTechIds) => createOrder(payload, files, extraTechIds, null, orderFromSalesOrder.salesOrderId)}
           saving={saving}
         />
       )}
@@ -7098,6 +9790,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           branchName={branchName}
           equipName={equipName}
           techName={techName}
+          technicians={technicians}
+          extraTechnicianIds={orderTechnicians.filter((wt) => wt.work_order_id === detailOrder.id).map((wt) => wt.technician_id)}
+          materials={materials}
+          onConsumeMaterial={consumeMaterialStock}
+          onSaveSignature={saveClientSignature}
           onClose={() => { setDetailOrder(null); setDetailOrderAttachments([]); setDetailOrderChecklist([]); }}
           onSave={saveOrderDetail}
           saving={saving}
@@ -7117,19 +9814,19 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       {showAddTech && <TechFormModal branches={branches} onClose={() => setShowAddTech(false)} onSave={saveTech} saving={saving} />}
       {editingTech && <TechFormModal branches={branches} initial={editingTech} onClose={() => setEditingTech(null)} onSave={saveTech} saving={saving} />}
       {showAddEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {editingEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
       {historyFor && <HistoryModal title={historyFor.title} orders={historyFor.orders} branchName={branchName} equipName={equipName} techName={techName} onClose={() => setHistoryFor(null)} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
       {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
-      {showAddAsset && <ClientAssetFormModal clients={clients} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
-      {editingAsset && <ClientAssetFormModal clients={clients} initial={editingAsset} onClose={() => setEditingAsset(null)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
+      {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
+      {editingAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} initial={editingAsset} onClose={() => setEditingAsset(null)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
       {showAddProduct && (
         <ProductFormModal
           existingProducts={products.filter((p) => (p.item_type || "producto") === (view === "services" ? "servicio" : "producto"))}
@@ -7152,6 +9849,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       {editingSupplier && <SupplierFormModal initial={editingSupplier} onClose={() => setEditingSupplier(null)} onSave={saveSupplier} saving={saving} />}
       {showAddExpense && <ExpenseFormModal suppliers={suppliers} onClose={() => setShowAddExpense(false)} onSave={saveExpense} saving={saving} />}
       {editingExpense && <ExpenseFormModal suppliers={suppliers} initial={editingExpense} onClose={() => setEditingExpense(null)} onSave={saveExpense} saving={saving} />}
+      {showAddTool && <ToolFormModal branches={branches} technicians={technicians} onClose={() => setShowAddTool(false)} onSave={saveTool} saving={saving} />}
+      {editingTool && <ToolFormModal branches={branches} technicians={technicians} initial={editingTool} onClose={() => setEditingTool(null)} onSave={saveTool} saving={saving} />}
+      {showBulkTools && <BulkToolFormModal branches={branches} technicians={technicians} onClose={() => setShowBulkTools(false)} onSave={createBulkTools} saving={saving} />}
+      {showAddMaterial && <MaterialFormModal branches={branches} onClose={() => setShowAddMaterial(false)} onSave={saveMaterial} saving={saving} />}
+      {editingMaterial && <MaterialFormModal branches={branches} initial={editingMaterial} onClose={() => setEditingMaterial(null)} onSave={saveMaterial} saving={saving} />}
       {showAddAccount && <AccountFormModal onClose={() => setShowAddAccount(false)} onSave={saveAccount} saving={saving} />}
       {editingAccount && <AccountFormModal initial={editingAccount} onClose={() => setEditingAccount(null)} onSave={saveAccount} saving={saving} />}
       {showAddTaxRate && <TaxRateFormModal onClose={() => setShowAddTaxRate(false)} onSave={saveTaxRate} saving={saving} />}
@@ -7226,6 +9928,14 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           onDuplicate={duplicateQuote}
         />
       )}
+      {partialInvoiceFor && (
+        <PartialInvoiceModal
+          quote={partialInvoiceFor.quote}
+          items={partialInvoiceFor.items}
+          onClose={() => setPartialInvoiceFor(null)}
+          onConfirm={confirmPartialInvoice}
+        />
+      )}
       {salesOrderDetail && (
         <SalesOrderDetailModal
           order={salesOrderDetail.order}
@@ -7259,6 +9969,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           branches={branches}
           equipment={equipment}
           clients={clients}
+          technicians={technicians}
           onClose={() => setShowAddIncident(false)}
           onSave={saveIncident}
           saving={saving}
@@ -7270,6 +9981,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           branches={branches}
           equipment={equipment}
           clients={clients}
+          technicians={technicians}
           initial={editingIncident}
           onClose={() => setEditingIncident(null)}
           onSave={saveIncident}
@@ -7283,14 +9995,22 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           branchName={branchName}
           equipName={equipName}
           clientName={(id) => clients.find((c) => c.id === id)?.name || "—"}
+          techName={techName}
+          technicians={technicians}
           orders={orders}
           quotes={quotes}
           canEdit={canEdit("incidents")}
+          isTecnico={isTecnico}
           onClose={() => setIncidentDetail(null)}
           onMarkStatus={markIncidentStatus}
           onConvertOrder={convertIncidentToOrder}
           onConvertQuote={convertIncidentToQuote}
           onDelete={deleteIncident}
+          onSaveProgress={saveIncidentProgress}
+          onComplete={completeIncident}
+          onEdit={(inc) => { setIncidentDetail(null); setEditingIncident(inc); }}
+          onAssignTechnician={assignIncidentTechnician}
+          onReopen={reopenIncident}
         />
       )}
       {showStatement && <StatementModal clients={clients} invoices={invoices} companyName={companyName} onClose={() => setShowStatement(false)} />}
@@ -7317,6 +10037,27 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           ncfSequences={ncfSequences}
           onClose={() => setShowAddCreditNote(false)}
           onSave={createCreditNote}
+          saving={saving}
+        />
+      )}
+      {showAddContract && (
+        <RecurringContractFormModal
+          clients={clients}
+          branches={branches}
+          ncfSequences={ncfSequences}
+          onClose={() => setShowAddContract(false)}
+          onSave={saveRecurringContract}
+          saving={saving}
+        />
+      )}
+      {editingContract && (
+        <RecurringContractFormModal
+          clients={clients}
+          branches={branches}
+          ncfSequences={ncfSequences}
+          initial={editingContract}
+          onClose={() => setEditingContract(null)}
+          onSave={saveRecurringContract}
           saving={saving}
         />
       )}
