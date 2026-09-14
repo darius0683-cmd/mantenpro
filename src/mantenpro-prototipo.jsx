@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
   CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut,
-  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet, Package, UserCheck, MessageCircle, Bell, BellOff
+  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet, Package, UserCheck, MessageCircle, Bell, BellOff, Menu
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend
@@ -4822,6 +4822,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [importingBankStatement, setImportingBankStatement] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [quotes, setQuotes] = useState([]);
   const [salesOrders, setSalesOrders] = useState([]);
@@ -4855,6 +4856,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [view, setView] = useState(() => new URLSearchParams(window.location.search).get("view") || "dashboard");
   const changeView = (key) => {
     setView(key);
+    setShowMobileMenu(false);
     const url = new URL(window.location.href);
     url.searchParams.set("view", key);
     window.history.replaceState(null, "", url);
@@ -7253,15 +7255,26 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   return (
     <div className="w-full min-h-[720px] flex" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <div className="w-56 flex-shrink-0 flex flex-col" style={{ background: C.panel, borderRight: `1px solid ${C.border}` }}>
-        <div className="px-5 py-5 flex items-center gap-2" style={{ borderBottom: `1px solid ${C.border}` }}>
-          <div className="w-7 h-7 flex items-center justify-center" style={{ background: C.amber }}>
-            <Wrench size={16} color="#1A1500" />
+      {showMobileMenu && (
+        <div className="fixed inset-0 z-40 md:hidden" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setShowMobileMenu(false)} />
+      )}
+      <div
+        className={`${showMobileMenu ? "flex" : "hidden"} md:flex fixed md:relative inset-y-0 left-0 z-50 md:z-auto w-64 md:w-56 flex-shrink-0 flex-col overflow-y-auto`}
+        style={{ background: C.panel, borderRight: `1px solid ${C.border}` }}
+      >
+        <div className="px-5 py-5 flex items-center justify-between gap-2" style={{ borderBottom: `1px solid ${C.border}` }}>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 flex items-center justify-center" style={{ background: C.amber }}>
+              <Wrench size={16} color="#1A1500" />
+            </div>
+            <div>
+              <div className="font-bold text-sm tracking-tight leading-none">MantenPro</div>
+              <div className="text-[10px] uppercase tracking-wide mt-0.5" style={{ color: C.muted }}>Multi-empresa</div>
+            </div>
           </div>
-          <div>
-            <div className="font-bold text-sm tracking-tight leading-none">MantenPro</div>
-            <div className="text-[10px] uppercase tracking-wide mt-0.5" style={{ color: C.muted }}>Multi-empresa</div>
-          </div>
+          <button onClick={() => setShowMobileMenu(false)} className="md:hidden p-1" style={{ color: C.muted }}>
+            <X size={18} />
+          </button>
         </div>
         <nav className="flex-1 py-3">
           {(() => {
@@ -7330,6 +7343,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
         <div className="flex items-center justify-between px-6 py-3 flex-wrap gap-3" style={{ borderBottom: `1px solid ${C.border}` }}>
           <div className="flex items-center gap-3">
+            <button onClick={() => setShowMobileMenu(true)} className="md:hidden p-2" style={{ color: C.text }}>
+              <Menu size={20} />
+            </button>
             <div className="flex items-center gap-2 px-3 py-2 text-sm font-medium" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
               <Building2 size={14} color={C.amber} />
               {companyName}
@@ -7350,7 +7366,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 )}
               </button>
               {showNotifPanel && (
-                <div className="absolute right-0 mt-2 w-96 z-50" style={{ background: C.panel, border: `1px solid ${C.border}`, maxHeight: 480, overflowY: "auto" }}>
+                <div className="absolute right-0 mt-2 z-50" style={{ background: C.panel, border: `1px solid ${C.border}`, maxHeight: 480, overflowY: "auto", width: "min(24rem, 90vw)" }}>
                   <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="text-sm font-semibold">Notificaciones</div>
                     <div className="flex items-center gap-2">
