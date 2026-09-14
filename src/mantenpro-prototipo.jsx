@@ -2010,7 +2010,7 @@ function BulkToolFormModal({ branches, technicians, onClose, onSave, saving }) {
           <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>{rows.length} herramienta{rows.length !== 1 ? "s" : ""} lista{rows.length !== 1 ? "s" : ""} para guardar</div>
           <div className="space-y-2 mb-3 max-h-80 overflow-y-auto pr-1">
             {rows.map((r) => (
-              <div key={r.tempId} className="grid grid-cols-12 gap-2 items-center">
+              <div key={r.tempId} className="grid grid-cols-12 gap-2 min-w-[860px] items-center">
                 <input className={`${inputClass} col-span-3`} style={inputStyle} value={r.name} onChange={(e) => updateRow(r.tempId, { name: e.target.value })} placeholder="Nombre" />
                 <input className={`${inputClass} col-span-2`} style={inputStyle} value={r.category} onChange={(e) => updateRow(r.tempId, { category: e.target.value })} placeholder="Categoría" />
                 <input className={`${inputClass} col-span-2`} style={inputStyle} value={r.serial_number} onChange={(e) => updateRow(r.tempId, { serial_number: e.target.value })} placeholder="No. serie" />
@@ -2290,7 +2290,7 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
       </div>
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos comprados</div>
-      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+      <div className="grid grid-cols-12 gap-2 min-w-[860px] text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
         <div className="col-span-4">Producto</div>
         <div className="col-span-1">Cantidad</div>
         <div className="col-span-2">Costo unitario</div>
@@ -2321,7 +2321,7 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
             <div key={b.id}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); reorderBlocks(e.dataTransfer.getData("text/plain"), b.id); }}
-              className="grid grid-cols-12 gap-2 items-center"
+              className="grid grid-cols-12 gap-2 min-w-[860px] items-center"
             >
               <div className="col-span-4 flex items-center gap-1">
                 <div draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", String(b.id))} className="cursor-grab flex-shrink-0 touch-none" style={{ color: C.muted }} title="Arrastrar para reordenar">
@@ -2718,7 +2718,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
       )}
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
-      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+      <div className="grid grid-cols-12 gap-2 min-w-[860px] text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
         <div className="col-span-4">Producto</div>
         <div className="col-span-3">Descripción</div>
         <div className="col-span-1">Cantidad</div>
@@ -2746,7 +2746,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); reorderBlocks(e.dataTransfer.getData("text/plain"), b.id); }}
             >
-              <div className="grid grid-cols-12 gap-2 items-center">
+              <div className="grid grid-cols-12 gap-2 min-w-[860px] items-center">
                 <div className="col-span-4 flex items-center gap-1">
                   <div draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", String(b.id))} className="cursor-grab flex-shrink-0 touch-none" style={{ color: C.muted }} title="Arrastrar para reordenar">
                     <GripVertical size={16} />
@@ -2768,7 +2768,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
                 <BadgeCheck size={12} color={C.amber} /> Registrar este renglón como activo en garantía
               </label>
               {b.register_asset && (
-                <div className="grid grid-cols-12 gap-2 items-center mt-1 ml-1">
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] items-center mt-1 ml-1">
                   <input className={`${inputClass} col-span-6`} style={inputStyle} value={b.asset_serial} onChange={(e) => updateBlock(b.id, { asset_serial: e.target.value })} placeholder="Número de serie (opcional)" />
                   <div className="col-span-6 flex items-center gap-2">
                     <input type="number" className={inputClass} style={inputStyle} value={b.asset_warranty_months} onChange={(e) => updateBlock(b.id, { asset_warranty_months: e.target.value })} placeholder="Meses de garantía" />
@@ -3092,7 +3092,7 @@ function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, onSave,
           {loadingItems && <div className="text-sm" style={{ color: C.muted }}>Cargando líneas de la factura...</div>}
           <div className="space-y-2 mb-3">
             {items.map((it) => (
-              <div key={it.id} className="grid grid-cols-12 gap-2 items-center">
+              <div key={it.id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center">
                 <label className="col-span-1 flex justify-center">
                   <input type="checkbox" checked={it.selected} onChange={(e) => updateItem(it.id, { selected: e.target.checked })} />
                 </label>
@@ -3386,7 +3386,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
       )}
 
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos / servicios</div>
-      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+      <div className="grid grid-cols-12 gap-2 min-w-[860px] text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
         <div className="col-span-4">Producto</div>
         <div className="col-span-3">Descripción</div>
         <div className="col-span-1">Cantidad</div>
@@ -3414,7 +3414,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
             <div key={b.id}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => { e.preventDefault(); reorderBlocks(e.dataTransfer.getData("text/plain"), b.id); }}
-              className="grid grid-cols-12 gap-2 items-center"
+              className="grid grid-cols-12 gap-2 min-w-[860px] items-center"
             >
               <div className="col-span-4 flex items-center gap-1">
                 <div draggable onDragStart={(e) => e.dataTransfer.setData("text/plain", String(b.id))} className="cursor-grab flex-shrink-0 touch-none" style={{ color: C.muted }} title="Arrastrar para reordenar">
@@ -3506,7 +3506,7 @@ function PartialInvoiceModal({ quote, items, onClose, onConfirm }) {
       </div>
       <div className="space-y-2 mb-3">
         {invoiceable.map((it) => (
-          <div key={it.id} className="grid grid-cols-12 gap-2 items-center px-3 py-2 text-sm" style={{ background: C.panelAlt }}>
+          <div key={it.id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center px-3 py-2 text-sm" style={{ background: C.panelAlt }}>
             <div className="col-span-5 truncate">{it.description}</div>
             <div className="col-span-3 text-xs text-right" style={{ color: C.muted }}>Pendiente: {it.remaining} de {it.quantity}</div>
             <div className="col-span-2">
@@ -3962,7 +3962,7 @@ function StatementModal({ clients, invoices, companyName, onClose }) {
       {client && (
         <>
           <div className="space-y-1 mt-3 mb-3">
-            <div className="grid grid-cols-12 gap-2 px-3 py-1 text-xs uppercase tracking-wide" style={{ color: C.muted }}>
+            <div className="grid grid-cols-12 gap-2 min-w-[860px] px-3 py-1 text-xs uppercase tracking-wide" style={{ color: C.muted }}>
               <div className="col-span-3">NCF</div>
               <div className="col-span-2">Fecha</div>
               <div className="col-span-2 text-right">Total</div>
@@ -3974,7 +3974,7 @@ function StatementModal({ clients, invoices, companyName, onClose }) {
               const balance = Number(inv.total) - Number(inv.amount_paid || 0);
               const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
               return (
-                <div key={inv.id} className="grid grid-cols-12 gap-2 items-center text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+                <div key={inv.id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center text-sm px-3 py-2" style={{ background: C.panelAlt }}>
                   <div className="col-span-3 font-mono text-xs">{inv.ncf}</div>
                   <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
                   <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
@@ -4292,7 +4292,7 @@ function BulkOrderFormModal({ branches, equipment, technicians, onClose, onSave,
           <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Asigna día y técnico para cada orden ({pool.length})</div>
           <div className="space-y-2 mb-3">
             {pool.map((p) => (
-              <div key={p.equipment_id} className="grid grid-cols-12 gap-2 items-center">
+              <div key={p.equipment_id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center">
                 <input className={`${inputClass} col-span-4`} style={inputStyle} value={p.title} onChange={(e) => updatePoolRow(p.equipment_id, { title: e.target.value })} />
                 <select className={`${inputClass} col-span-4`} style={inputStyle} value={p.day} onChange={(e) => updatePoolRow(p.equipment_id, { day: Number(e.target.value) })}>
                   {dayLabels.map((lbl, i) => <option key={i} value={i}>{lbl} · {fmtDate(weekDates[i].toISOString().slice(0, 10))}</option>)}
@@ -4624,7 +4624,7 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         )}
         {!loadingMaterials && usedMaterials.length === 0 && <div className="text-xs mb-2" style={{ color: C.muted }}>Todavía no se ha registrado ningún material.</div>}
         {!readOnly && (
-          <div className="grid grid-cols-12 gap-2 items-end">
+          <div className="grid grid-cols-12 gap-2 min-w-[860px] items-end">
             <div className="col-span-3">
               <select className={`${inputClass} text-xs`} style={inputStyle} value={newMaterialSource} onChange={(e) => { setNewMaterialSource(e.target.value); setNewMaterialName(""); }}>
                 <option value="">Material libre...</option>
@@ -7208,7 +7208,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   }, [view, JSON.stringify(effectivePermissions)]);
 
   const renderToolRow = (t) => (
-    <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+    <div key={t.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
       <div className="col-span-3">
         <div className="font-medium">{t.name}</div>
         {t.serial_number && <div className="text-xs" style={{ color: C.muted }}>S/N {t.serial_number}</div>}
@@ -7629,10 +7629,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </button>
                 )}
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <input type="checkbox" checked={filteredOrders.length > 0 && selectedOrders.size === filteredOrders.length} onChange={() => setSelectedOrders(selectedOrders.size === filteredOrders.length ? new Set() : new Set(filteredOrders.map((o) => o.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2">
+                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
                     <div className="col-span-3">Orden</div>
                     <div className="col-span-2">Tipo</div>
                     <div className="col-span-1">Sucursal</div>
@@ -7647,7 +7647,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   return (
                     <div key={o.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${t.color}` }}>
                       <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => setSelectedOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })} />
-                      <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                      <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
                         <div className="col-span-3 min-w-0">
                           <div className="font-mono text-xs" style={{ color: C.muted }}>{o.code}</div>
                           <div className="truncate">{o.title}</div>
@@ -7748,10 +7748,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </button>
                 )}
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <input type="checkbox" checked={incidentsFiltered.length > 0 && selectedIncidents.size === incidentsFiltered.length} onChange={() => setSelectedIncidents(selectedIncidents.size === incidentsFiltered.length ? new Set() : new Set(incidentsFiltered.map((i) => i.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2">
+                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
                     <div className="col-span-3">Incidente</div>
                     <div className="col-span-2">Sucursal</div>
                     <div className="col-span-2">Técnico</div>
@@ -7767,7 +7767,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   return (
                     <div key={inc.id} onClick={() => setIncidentDetail(inc)} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${s.color}` }}>
                       <input type="checkbox" checked={selectedIncidents.has(inc.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedIncidents((prev) => { const next = new Set(prev); next.has(inc.id) ? next.delete(inc.id) : next.add(inc.id); return next; })} />
-                      <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                      <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
                         <div className="col-span-3 truncate">{inc.title}</div>
                         <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(inc.branch_id)}</div>
                         <div className="col-span-2 truncate" style={{ color: inc.technician_id ? C.text : C.muted }}>{techName(inc.technician_id)}</div>
@@ -7914,8 +7914,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         <span className="text-sm font-semibold">{g.name}</span>
                         <span className="text-xs" style={{ color: C.muted }}>({g.tools.length})</span>
                       </div>
-                      <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                        <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                      <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                        <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                           <div className="col-span-3">Herramienta</div>
                           <div className="col-span-2">Categoría</div>
                           <div className="col-span-2">Sucursal</div>
@@ -7930,8 +7930,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   {toolGroups.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay herramientas para este filtro.</div>}
                 </div>
               ) : (
-                <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                  <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3">Herramienta</div>
                     <div className="col-span-2">Categoría</div>
                     <div className="col-span-2">Sucursal</div>
@@ -7956,8 +7956,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </button>
                 )}
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-4">Material</div>
                   <div className="col-span-2">Sucursal</div>
                   <div className="col-span-2 text-right">Cantidad</div>
@@ -7965,7 +7965,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
                 {materials.map((m) => (
-                  <div key={m.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={m.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-4">
                       <div className="font-medium">{m.name}</div>
                       {m.notes && <div className="text-xs" style={{ color: C.muted }}>{m.notes}</div>}
@@ -7999,7 +7999,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Equipos — plan de mantenimiento</div>
               <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Equipo</div>
                   <div className="col-span-2">Sucursal</div>
                   <div className="col-span-2">Próximo mantenimiento</div>
@@ -8013,7 +8013,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     (Number(e.current_usage) - Number(e.usage_last_maintenance || 0)) >= Number(e.usage_interval);
                   const isDue = dueByDate || dueByUsage;
                   return (
-                    <div key={e.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-start text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={e.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-start text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-3 truncate">{e.name}</div>
                       <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(e.branch_id)}</div>
                       <div className="col-span-2">
@@ -8040,8 +8040,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               </div>
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Activos instalados en clientes — plan de mantenimiento</div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Activo</div>
                   <div className="col-span-2">Cliente</div>
                   <div className="col-span-2">Próximo mantenimiento</div>
@@ -8052,7 +8052,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {[...dueClientAssets, ...upcomingClientAssets].map((a) => {
                   const dueByDate = a.next_maintenance_date && a.next_maintenance_date <= todayStr;
                   return (
-                    <div key={a.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-start text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={a.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-start text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-3 truncate">{a.name}</div>
                       <div className="col-span-2 truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === a.client_id)?.name || "—"}</div>
                       <div className="col-span-2">
@@ -8126,8 +8126,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               <div className="text-xs mb-3" style={{ color: C.muted }}>
                 Los activos vencidos salen automáticamente de esta lista (siguen guardados, solo dejan de contar como "en garantía").
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Activo</div>
                   <div className="col-span-3">Cliente</div>
                   <div className="col-span-2">Instalado</div>
@@ -8135,7 +8135,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
                 {activeWarrantyAssets.map((a) => (
-                  <div key={a.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={a.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3 min-w-0">
                       <div className="truncate">{a.name}</div>
                       <div className="text-xs truncate" style={{ color: C.muted }}>{[a.brand, a.model].filter(Boolean).join(" · ") || a.serial_number || ""}</div>
@@ -8249,13 +8249,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>SLA — tiempos promedio por prioridad</div>
               <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Prioridad</div>
                   <div className="col-span-4">Tiempo promedio de atención</div>
                   <div className="col-span-5">Tiempo promedio de resolución</div>
                 </div>
                 {incidentSlaStats.map((s) => (
-                  <div key={s.key} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={s.key} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3"><Pill label={s.label} color={s.color} /></div>
                     <div className="col-span-4 font-mono">{s.responseLabel} <span className="text-xs" style={{ color: C.muted }}>({s.nResponse})</span></div>
                     <div className="col-span-5 font-mono">{s.resolutionLabel} <span className="text-xs" style={{ color: C.muted }}>({s.nResolution})</span></div>
@@ -8281,7 +8281,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 </ResponsiveContainer>
               </div>
               <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Técnico</div>
                   <div className="col-span-1 text-center">Prev.</div>
                   <div className="col-span-1 text-center">Correc.</div>
@@ -8291,7 +8291,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-3 text-right">Historial</div>
                 </div>
                 {techStats.map((t) => (
-                  <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={t.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3">
                       <div>{t.name}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{t.specialty}</div>
@@ -8343,8 +8343,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </ResponsiveContainer>
                 </div>
               )}
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Equipo</div>
                   <div className="col-span-2 text-center">Abiertas</div>
                   <div className="col-span-2 text-center">Correctivas</div>
@@ -8353,7 +8353,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Historial</div>
                 </div>
                 {equipStats.map((eq) => (
-                  <div key={eq.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={eq.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3">
                       <div>{eq.name}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{branchName(eq.branch_id)}</div>
@@ -8399,10 +8399,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 <Search size={14} color={C.muted} />
                 <input value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} placeholder="Buscar por nombre, RNC, teléfono o correo..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <input type="checkbox" checked={filteredClients.length > 0 && selectedClients.size === filteredClients.length} onChange={() => setSelectedClients(selectedClients.size === filteredClients.length ? new Set() : new Set(filteredClients.map((c) => c.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2">
+                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
                     <div className="col-span-3">Cliente</div>
                     <div className="col-span-2">RNC / Cédula</div>
                     <div className="col-span-2">Teléfono</div>
@@ -8414,7 +8414,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {filteredClients.map((c) => (
                   <div key={c.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <input type="checkbox" checked={selectedClients.has(c.id)} onChange={() => setSelectedClients((prev) => { const next = new Set(prev); next.has(c.id) ? next.delete(c.id) : next.add(c.id); return next; })} />
-                    <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                    <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
                       <div className="col-span-3 truncate">{c.name}</div>
                       <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.rnc_cedula || "—"}</div>
                       <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.phone || "—"}</div>
@@ -8471,10 +8471,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   {productCategories.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <input type="checkbox" checked={filteredProducts.length > 0 && selectedProducts.size === filteredProducts.length} onChange={() => setSelectedProducts(selectedProducts.size === filteredProducts.length ? new Set() : new Set(filteredProducts.map((p) => p.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2">
+                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
                     <div className={isServicesView ? "col-span-6" : "col-span-4"}>{isServicesView ? "Servicio" : "Producto"}</div>
                     <div className="col-span-2 text-right">Costo</div>
                     <div className="col-span-2 text-right">Precio venta</div>
@@ -8485,7 +8485,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {filteredProducts.map((p) => (
                   <div key={p.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => setSelectedProducts((prev) => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; })} />
-                    <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                    <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
                       <div className={(isServicesView ? "col-span-6" : "col-span-4") + " min-w-0"}>
                         <div className="truncate">{p.name}</div>
                         <div className="text-xs truncate" style={{ color: C.muted }}>
@@ -8586,8 +8586,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Proveedor</div>
                   <div className="col-span-2">Factura</div>
                   <div className="col-span-2">Fecha</div>
@@ -8598,7 +8598,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {filteredPurchases.map((pu) => {
                   const payCfg = PAYABLE_STATUS_CFG[pu.payment_status] || PAYABLE_STATUS_CFG.pendiente;
                   return (
-                    <div key={pu.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={pu.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-3 min-w-0">
                         <div className="truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
                         {pu.title && <div className="text-xs truncate" style={{ color: C.muted }}>{pu.title}</div>}
@@ -8640,8 +8640,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <Plus size={14} /> Registrar gasto
                 </button>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-2">Fecha</div>
                   <div className="col-span-2">Categoría</div>
                   <div className="col-span-4">Descripción</div>
@@ -8649,7 +8649,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
                 {otherExpenses.map((ex) => (
-                  <div key={ex.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={ex.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(ex.expense_date)}</div>
                     <div className="col-span-2 truncate" style={{ color: C.muted }}>{ex.category || "—"}</div>
                     <div className="col-span-4 truncate">{ex.description}{ex.supplier_id && <span className="text-xs" style={{ color: C.muted }}> · {suppliers.find((s) => s.id === ex.supplier_id)?.name}</span>}</div>
@@ -8673,8 +8673,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <Plus size={14} /> Agregar cuenta
                 </button>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-2">Código</div>
                   <div className="col-span-5">Nombre</div>
                   <div className="col-span-2">Tipo</div>
@@ -8682,7 +8682,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
                 {chartOfAccounts.map((a) => (
-                  <div key={a.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={a.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-2 font-mono" style={{ color: C.muted }}>{a.code}</div>
                     <div className="col-span-5 truncate">{a.name}</div>
                     <div className="col-span-2" style={{ color: C.muted }}>{a.account_type}</div>
@@ -8707,15 +8707,15 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 </button>
               </div>
               <div className="text-xs mb-3" style={{ color: C.muted }}>Catálogo informativo — las cotizaciones y facturas siguen calculando ITBIS al 18% de forma fija.</div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-5">Nombre</div>
                   <div className="col-span-3 text-right">Tasa</div>
                   <div className="col-span-2">Por defecto</div>
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
                 {taxRates.map((t) => (
-                  <div key={t.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={t.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-5 truncate">{t.name}</div>
                     <div className="col-span-3 text-right font-mono">{Number(t.rate_pct)}%</div>
                     <div className="col-span-2" style={{ color: t.is_default ? C.amber : C.muted }}>{t.is_default ? "Sí" : "No"}</div>
@@ -8957,8 +8957,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       <KpiCard label="Pendientes" value={pending.length} accent={C.amber} sub="Necesitan revisión" />
                     </div>
 
-                    <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                      <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                    <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                         <div className="col-span-2">Fecha</div>
                         <div className="col-span-3">Descripción</div>
                         <div className="col-span-2 text-right">Monto</div>
@@ -8968,7 +8968,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       {txInRange.map((tx) => {
                         const candidate = !tx.is_reconciled ? bankMatchCandidate(tx) : null;
                         return (
-                          <div key={tx.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <div key={tx.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                             <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(tx.transaction_date)}</div>
                             <div className="col-span-3 truncate">{tx.description || "—"}</div>
                             <div className="col-span-2 text-right font-mono" style={{ color: tx.amount >= 0 ? C.green : C.red }}>{fmtMoney(tx.amount)}</div>
@@ -9013,8 +9013,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           {!loadingScope && hasPerm("supplierReceipts") && view === "supplierReceipts" && (
             <div>
               <div className="text-sm mb-3" style={{ color: C.muted }}>{allPurchasePayments.length} recibo{allPurchasePayments.length !== 1 ? "s" : ""} de pago a proveedores</div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Proveedor</div>
                   <div className="col-span-2">Factura</div>
                   <div className="col-span-2">Fecha de pago</div>
@@ -9024,7 +9024,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {allPurchasePayments.map((pay) => {
                   const pu = purchases.find((p) => p.id === pay.purchase_id);
                   return (
-                    <div key={pay.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={pay.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu?.supplier_id)?.name || "—"}</div>
                       <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu?.invoice_number || "—"}</div>
                       <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pay.payment_date)}</div>
@@ -9041,8 +9041,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           {!loadingScope && hasPerm("purchaseLedger") && view === "purchaseLedger" && (
             <div>
               <div className="text-sm mb-3" style={{ color: C.muted }}>{purchases.length} factura{purchases.length !== 1 ? "s" : ""} de proveedor recibida{purchases.length !== 1 ? "s" : ""}</div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Proveedor</div>
                   <div className="col-span-2">Factura</div>
                   <div className="col-span-2">Fecha</div>
@@ -9053,7 +9053,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {purchases.map((pu) => {
                   const payCfg = PAYABLE_STATUS_CFG[pu.payment_status] || PAYABLE_STATUS_CFG.pendiente;
                   return (
-                    <div key={pu.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={pu.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
                       <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
                       <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
@@ -9094,8 +9094,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       <div className="text-sm" style={{ color: C.muted }}>{pending.length} factura{pending.length !== 1 ? "s" : ""} pendiente{pending.length !== 1 ? "s" : ""} de cobro</div>
                       <div className="text-lg font-mono font-bold" style={{ color: C.red }}>{fmtMoney(totalPending)}</div>
                     </div>
-                    <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                      <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                    <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                         <div className="col-span-3">Cliente</div>
                         <div className="col-span-2">NCF</div>
                         <div className="col-span-2">Fecha</div>
@@ -9107,7 +9107,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         const cli = clients.find((c) => c.id === inv.client_id);
                         const reminderText = invoiceReminderText(companyName, cli?.name || "Cliente", inv, inv.balance, inv.days);
                         return (
-                          <div key={inv.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <div key={inv.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                             <div className="col-span-3 truncate">{cli?.name || "—"}</div>
                             <div className="col-span-2 truncate" style={{ color: C.muted }}>{inv.ncf}</div>
                             <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
@@ -9157,8 +9157,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       <div className="text-sm" style={{ color: C.muted }}>{pending.length} compra{pending.length !== 1 ? "s" : ""} pendiente{pending.length !== 1 ? "s" : ""} de pago</div>
                       <div className="text-lg font-mono font-bold" style={{ color: C.red }}>{fmtMoney(totalPending)}</div>
                     </div>
-                    <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                      <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                    <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                         <div className="col-span-3">Proveedor</div>
                         <div className="col-span-2">Factura</div>
                         <div className="col-span-2">Fecha</div>
@@ -9167,7 +9167,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         <div className="col-span-2 text-right">Acciones</div>
                       </div>
                       {pending.map((pu) => (
-                        <div key={pu.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <div key={pu.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                           <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
                           <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
                           <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
@@ -9196,8 +9196,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <Plus size={14} /> Agregar secuencia
                 </button>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-2">Tipo</div>
                   <div className="col-span-3">Rango autorizado</div>
                   <div className="col-span-2">Próximo número</div>
@@ -9208,7 +9208,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {ncfSequences.map((s) => {
                   const remaining = s.range_end - s.next_number + 1;
                   return (
-                    <div key={s.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={s.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-2 font-mono">{s.ncf_type}</div>
                       <div className="col-span-3 font-mono text-xs" style={{ color: C.muted }}>{s.range_start} – {s.range_end}</div>
                       <div className="col-span-2 font-mono">{s.next_number}</div>
@@ -9262,10 +9262,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   {Object.entries(QUOTE_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <input type="checkbox" checked={filteredQuotes.length > 0 && selectedQuotes.size === filteredQuotes.length} onChange={() => setSelectedQuotes(selectedQuotes.size === filteredQuotes.length ? new Set() : new Set(filteredQuotes.map((q) => q.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2">
+                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
                     <div className="col-span-2">No.</div>
                     <div className="col-span-3">Cliente</div>
                     <div className="col-span-2">Fecha</div>
@@ -9278,7 +9278,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   return (
                     <div key={q.id} onClick={() => openQuoteDetail(q)} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <input type="checkbox" checked={selectedQuotes.has(q.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedQuotes((prev) => { const next = new Set(prev); next.has(q.id) ? next.delete(q.id) : next.add(q.id); return next; })} />
-                      <div className="flex-1 grid grid-cols-12 gap-2 items-center">
+                      <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
                         <div className="col-span-2 min-w-0">
                           <div className="font-mono text-xs">{q.quote_number}</div>
                           {q.title && <div className="text-xs truncate" style={{ color: C.muted }}>{q.title}</div>}
@@ -9313,7 +9313,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               <div className="text-xs mb-3" style={{ color: C.muted }}>
                 Las órdenes de venta se generan desde una cotización aprobada (botón "Pasar a Orden de Venta") — representan un trabajo o venta ya en ejecución, antes de facturarse. Solo las canceladas se pueden marcar y borrar.
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <input
                     type="checkbox"
@@ -9324,7 +9324,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       setSelectedSalesOrders(allSelected ? new Set() : new Set(cancelledIds));
                     }}
                   />
-                  <div className="flex-1 grid grid-cols-12 gap-2">
+                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
                     <div className="col-span-3">Orden</div>
                     <div className="col-span-3">Cliente</div>
                     <div className="col-span-2">Fecha</div>
@@ -9344,7 +9344,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         onChange={() => setSelectedSalesOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })}
                         style={{ opacity: isCancelled ? 1 : 0.3 }}
                       />
-                      <div onClick={() => openSalesOrderDetail(o)} className="flex-1 grid grid-cols-12 gap-2 items-center cursor-pointer">
+                      <div onClick={() => openSalesOrderDetail(o)} className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center cursor-pointer">
                         <div className="col-span-3 min-w-0">
                           <div className="font-mono text-xs">{o.order_number}</div>
                           {o.title && <div className="text-xs truncate" style={{ color: C.muted }}>{o.title}</div>}
@@ -9397,8 +9397,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   {Object.entries(PAYMENT_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-2">NCF</div>
                   <div className="col-span-3">Cliente</div>
                   <div className="col-span-2">Fecha</div>
@@ -9408,7 +9408,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {filteredInvoices.map((inv) => {
                   const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
                   return (
-                    <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${inv.status === "anulada" ? C.red : "transparent"}` }}>
+                    <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${inv.status === "anulada" ? C.red : "transparent"}` }}>
                       <div className="col-span-2 min-w-0">
                         <div className="font-mono text-xs">{inv.ncf}</div>
                         {inv.title && <div className="text-xs truncate" style={{ color: C.muted }}>{inv.title}</div>}
@@ -9501,8 +9501,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     )}
 
                     <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Historial de cuadres — {activeBranchName}</div>
-                    <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                      <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                    <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                         <div className="col-span-3">Cierre</div>
                         <div className="col-span-2 text-right">Efectivo</div>
                         <div className="col-span-2 text-right">Tarjeta</div>
@@ -9514,7 +9514,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                           + Number(s.declared_card || 0) - Number(s.expected_card || 0)
                           + Number(s.declared_transfer || 0) - Number(s.expected_transfer || 0);
                         return (
-                          <div key={s.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <div key={s.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                             <div className="col-span-3" style={{ color: C.muted }}>{s.closed_at ? new Date(s.closed_at).toLocaleString("es-DO") : "—"}</div>
                             <div className="col-span-2 text-right font-mono">{fmtMoney(s.declared_cash)}</div>
                             <div className="col-span-2 text-right font-mono">{fmtMoney(s.declared_card)}</div>
@@ -9549,8 +9549,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               <div className="text-xs mb-3" style={{ color: C.muted }}>
                 Una nota de crédito ajusta el saldo de una factura ya emitida (que no se puede editar directamente) — útil para devoluciones o correcciones. Usa el tipo de comprobante B04.
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">NCF</div>
                   <div className="col-span-2">Factura original</div>
                   <div className="col-span-3">Cliente</div>
@@ -9558,7 +9558,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Total</div>
                 </div>
                 {creditNotes.map((cn) => (
-                  <div key={cn.id} onClick={() => openCreditNoteDetail(cn)} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={cn.id} onClick={() => openCreditNoteDetail(cn)} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-3 font-mono text-xs">{cn.ncf}</div>
                     <div className="col-span-2 font-mono text-xs" style={{ color: C.muted }}>{invoices.find((i) => i.id === cn.invoice_id)?.ncf || "—"}</div>
                     <div className="col-span-3 truncate">{clients.find((c) => c.id === cn.client_id)?.name || "—"}</div>
@@ -9590,8 +9590,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   )}
                 </div>
               </div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Cliente / título</div>
                   <div className="col-span-2 text-right">Monto</div>
                   <div className="col-span-2">Frecuencia</div>
@@ -9602,7 +9602,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {recurringContracts.map((c) => {
                   const due = c.is_active && c.next_invoice_date <= todayStr;
                   return (
-                    <div key={c.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={c.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-3">
                         <div className="truncate">{clients.find((cl) => cl.id === c.client_id)?.name || "—"}</div>
                         <div className="text-xs truncate" style={{ color: C.muted }}>{c.title}</div>
@@ -9668,7 +9668,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               </div>
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Invitaciones pendientes</div>
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 {invites.map((i) => (
                   <div key={i.id} className="flex items-center justify-between px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div>
@@ -9743,8 +9743,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 </select>
               </div>
 
-              <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-2">Fecha y hora</div>
                   <div className="col-span-2">Módulo</div>
                   <div className="col-span-2">Acción</div>
@@ -9755,7 +9755,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   const a = ACTIVITY_ACTION_LABELS[l.action] || { label: l.action, color: C.muted };
                   const dt = new Date(l.changed_at);
                   return (
-                    <div key={l.id} className="grid grid-cols-12 gap-2 px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div key={l.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-2 text-xs" style={{ color: C.muted }}>{dt.toLocaleDateString("es-DO")} · {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</div>
                       <div className="col-span-2 truncate">{ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name}</div>
                       <div className="col-span-2"><Pill label={a.label} color={a.color} /></div>
