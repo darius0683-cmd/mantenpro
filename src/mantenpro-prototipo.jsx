@@ -7867,48 +7867,49 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   }, [view, JSON.stringify(effectivePermissions)]);
 
   const renderToolRow = (t) => (
-    <div key={t.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-      <div className="col-span-3">
-        <div className="font-medium">{t.name}</div>
-        {t.serial_number && <div className="text-xs" style={{ color: C.muted }}>S/N {t.serial_number}</div>}
+    <div key={t.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-start justify-between gap-2 mb-1">
+        <div className="min-w-0">
+          <div className="font-medium truncate">{t.name}</div>
+          {t.serial_number && <div className="text-xs" style={{ color: C.muted }}>S/N {t.serial_number}</div>}
+          {t.category && <div className="text-xs" style={{ color: C.muted }}>{t.category}</div>}
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {canEdit("tools") && <button onClick={() => setEditingTool(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
+          {canEdit("tools") && <button onClick={() => deleteTool(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+        </div>
       </div>
-      <div className="col-span-2 truncate" style={{ color: C.muted }}>{t.category || "—"}</div>
-      <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(t.branch_id)}</div>
-      <div className="col-span-2"><Pill label={TOOL_STATUS_CFG[t.status]?.label || "Disponible"} color={TOOL_STATUS_CFG[t.status]?.color || C.green} /></div>
-      <div className="col-span-2">
+      <div className="text-xs mb-2" style={{ color: C.muted }}>{branchName(t.branch_id)}</div>
+      <div className="flex items-center justify-between pt-2 mt-1" style={{ borderTop: `1px solid ${C.border}` }}>
+        <Pill label={TOOL_STATUS_CFG[t.status]?.label || "Disponible"} color={TOOL_STATUS_CFG[t.status]?.color || C.green} />
         {canEdit("tools") ? (
-          <div>
-            <select value={t.technician_id || ""} onChange={(e) => assignTool(t.id, e.target.value)} className="w-full px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
-              <option value="">Sin asignar</option>
-              {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
-            </select>
-            {t.technician_id && (
-              <div className="text-[10px] mt-1" style={{ color: t.received_at ? C.green : C.amber }}>
-                {t.received_at ? `Confirmada ${fmtDate(t.received_at.slice(0, 10))}` : "Pendiente de confirmación"}
-              </div>
-            )}
-          </div>
+          <select value={t.technician_id || ""} onChange={(e) => assignTool(t.id, e.target.value)} className="px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+            <option value="">Sin asignar</option>
+            {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+          </select>
         ) : (
-          <div>
-            <span style={{ color: C.muted }}>{techName(t.technician_id)}</span>
-            {t.technician_id && (
-              t.received_at ? (
-                <div className="text-[10px] mt-1" style={{ color: C.green }}>✓ Confirmada {fmtDate(t.received_at.slice(0, 10))}</div>
-              ) : isTecnico && t.technician_id === profile.technician_id ? (
-                <button onClick={() => confirmToolReceipt(t.id)} className="mt-1 flex items-center gap-1 text-[11px] px-2 py-1" style={{ background: C.green + "20", color: C.green, border: `1px solid ${C.green}40` }}>
-                  <CheckCircle2 size={12} /> Confirmar recepción
-                </button>
-              ) : (
-                <div className="text-[10px] mt-1" style={{ color: C.amber }}>Pendiente de confirmación</div>
-              )
-            )}
-          </div>
+          <span style={{ color: C.muted }}>{techName(t.technician_id)}</span>
         )}
       </div>
-      <div className="col-span-1 flex items-center justify-end gap-2">
-        {canEdit("tools") && <button onClick={() => setEditingTool(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
-        {canEdit("tools") && <button onClick={() => deleteTool(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
-      </div>
+      {t.technician_id && (
+        canEdit("tools") ? (
+          <div className="text-[10px] mt-1 text-right" style={{ color: t.received_at ? C.green : C.amber }}>
+            {t.received_at ? `Confirmada ${fmtDate(t.received_at.slice(0, 10))}` : "Pendiente de confirmación"}
+          </div>
+        ) : (
+          t.received_at ? (
+            <div className="text-[10px] mt-1 text-right" style={{ color: C.green }}>✓ Confirmada {fmtDate(t.received_at.slice(0, 10))}</div>
+          ) : isTecnico && t.technician_id === profile.technician_id ? (
+            <div className="text-right">
+              <button onClick={() => confirmToolReceipt(t.id)} className="mt-1 inline-flex items-center gap-1 text-[11px] px-2 py-1" style={{ background: C.green + "20", color: C.green, border: `1px solid ${C.green}40` }}>
+                <CheckCircle2 size={12} /> Confirmar recepción
+              </button>
+            </div>
+          ) : (
+            <div className="text-[10px] mt-1 text-right" style={{ color: C.amber }}>Pendiente de confirmación</div>
+          )
+        )
+      )}
     </div>
   );
 
@@ -8422,38 +8423,38 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   </button>
                 )}
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input type="checkbox" checked={incidentsFiltered.length > 0 && selectedIncidents.size === incidentsFiltered.length} onChange={() => setSelectedIncidents(selectedIncidents.size === incidentsFiltered.length ? new Set() : new Set(incidentsFiltered.map((i) => i.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
-                    <div className="col-span-3">Incidente</div>
-                    <div className="col-span-2">Sucursal</div>
-                    <div className="col-span-2">Técnico</div>
-                    <div className="col-span-1">Cliente</div>
-                    <div className="col-span-1">Prioridad</div>
-                    <div className="col-span-1">Fecha</div>
-                    <div className="col-span-2 text-right">Estado</div>
-                  </div>
-                </div>
+              {incidentsFiltered.length > 0 && (
+                <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
+                  <input type="checkbox" checked={selectedIncidents.size === incidentsFiltered.length} onChange={() => setSelectedIncidents(selectedIncidents.size === incidentsFiltered.length ? new Set() : new Set(incidentsFiltered.map((i) => i.id)))} />
+                  Seleccionar todos los que se ven ({incidentsFiltered.length})
+                </label>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {incidentsFiltered.map((inc) => {
                   const s = INCIDENT_STATUS_CFG[inc.status] || INCIDENT_STATUS_CFG.abierto;
                   const p = PRIORITY_CFG[inc.priority] || PRIORITY_CFG.media;
                   return (
-                    <div key={inc.id} onClick={() => setIncidentDetail(inc)} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${s.color}` }}>
-                      <input type="checkbox" checked={selectedIncidents.has(inc.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedIncidents((prev) => { const next = new Set(prev); next.has(inc.id) ? next.delete(inc.id) : next.add(inc.id); return next; })} />
-                      <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
-                        <div className="col-span-3 truncate">{inc.title}</div>
-                        <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(inc.branch_id)}</div>
-                        <div className="col-span-2 truncate" style={{ color: inc.technician_id ? C.text : C.muted }}>{techName(inc.technician_id)}</div>
-                        <div className="col-span-1 truncate" style={{ color: C.muted }}>{inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—"}</div>
-                        <div className="col-span-1"><Pill label={p.label} color={p.color} /></div>
-                        <div className="col-span-1 text-xs" style={{ color: C.muted }}>{fmtDate(inc.created_at?.slice(0, 10))}</div>
-                        <div className="col-span-2 text-right"><Pill label={s.label} color={s.color} /></div>
+                    <div key={inc.id} onClick={() => setIncidentDetail(inc)} className="p-4 cursor-pointer" style={{ background: C.panel, border: `1px solid ${C.border}`, borderLeft: `3px solid ${s.color}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input type="checkbox" checked={selectedIncidents.has(inc.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedIncidents((prev) => { const next = new Set(prev); next.has(inc.id) ? next.delete(inc.id) : next.add(inc.id); return next; })} />
+                          <div className="font-semibold truncate">{inc.title}</div>
+                        </div>
+                        <Pill label={s.label} color={s.color} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-xs mb-2" style={{ color: C.muted }}>
+                        <div>Sucursal<br /><span style={{ color: C.text }}>{branchName(inc.branch_id)}</span></div>
+                        <div>Técnico<br /><span style={{ color: inc.technician_id ? C.text : C.muted }}>{techName(inc.technician_id)}</span></div>
+                        <div>Cliente<br /><span style={{ color: C.text }}>{inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—"}</span></div>
+                        <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(inc.created_at?.slice(0, 10))}</span></div>
+                      </div>
+                      <div className="pt-2" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <Pill label={p.label} color={p.color} />
                       </div>
                     </div>
                   );
                 })}
-                {incidentsFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>{isTecnico ? "No tienes incidentes asignados todavía." : "Todavía no hay incidentes reportados."}</div>}
+                {incidentsFiltered.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>{isTecnico ? "No tienes incidentes asignados todavía." : "Todavía no hay incidentes reportados."}</div>}
               </div>
             </div>
           )}
@@ -8704,15 +8705,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         <span className="text-sm font-semibold">{g.name}</span>
                         <span className="text-xs" style={{ color: C.muted }}>({g.tools.length})</span>
                       </div>
-                      <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                        <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                          <div className="col-span-3">Herramienta</div>
-                          <div className="col-span-2">Categoría</div>
-                          <div className="col-span-2">Sucursal</div>
-                          <div className="col-span-2">Estado</div>
-                          <div className="col-span-2">Asignada a</div>
-                          <div className="col-span-1 text-right">Acciones</div>
-                        </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                         {g.tools.map(renderToolRow)}
                       </div>
                     </div>
@@ -8720,17 +8713,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   {toolGroups.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay herramientas para este filtro.</div>}
                 </div>
               ) : (
-                <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                  <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3">Herramienta</div>
-                    <div className="col-span-2">Categoría</div>
-                    <div className="col-span-2">Sucursal</div>
-                    <div className="col-span-2">Estado</div>
-                    <div className="col-span-2">Asignada a</div>
-                    <div className="col-span-1 text-right">Acciones</div>
-                  </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   {toolsFiltered.map(renderToolRow)}
-                  {toolsFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>{isTecnico ? "No tienes herramientas asignadas todavía." : "Todavía no hay herramientas para este filtro."}</div>}
+                  {toolsFiltered.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>{isTecnico ? "No tienes herramientas asignadas todavía." : "Todavía no hay herramientas para este filtro."}</div>}
                 </div>
               )}
               </>
@@ -10589,28 +10574,25 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 </select>
               </div>
 
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-2">Fecha y hora</div>
-                  <div className="col-span-2">Módulo</div>
-                  <div className="col-span-2">Acción</div>
-                  <div className="col-span-3">Usuario</div>
-                  <div className="col-span-3">Detalle</div>
-                </div>
+              <div className="space-y-2">
                 {activityLogFiltered.map((l) => {
                   const a = ACTIVITY_ACTION_LABELS[l.action] || { label: l.action, color: C.muted };
                   const dt = new Date(l.changed_at);
                   return (
-                    <div key={l.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-2 text-xs" style={{ color: C.muted }}>{dt.toLocaleDateString("es-DO")} · {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</div>
-                      <div className="col-span-2 truncate">{ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name}</div>
-                      <div className="col-span-2"><Pill label={a.label} color={a.color} /></div>
-                      <div className="col-span-3 truncate" style={{ color: C.muted }}>{activityUserName(l.changed_by_email)}</div>
-                      <div className="col-span-3 truncate" style={{ color: C.muted }}>{describeActivityEntry(l) || "—"}</div>
+                    <div key={l.id} className="p-3" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <div className="flex items-center gap-2">
+                          <Pill label={a.label} color={a.color} />
+                          <span className="text-sm font-medium">{ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name}</span>
+                        </div>
+                        <div className="text-xs flex-shrink-0" style={{ color: C.muted }}>{dt.toLocaleDateString("es-DO")} · {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</div>
+                      </div>
+                      <div className="text-xs" style={{ color: C.muted }}>{describeActivityEntry(l) || "—"}</div>
+                      <div className="text-xs mt-1" style={{ color: C.muted }}>Por: <span style={{ color: C.text }}>{activityUserName(l.changed_by_email)}</span></div>
                     </div>
                   );
                 })}
-                {!loadingActivityLog && activityLogFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay actividad registrada en este rango.</div>}
+                {!loadingActivityLog && activityLogFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay actividad registrada en este rango.</div>}
               </div>
             </div>
           )}
