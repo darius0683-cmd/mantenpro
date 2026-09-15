@@ -94,6 +94,10 @@ async function extractInvoiceDataFromPdf(file) {
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
+// Ventana (en días) para sugerir coincidencias automáticas en conciliación bancaria.
+// Se amplió de 5 a 45 días porque hay créditos a clientes/proveedores de hasta 45 días
+// entre la fecha de la factura y la fecha real del pago.
+const BANK_MATCH_WINDOW_DAYS = 45;
 const C = {
   bg: "#12151A",
   panel: "#1B1F27",
@@ -175,7 +179,7 @@ const ROLE_CFG = {
 
 const ROLE_DEFAULT_PERMISSIONS = {
   supervisor: {
-    ...Object.fromEntries(["dashboard", "agenda", "orders", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches"].map((k) => [k, "edit"])),
+    ...Object.fromEntries(["dashboard", "agenda", "orders", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),
     activityLog: "view",
   },
   vendedor: { dashboard: "edit", agenda: "edit", orders: "edit", quotes: "edit", invoices: "edit", caja: "edit" },
@@ -191,7 +195,6 @@ const PERMISSION_CATALOG = [
   { section: "Departamento Técnico", items: [
     { key: "incidents", label: "Incidentes" },
     { key: "equipment", label: "Gestión de Equipos" },
-    { key: "reports", label: "Reportes" },
     { key: "checklists", label: "Checklists" },
     { key: "technicians", label: "Técnicos" },
     { key: "tools", label: "Herramientas" },
@@ -221,17 +224,22 @@ const PERMISSION_CATALOG = [
     { key: "recurringContracts", label: "Contratos recurrentes" },
     { key: "caja", label: "Caja" },
   ] },
+  { section: "Informes", items: [
+    { key: "reports", label: "Departamento Técnico" },
+    { key: "salesReports", label: "Comercial / Ventas" },
+    { key: "financialReports", label: "Financieros" },
+    { key: "fiscalReports", label: "Fiscales (DGII)" },
+  ] },
   { section: "Administración / Contable", items: [
     { key: "branches", label: "Sucursales" },
     { key: "chartOfAccounts", label: "Catálogo de cuentas" },
     { key: "receivables", label: "Cuentas por Cobrar" },
     { key: "payables", label: "Cuentas por Pagar" },
     { key: "taxRates", label: "Tasas impositivas" },
-    { key: "fiscalReports", label: "Reportes fiscales" },
     { key: "ncf", label: "Secuencia NCF" },
     { key: "users", label: "Usuarios" },
+    { key: "companyProfile", label: "Perfil de la empresa" },
     { key: "activityLog", label: "Historial de actividad" },
-    { key: "financialReports", label: "Reportes financieros" },
     { key: "bankReconciliation", label: "Conciliación bancaria" },
   ] },
 ];
@@ -331,9 +339,22 @@ const summarizeHistoryEntry = (l, resolvers = {}, statusLabels = {}) => {
   }).join(" · ");
 };
 
+// Cache en memoria (compartido por todos los ActivityHistorySection abiertos en la sesión)
+// para no repetir la consulta de perfiles cada vez que se abre un historial.
+let _activityProfileNameCache = null;
+async function getActivityProfileNameMap() {
+  if (_activityProfileNameCache) return _activityProfileNameCache;
+  const { data } = await supabase.from("profiles").select("email, full_name");
+  const map = {};
+  (data || []).forEach((p) => { if (p.email) map[p.email] = p.full_name || p.email; });
+  _activityProfileNameCache = map;
+  return map;
+}
+
 function ActivityHistorySection({ tableName, recordId, resolvers, statusLabels, title }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [nameMap, setNameMap] = useState({});
 
   useEffect(() => {
     let active = true;
@@ -345,6 +366,7 @@ function ActivityHistorySection({ tableName, recordId, resolvers, statusLabels, 
         if (!error) setHistory(data || []);
         setLoading(false);
       });
+    getActivityProfileNameMap().then((map) => { if (active) setNameMap(map); });
     return () => { active = false; };
   }, [tableName, recordId]);
 
@@ -362,10 +384,182 @@ function ActivityHistorySection({ tableName, recordId, resolvers, statusLabels, 
             return (
               <div key={l.id} className="text-xs flex items-start gap-2" style={{ color: C.muted }}>
                 <span className="flex-shrink-0 font-mono" style={{ color: C.text }}>{dt.toLocaleDateString("es-DO")} {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</span>
-                <span>· {l.changed_by_email || "—"} · {summarizeHistoryEntry(l, resolvers, statusLabels)}</span>
+                <span>· {(l.changed_by_email && nameMap[l.changed_by_email]) || l.changed_by_email || "—"} · {summarizeHistoryEntry(l, resolvers, statusLabels)}</span>
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAccount, onDeleteBankAccount, onSetDefaultBankAccount, saving }) {
+  const [name, setName] = useState(company?.name || "");
+  const [rnc, setRnc] = useState(company?.rnc || "");
+  const [address, setAddress] = useState(company?.address || "");
+  const [phone, setPhone] = useState(company?.phone || "");
+  const [email, setEmail] = useState(company?.email || "");
+  const [website, setWebsite] = useState(company?.website || "");
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(company?.logo_url || "");
+
+  const onLogoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLogoFile(file);
+    setLogoPreview(URL.createObjectURL(file));
+  };
+
+  const submit = () => {
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(), rnc: rnc.trim() || null, address: address.trim() || null,
+      phone: phone.trim() || null, email: email.trim() || null, website: website.trim() || null,
+    }, logoFile);
+  };
+
+  return (
+    <div className="max-w-2xl">
+      <div className="text-sm mb-4" style={{ color: C.muted }}>
+        Esta información aparece en tus facturas, cotizaciones y demás documentos impresos.
+      </div>
+      <div className="p-5" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <Field label="Logo de la empresa">
+          <div className="flex items-center gap-4">
+            {logoPreview ? (
+              <img src={logoPreview} alt="Logo" className="w-20 h-20 object-contain" style={{ background: "#fff", border: `1px solid ${C.border}` }} />
+            ) : (
+              <div className="w-20 h-20 flex items-center justify-center text-xs text-center" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.muted }}>Sin logo</div>
+            )}
+            <label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
+              <ImageIcon size={14} /> {logoPreview ? "Cambiar logo" : "Subir logo"}
+              <input type="file" accept="image/*" className="hidden" onChange={onLogoChange} />
+            </label>
+          </div>
+        </Field>
+        <Field label="Nombre de la empresa">
+          <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Mantic Mantenimiento Ingeniería & Outsourcing SRL" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="RNC">
+            <input className={inputClass} style={inputStyle} value={rnc} onChange={(e) => setRnc(e.target.value)} placeholder="Ej. 1-31-45678-9" />
+          </Field>
+          <Field label="Teléfono">
+            <input className={inputClass} style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Ej. 809-555-1234" />
+          </Field>
+        </div>
+        <Field label="Dirección">
+          <input className={inputClass} style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Ej. Av. Independencia #123, San Pedro de Macorís" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Correo (opcional)">
+            <input className={inputClass} style={inputStyle} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Ej. info@tuempresa.com" />
+          </Field>
+          <Field label="Sitio web (opcional)">
+            <input className={inputClass} style={inputStyle} value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="Ej. www.tuempresa.com" />
+          </Field>
+        </div>
+        <div className="flex justify-end mt-4">
+          <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+            {saving ? "Guardando..." : "Guardar cambios"}
+          </button>
+        </div>
+      </div>
+      <BankAccountsManager accounts={bankAccounts} onSave={onSaveBankAccount} onDelete={onDeleteBankAccount} onSetDefault={onSetDefaultBankAccount} saving={saving} />
+    </div>
+  );
+}
+
+function BankAccountsManager({ accounts, onSave, onDelete, onSetDefault, saving }) {
+  const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [bankName, setBankName] = useState("");
+  const [accountType, setAccountType] = useState("");
+  const [accountNumber, setAccountNumber] = useState("");
+  const [holderName, setHolderName] = useState("");
+  const [makeDefault, setMakeDefault] = useState(accounts.length === 0);
+
+  const openNew = () => {
+    setEditingId(null); setBankName(""); setAccountType(""); setAccountNumber(""); setHolderName(""); setMakeDefault(accounts.length === 0);
+    setShowForm(true);
+  };
+  const openEdit = (acc) => {
+    setEditingId(acc.id); setBankName(acc.bank_name || ""); setAccountType(acc.account_type || ""); setAccountNumber(acc.account_number || ""); setHolderName(acc.holder_name || ""); setMakeDefault(!!acc.is_default);
+    setShowForm(true);
+  };
+
+  const submit = async () => {
+    if (!bankName.trim() || !accountNumber.trim()) return;
+    await onSave({
+      bank_name: bankName.trim(), account_type: accountType.trim() || null, account_number: accountNumber.trim(),
+      holder_name: holderName.trim() || null, is_default: makeDefault || accounts.length === 0,
+    }, editingId);
+    setShowForm(false);
+  };
+
+  return (
+    <div className="mt-5 p-5" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Cuentas bancarias (para pagos por transferencia)</div>
+        {!showForm && (
+          <button onClick={openNew} className="flex items-center gap-1 text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={12} /> Agregar cuenta</button>
+        )}
+      </div>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Puedes agregar varias — al hacer una factura eliges cuál mostrar como referencia de pago.</div>
+
+      {accounts.length === 0 && !showForm && (
+        <div className="text-sm text-center py-3" style={{ color: C.muted }}>Todavía no has agregado ninguna cuenta bancaria.</div>
+      )}
+
+      <div className="space-y-2 mb-3">
+        {accounts.map((acc) => (
+          <div key={acc.id} className="flex items-center justify-between px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold truncate">{acc.bank_name}</span>
+                {acc.is_default && <Pill label="Predeterminada" color={C.green} />}
+              </div>
+              <div className="text-xs truncate" style={{ color: C.muted }}>
+                {[acc.account_type, `Cuenta ${acc.account_number}`, acc.holder_name].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              {!acc.is_default && <button onClick={() => onSetDefault(acc.id)} title="Marcar como predeterminada" className="text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.muted }}>Predeterminar</button>}
+              <button onClick={() => openEdit(acc)} style={iconBtnStyle}><Pencil size={13} /></button>
+              <button onClick={() => onDelete(acc.id)} style={iconBtnStyle}><Trash2 size={13} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showForm && (
+        <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Banco">
+              <input className={inputClass} style={inputStyle} value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Ej. Banreservas" />
+            </Field>
+            <Field label="Tipo de cuenta (opcional)">
+              <input className={inputClass} style={inputStyle} value={accountType} onChange={(e) => setAccountType(e.target.value)} placeholder="Ej. Cuenta Corriente" />
+            </Field>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Número de cuenta">
+              <input className={inputClass} style={inputStyle} value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} placeholder="Ej. 1234567890" />
+            </Field>
+            <Field label="A nombre de (opcional)">
+              <input className={inputClass} style={inputStyle} value={holderName} onChange={(e) => setHolderName(e.target.value)} placeholder="Ej. Mantic Mantenimiento SRL" />
+            </Field>
+          </div>
+          <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
+            <input type="checkbox" checked={makeDefault} disabled={accounts.length === 0 && !editingId} onChange={(e) => setMakeDefault(e.target.checked)} /> Usar como cuenta predeterminada al facturar
+          </label>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowForm(false)} className="px-3 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+            <button onClick={submit} disabled={saving} className="px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+              {editingId ? "Guardar cambios" : "Agregar cuenta"}
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -783,6 +977,7 @@ function OrderFormModal({ branches, equipment, technicians, initial, initialExtr
   const [technicianId, setTechnicianId] = useState(initial?.technician_id || "");
   const [extraTechIds, setExtraTechIds] = useState(initialExtraTechIds || []);
   const [scheduled, setScheduled] = useState(initial?.scheduled || "");
+  const [deadline, setDeadline] = useState(initial?.deadline || "");
   const [files, setFiles] = useState([]);
 
   const branchEquip = equipment.filter((e) => e.branch_id === branchId);
@@ -793,7 +988,8 @@ function OrderFormModal({ branches, equipment, technicians, initial, initialExtr
 
   const submit = () => {
     if (!title.trim() || !branchId || !scheduled) return;
-    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled }, files, extraTechIds.filter((id) => id !== technicianId));
+    if (deadline && deadline < scheduled) return;
+    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled, deadline: deadline || null }, files, extraTechIds.filter((id) => id !== technicianId));
   };
 
   return (
@@ -814,6 +1010,11 @@ function OrderFormModal({ branches, equipment, technicians, initial, initialExtr
         </Field>
         <Field label="Fecha programada">
           <input type="date" className={inputClass} style={inputStyle} value={scheduled} onChange={(e) => setScheduled(e.target.value)} />
+        </Field>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Fecha límite / deadline (opcional)">
+          <input type="date" className={inputClass} style={inputStyle} value={deadline} min={scheduled || undefined} onChange={(e) => setDeadline(e.target.value)} />
         </Field>
       </div>
       <div className="grid grid-cols-3 gap-3">
@@ -1227,8 +1428,8 @@ function ProductSearchSelect({ products, value, onChange, placeholder }) {
       />
       {open && (
         <div className="absolute z-50 w-full mt-1 max-h-56 overflow-y-auto" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-          <button type="button" onMouseDown={() => { onChange(""); setOpen(false); }} className="w-full text-left px-3 py-2 text-sm" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-            Servicio / producto libre (sin vincular)
+          <button type="button" onMouseDown={() => { onChange(""); setOpen(false); }} className="w-full text-left px-3 py-2 text-sm font-semibold" style={{ color: C.amber, borderBottom: `1px solid ${C.border}` }}>
+            + Trabajo / renglón libre (describe y pon el monto — no descuenta inventario)
           </button>
           {filtered.map((p) => (
             <button key={p.id} type="button" onMouseDown={() => { onChange(p.id); setOpen(false); }} className="w-full text-left px-3 py-2 text-sm flex justify-between" style={{ color: C.text }}>
@@ -1338,7 +1539,7 @@ function checklistPrintHtml({ companyName, order, branchName, equipName, techNam
   `;
 }
 
-function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, dateLabel, dateValue, extraMeta, items, subtotal, itbis, total, discountPct, notes, retainedLabel, retainedAmount, legalNote, currency, foreignTotal, exchangeRate }) {
+function invoiceLikeHtml({ docLabel, code, docTitle, companyName, companyLogo, companyRnc, companyAddress, companyPhone, companyBankName, companyBankAccountType, companyBankAccountNumber, partyLabel, clientName, clientRnc, clientAddress, dateLabel, dateValue, extraMeta, paymentTerms, items, subtotal, itbis, total, discountPct, notes, retainedLabel, retainedAmount, legalNote, currency, foreignTotal, exchangeRate }) {
   const isUsd = currency === "USD";
   const fmtItem = (n) => isUsd ? `US$ ${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : fmtMoney(n);
   const groups = groupItemsByChapter(items, (it) => Number(it.subtotal ?? it.quantity * (it.unit_price ?? it.unit_cost) ?? 0));
@@ -1347,12 +1548,22 @@ function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, da
   const rows = showChapters
     ? groups.map((g) => `<tr><td colspan="4" style="background:#f2f2f2;font-weight:bold">${g.chapter} <span style="font-weight:normal;float:right">${fmtItem(g.subtotal)}</span></td></tr>${g.items.map(rowHtml).join("")}`).join("")
     : items.map(rowHtml).join("");
+  const companyMeta = [companyRnc ? `RNC: ${companyRnc}` : null, companyAddress || null, companyPhone ? `Tel: ${companyPhone}` : null].filter(Boolean).join(" · ");
   return `
     <div class="header-row">
-      <div><h1>${companyName}</h1><div class="muted">${docLabel}${code ? " · " + code : ""}</div>${docTitle ? `<div class="muted" style="margin-top:2px">${docTitle}</div>` : ""}</div>
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        ${companyLogo ? `<img src="${companyLogo}" style="width:56px;height:56px;object-fit:contain;flex-shrink:0" />` : ""}
+        <div>
+          <h1>${companyName}</h1>
+          ${companyMeta ? `<div class="muted" style="font-size:11px">${companyMeta}</div>` : ""}
+          <div class="muted">${docLabel}${code ? " · " + code : ""}</div>${docTitle ? `<div class="muted" style="margin-top:2px">${docTitle}</div>` : ""}
+        </div>
+      </div>
       <div class="muted" style="text-align:right">${dateLabel}: ${dateValue}${extraMeta || ""}</div>
     </div>
-    <div class="muted">Cliente: <b style="color:#111">${clientName}</b></div>
+    <div class="muted">${partyLabel || "Cliente"}: <b style="color:#111">${clientName}</b>${clientRnc ? ` · RNC/Cédula: <b style="color:#111">${clientRnc}</b>` : ""}</div>
+    ${clientAddress ? `<div class="muted" style="margin-top:2px">Dirección: ${clientAddress}</div>` : ""}
+    ${paymentTerms ? `<div class="muted" style="margin-top:2px">Forma de pago: ${paymentTerms}</div>` : ""}
     <table><thead><tr><th>Descripción</th><th style="text-align:right">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="totals">
       ${discountPct > 0 ? `<div><span>Descuento aplicado</span><span>${discountPct}%</span></div>` : ""}
@@ -1364,6 +1575,7 @@ function invoiceLikeHtml({ docLabel, code, docTitle, companyName, clientName, da
     </div>
     ${legalNote ? `<div class="muted" style="margin-top:6px;font-weight:bold">${legalNote}</div>` : ""}
     ${notes ? `<div class="muted" style="margin-top:14px">Notas: ${notes}</div>` : ""}
+    ${(companyBankName || companyBankAccountNumber) ? `<div class="muted" style="margin-top:14px;padding-top:8px;border-top:1px solid #ddd">Pagos por transferencia: ${[companyBankName, companyBankAccountType, companyBankAccountNumber ? `Cuenta ${companyBankAccountNumber}` : null].filter(Boolean).join(" · ")}</div>` : ""}
   `;
 }
 
@@ -1533,7 +1745,7 @@ function ClientAssetFormModal({ clients, branches, technicians, initial, onClose
   );
 }
 
-function ProductFormModal({ initial, existingProducts, defaultItemType, onClose, onSave, saving }) {
+function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, onClose, onSave, saving }) {
   const [itemType, setItemType] = useState(initial?.item_type || defaultItemType || "producto");
   const [sku, setSku] = useState(initial?.sku || "");
   const [skuManual, setSkuManual] = useState(!!initial?.sku);
@@ -1549,7 +1761,30 @@ function ProductFormModal({ initial, existingProducts, defaultItemType, onClose,
   });
   const [stockQty, setStockQty] = useState(initial?.stock_qty ?? "");
   const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
+  const [isComposite, setIsComposite] = useState(initial?.is_composite ?? false);
+  const [components, setComponents] = useState(() => (initialComponents || []).map((c) => ({ component_product_id: c.component_product_id, quantity: c.quantity })));
+  const [newComponentId, setNewComponentId] = useState("");
+  const [newComponentQty, setNewComponentQty] = useState(1);
   const isService = itemType === "servicio";
+
+  const componentCandidates = (allProducts || []).filter((p) => !p.is_composite && p.id !== initial?.id);
+
+  const addComponent = () => {
+    if (!newComponentId) return;
+    setComponents((prev) => {
+      const existing = prev.find((c) => c.component_product_id === newComponentId);
+      if (existing) return prev.map((c) => (c.component_product_id === newComponentId ? { ...c, quantity: Number(c.quantity) + Number(newComponentQty || 1) } : c));
+      return [...prev, { component_product_id: newComponentId, quantity: Number(newComponentQty) || 1 }];
+    });
+    setNewComponentId("");
+    setNewComponentQty(1);
+  };
+  const removeComponent = (id) => setComponents((prev) => prev.filter((c) => c.component_product_id !== id));
+  const updateComponentQty = (id, qty) => setComponents((prev) => prev.map((c) => (c.component_product_id === id ? { ...c, quantity: Math.max(0.01, Number(qty) || 1) } : c)));
+  const estimatedCost = components.reduce((sum, c) => {
+    const p = (allProducts || []).find((x) => x.id === c.component_product_id);
+    return sum + (p ? Number(p.cost_price || 0) * Number(c.quantity || 0) : 0);
+  }, 0);
 
   const existingCategories = [...new Set((existingProducts || []).map((p) => p.category).filter(Boolean))];
 
@@ -1601,6 +1836,7 @@ function ProductFormModal({ initial, existingProducts, defaultItemType, onClose,
 
   const submit = () => {
     if (!name.trim() || unitPrice === "") return;
+    if (isComposite && components.length === 0) return;
     onSave({
       item_type: itemType,
       sku: sku.trim() || null,
@@ -1610,9 +1846,10 @@ function ProductFormModal({ initial, existingProducts, defaultItemType, onClose,
       unit: unit.trim() || "unidad",
       cost_price: Number(costPrice) || 0,
       unit_price: Number(unitPrice) || 0,
-      stock_qty: isService ? 0 : Number(stockQty) || 0,
+      stock_qty: (isService || isComposite) ? 0 : Number(stockQty) || 0,
       is_taxable: isTaxable,
-    });
+      is_composite: isComposite,
+    }, components);
   };
 
   return (
@@ -1650,20 +1887,57 @@ function ProductFormModal({ initial, existingProducts, defaultItemType, onClose,
           <input className={inputClass} style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="unidad, gal, lb" />
         </Field>
         <Field label="Costo (RD$)">
-          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={costPrice} onChange={(e) => onCostChange(e.target.value)} placeholder="0.00" />
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={costPrice} onChange={(e) => onCostChange(e.target.value)} placeholder="0.00" />
         </Field>
-        {!isService && (
+        {!isService && !isComposite && (
           <Field label="Cantidad en stock">
-            <input type="number" step="0.01" className={inputClass} style={inputStyle} value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="0" />
+            <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="0" />
           </Field>
         )}
       </div>
+      {!isService && (
+        <label className="flex items-center gap-2 text-sm mb-3 p-3 cursor-pointer" style={{ color: C.text, background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <input type="checkbox" checked={isComposite} onChange={(e) => setIsComposite(e.target.checked)} />
+          <div>
+            <div>Este es un producto compuesto (kit / equipo armado)</div>
+            <div className="text-xs" style={{ color: C.muted }}>Se cotiza y factura como un solo renglón, pero al facturarlo se descuenta del almacén cada componente por separado — no lleva stock propio.</div>
+          </div>
+        </label>
+      )}
+      {isComposite && (
+        <div className="mb-3 p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Componentes de este kit</div>
+          <div className="flex gap-2 mb-2">
+            <div className="flex-1"><SearchSelect items={componentCandidates} value={newComponentId} onChange={setNewComponentId} placeholder="Buscar producto a agregar..." getLabel={(p) => `${p.name}${p.sku ? ` (${p.sku})` : ""}`} /></div>
+            <input type="text" inputMode="decimal" value={newComponentQty} onChange={(e) => setNewComponentQty(e.target.value)} className={inputClass} style={{ ...inputStyle, width: 90 }} />
+            <button type="button" onClick={addComponent} disabled={!newComponentId} className="px-3 flex-shrink-0 disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
+          </div>
+          {components.length === 0 ? (
+            <div className="text-xs text-center py-2" style={{ color: C.muted }}>Todavía no has agregado componentes.</div>
+          ) : (
+            <div className="space-y-1">
+              {components.map((c) => {
+                const p = (allProducts || []).find((x) => x.id === c.component_product_id);
+                return (
+                  <div key={c.component_product_id} className="flex items-center gap-2 text-sm px-2 py-1.5" style={{ background: C.panel }}>
+                    <div className="flex-1 truncate">{p?.name || "Producto eliminado"}</div>
+                    <input type="text" inputMode="decimal" value={c.quantity} onChange={(e) => updateComponentQty(c.component_product_id, e.target.value)} className={inputClass} style={{ ...inputStyle, width: 80 }} />
+                    <div className="text-xs w-14 text-right" style={{ color: C.muted }}>{p?.unit || ""}</div>
+                    <button type="button" onClick={() => removeComponent(c.component_product_id)} style={{ color: C.red }}><X size={14} /></button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {components.length > 0 && <div className="text-xs mt-2" style={{ color: C.muted }}>Costo estimado de los componentes: {fmtMoney(estimatedCost)} — sirve de referencia para poner el precio de venta del kit abajo.</div>}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 items-end">
         <Field label="% de ganancia sobre el costo">
-          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={marginPct} onChange={(e) => onMarginChange(e.target.value)} placeholder="Ej. 30" />
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={marginPct} onChange={(e) => onMarginChange(e.target.value)} placeholder="Ej. 30" />
         </Field>
         <Field label="Precio de venta (RD$)">
-          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={unitPrice} onChange={(e) => onUnitPriceChange(e.target.value)} placeholder="0.00" />
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={unitPrice} onChange={(e) => onUnitPriceChange(e.target.value)} placeholder="0.00" />
         </Field>
       </div>
       <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>
@@ -1866,29 +2140,48 @@ function ToolFormModal({ branches, technicians, initial, onClose, onSave, saving
   const [technicianId, setTechnicianId] = useState(initial?.technician_id || "");
   const [status, setStatus] = useState(initial?.status || "disponible");
   const [notes, setNotes] = useState(initial?.notes || "");
+  const [quantity, setQuantity] = useState(1);
   const submit = () => {
     if (!name.trim()) return;
-    onSave({
+    const base = {
       name: name.trim(),
       category: category.trim() || null,
-      serial_number: serial.trim() || null,
       branch_id: branchId || null,
       technician_id: technicianId || null,
       status: technicianId ? (status === "disponible" ? "asignada" : status) : status,
       notes: notes.trim() || null,
-    });
+    };
+    if (initial) {
+      onSave({ ...base, serial_number: serial.trim() || null });
+    } else {
+      const qty = Math.max(1, Number(quantity) || 1);
+      if (qty === 1) {
+        onSave({ ...base, serial_number: serial.trim() || null });
+      } else {
+        // Varias unidades idénticas a la vez — cada una queda como una
+        // herramienta independiente (para poder asignarlas por separado y
+        // llevar el historial de cada una), sin número de serie (se pueden
+        // editar después una por una si necesitas ponerle serie a cada una).
+        onSave(Array.from({ length: qty }, () => ({ ...base, serial_number: null })));
+      }
+    }
   };
   return (
     <Modal title={initial ? "Editar herramienta" : "Agregar herramienta"} onClose={onClose}>
       <Field label="Nombre">
         <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Taladro inalámbrico" />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className={initial ? "grid grid-cols-2 gap-3" : "grid grid-cols-3 gap-3"}>
         <Field label="Categoría (opcional)">
           <input className={inputClass} style={inputStyle} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Ej. Eléctrica, Manual, Medición" />
         </Field>
+        {!initial && (
+          <Field label="Cantidad">
+            <input type="text" inputMode="numeric" className={inputClass} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value.replace(/[^0-9]/g, ""))} placeholder="1" />
+          </Field>
+        )}
         <Field label="No. de serie (opcional)">
-          <input className={inputClass} style={inputStyle} value={serial} onChange={(e) => setSerial(e.target.value)} />
+          <input className={inputClass} style={inputStyle} value={serial} onChange={(e) => setSerial(e.target.value)} disabled={!initial && Number(quantity) > 1} placeholder={!initial && Number(quantity) > 1 ? "No aplica para varias unidades" : ""} />
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -1933,6 +2226,129 @@ function ToolFormModal({ branches, technicians, initial, onClose, onSave, saving
 }
 
 const MATERIAL_UNITS = ["unidad", "pieza", "metro", "kg", "litro", "galón", "caja", "rollo"];
+
+function ToolListFormModal({ tools, technicians, initial, onClose, onSave, saving }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [toolIds, setToolIds] = useState(initial?.tool_ids || []);
+  const [search, setSearch] = useState("");
+
+  const toggleTool = (id) => setToolIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const filteredTools = tools.filter((t) => (t.name || "").toLowerCase().includes(search.toLowerCase()));
+  const selectedTools = tools.filter((t) => toolIds.includes(t.id));
+
+  const submit = () => {
+    if (!name.trim() || toolIds.length === 0) return;
+    onSave({ name: name.trim(), tool_ids: toolIds }, initial?.id || null);
+  };
+
+  return (
+    <Modal title={initial ? "Editar listado" : "Nuevo listado de herramientas"} onClose={onClose} wide>
+      <Field label="Nombre del listado">
+        <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Kit básico de electricista" />
+      </Field>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Después de crear el listado, podrás asignar cantidades de cada herramienta a técnicos específicos desde la tarjeta del listado.</div>
+      {selectedTools.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {selectedTools.map((t) => (
+            <span key={t.id} className="flex items-center gap-1 text-xs px-2 py-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+              {t.name}
+              <button type="button" onClick={() => toggleTool(t.id)} style={{ color: C.red }}><X size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      <Field label={`Herramientas del listado (${toolIds.length} seleccionadas)`}>
+        <input className={inputClass} style={{ ...inputStyle, marginBottom: 6 }} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar herramienta..." />
+        <div className="max-h-52 overflow-y-auto" style={{ border: `1px solid ${C.border}` }}>
+          {filteredTools.length === 0 && <div className="text-sm text-center py-4" style={{ color: C.muted }}>Sin resultados.</div>}
+          {filteredTools.map((t) => (
+            <label key={t.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, color: C.text }}>
+              <input type="checkbox" checked={toolIds.includes(t.id)} onChange={() => toggleTool(t.id)} />
+              <span className="flex-1 truncate">{t.name}</span>
+              {t.technician_id && <span className="text-xs flex-shrink-0" style={{ color: C.muted }}>{technicians.find((tc) => tc.id === t.technician_id)?.name}</span>}
+            </label>
+          ))}
+        </div>
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Crear listado"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ToolListCard({ list, tools, technicians, canEdit, onEdit, onDelete, onAssign, onReturn }) {
+  const groups = useMemo(() => {
+    const map = {};
+    tools.forEach((t) => {
+      if (!map[t.name]) map[t.name] = { name: t.name, total: 0, available: 0, byTech: {} };
+      map[t.name].total++;
+      if (t.technician_id) map[t.name].byTech[t.technician_id] = (map[t.name].byTech[t.technician_id] || 0) + 1;
+      else map[t.name].available++;
+    });
+    return Object.values(map).sort((a, b) => a.name.localeCompare(b.name));
+  }, [tools]);
+  const [inputs, setInputs] = useState({});
+  const getInput = (name) => inputs[name] || { qty: "1", techId: "" };
+  const setInput = (name, patch) => setInputs((prev) => ({ ...prev, [name]: { ...getInput(name), ...patch } }));
+
+  return (
+    <div className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between mb-1">
+        <div className="font-semibold">{list.name}</div>
+        <div className="flex items-center gap-1">
+          {canEdit && <button onClick={onEdit} style={iconBtnStyle}><Pencil size={13} /></button>}
+          {canEdit && <button onClick={onDelete} style={iconBtnStyle}><Trash2 size={13} /></button>}
+        </div>
+      </div>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>{tools.length} herramienta{tools.length !== 1 ? "s" : ""}</div>
+      <div className="space-y-3">
+        {groups.map((g) => {
+          const input = getInput(g.name);
+          return (
+            <div key={g.name} className="p-2" style={{ background: C.panelAlt }}>
+              <div className="flex items-center justify-between text-sm mb-1">
+                <span className="font-semibold">{g.name}</span>
+                <span className="text-xs" style={{ color: C.muted }}>{g.total} en total · {g.available} disponible{g.available !== 1 ? "s" : ""}</span>
+              </div>
+              {Object.entries(g.byTech).map(([techId, count]) => (
+                <div key={techId} className="flex items-center justify-between text-xs px-2 py-1" style={{ color: C.text }}>
+                  <span>{technicians.find((t) => t.id === techId)?.name || "Técnico"}: {count}</span>
+                  {canEdit && <button onClick={() => onReturn(list, g.name, techId, count)} className="text-xs px-2 py-0.5" style={{ color: C.amber, border: `1px solid ${C.amber}40` }}>Devolver</button>}
+                </div>
+              ))}
+              {canEdit && g.available > 0 && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <input type="text" inputMode="numeric" value={input.qty} onChange={(e) => setInput(g.name, { qty: e.target.value.replace(/[^0-9]/g, "") })} className="w-12 px-2 py-1 text-xs" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                  <select value={input.techId} onChange={(e) => setInput(g.name, { techId: e.target.value })} className="flex-1 px-2 py-1 text-xs" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                    <option value="">Elegir técnico...</option>
+                    {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                  <button
+                    onClick={() => {
+                      const qty = Math.min(g.available, Math.max(1, Number(input.qty) || 1));
+                      if (input.techId) { onAssign(list, g.name, qty, input.techId); setInput(g.name, { qty: "1", techId: "" }); }
+                    }}
+                    disabled={!input.techId}
+                    className="text-xs px-2 py-1 font-semibold disabled:opacity-40"
+                    style={{ background: C.amber, color: "#1A1500" }}
+                  >
+                    Asignar
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {groups.length === 0 && <div className="text-sm text-center py-3" style={{ color: C.muted }}>Este listado no tiene herramientas.</div>}
+      </div>
+    </div>
+  );
+}
 
 function BulkToolFormModal({ branches, technicians, onClose, onSave, saving }) {
   const [branchId, setBranchId] = useState(branches[0]?.id || "");
@@ -2057,7 +2473,7 @@ function MaterialFormModal({ branches, initial, onClose, onSave, saving }) {
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Cantidad">
-          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
         </Field>
         <Field label="Unidad">
           <select className={inputClass} style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)}>
@@ -2331,8 +2747,8 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
                   <ProductSearchSelect products={products} value={b.product_id} onChange={(id) => onProductPick(b.id, id)} placeholder="Buscar producto..." />
                 </div>
               </div>
-              <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
-              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_cost} onChange={(e) => updateBlock(b.id, { unit_cost: e.target.value })} placeholder="Costo unit." />
+              <input type="text" inputMode="decimal" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
+              <input type="text" inputMode="decimal" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_cost} onChange={(e) => updateBlock(b.id, { unit_cost: e.target.value })} placeholder="Costo unit." />
               <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
                 <input type="checkbox" checked={b.is_taxable} onChange={(e) => updateBlock(b.id, { is_taxable: e.target.checked })} /> ITBIS
               </label>
@@ -2394,7 +2810,7 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   );
 }
 
-function PurchaseDetailModal({ purchase, items, payments, supplierName, companyName, canEdit, onClose, onRegisterPayment, onDeletePayment }) {
+function PurchaseDetailModal({ purchase, items, payments, supplierName, supplierRnc, companyName, company, canEdit, onClose, onRegisterPayment, onDeletePayment }) {
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const balance = Number(purchase.total) - Number(purchase.amount_paid || 0);
@@ -2414,7 +2830,8 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, companyN
   const doPrint = () => {
     const html = invoiceLikeHtml({
       docLabel: "Orden de compra", code: purchase.invoice_number, docTitle: purchase.title, companyName,
-      clientName: supplierName, dateLabel: "Fecha", dateValue: fmtDate(purchase.purchase_date),
+      companyLogo: company?.logo_url, companyRnc: company?.rnc, companyAddress: company?.address, companyPhone: company?.phone,
+      partyLabel: "Proveedor", clientName: supplierName, clientRnc: supplierRnc, dateLabel: "Fecha", dateValue: fmtDate(purchase.purchase_date),
       items: items.map((it) => ({ description: it.productName, quantity: it.quantity, unit_price: it.unit_cost, subtotal: it.subtotal, is_taxable: false, chapter: it.chapter })),
       subtotal: purchase.service_value ?? purchase.total,
       itbis: purchase.itbis_amount || 0,
@@ -2430,7 +2847,7 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, companyN
       {purchase.title && <div className="text-sm font-semibold mb-2" style={{ color: C.text }}>{purchase.title}</div>}
       {purchase.applies_254_06 && <div className="text-xs mb-2 font-semibold" style={{ color: C.amber }}>Aplica Reglamento 254-06.</div>}
       <div className="grid grid-cols-4 gap-3 text-xs mb-4" style={{ color: C.muted }}>
-        <div>Proveedor<br /><span style={{ color: C.text }}>{supplierName}</span></div>
+        <div>Proveedor<br /><span style={{ color: C.text }}>{supplierName}</span>{supplierRnc && <span style={{ color: C.muted }}> · RNC: {supplierRnc}</span>}</div>
         <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(purchase.purchase_date)}</span></div>
         <div>Total<br /><span style={{ color: C.text }}>{fmtMoney(purchase.total)}</span></div>
         <div>Estado<br /><span style={{ color: payCfg.color }}>{payCfg.label}</span></div>
@@ -2583,7 +3000,7 @@ function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
   );
 }
 
-function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBranchId, prefill, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
+function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccounts, defaultBranchId, prefill, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
   const [title, setTitle] = useState(prefill?.title || "");
   const [clientId, setClientId] = useState(prefill?.client_id || clients[0]?.id || "");
   const [sequenceId, setSequenceId] = useState("");
@@ -2594,6 +3011,9 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
   const [exemptItbis, setExemptItbis] = useState(false);
   const [currency, setCurrency] = useState(prefill?.currency || "DOP");
   const [exchangeRate, setExchangeRate] = useState(prefill?.exchange_rate ?? 1);
+  const [paymentTerms, setPaymentTerms] = useState(prefill?.payment_terms || "");
+  const [bankAccountId, setBankAccountId] = useState(prefill?.bank_account_id || (bankAccounts || []).find((a) => a.is_default)?.id || "");
+  const [notes, setNotes] = useState(prefill?.notes || "");
   const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true, register_asset: false, asset_serial: "", asset_warranty_months: 12 };
   const [blocks, setBlocks] = useState(() => {
     if (prefill?.items?.length) return itemsToBlocks(prefill.items, blankItem);
@@ -2658,7 +3078,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
     onSave({
       title: title.trim() || null, client_id: clientId, ncf_sequence_id: sequenceId, branch_id: branchId || null, invoice_date: invoiceDate, discount_pct: discountPct,
       subtotal: subtotal * rate, itbis: itbis * rate, exempt_itbis: exemptItbis, applies_norma_0205: applyNorma0205, itbis_retained: itbisRetained * rate, total: total * rate,
-      currency, exchange_rate: rate,
+      currency, exchange_rate: rate, payment_terms: paymentTerms || null, bank_account_id: bankAccountId || null, notes: notes.trim() || null,
       foreign_subtotal: currency === "USD" ? subtotal : null,
       foreign_itbis: currency === "USD" ? itbis : null,
       foreign_total: currency === "USD" ? total : null,
@@ -2695,6 +3115,30 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
           <option value="">Sin asignar</option>
           {(branches || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+      </Field>
+      <Field label="Forma de pago (opcional)">
+        <select className={inputClass} style={inputStyle} value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)}>
+          <option value="">Sin especificar</option>
+          <option value="Efectivo">Efectivo</option>
+          <option value="Transferencia">Transferencia</option>
+          <option value="Tarjeta">Tarjeta</option>
+          <option value="Cheque">Cheque</option>
+          <option value="Crédito 15 días">Crédito 15 días</option>
+          <option value="Crédito 30 días">Crédito 30 días</option>
+          <option value="Crédito 45 días">Crédito 45 días</option>
+          <option value="Crédito 60 días">Crédito 60 días</option>
+        </select>
+      </Field>
+      {bankAccounts && bankAccounts.length > 0 && (
+        <Field label="Cuenta bancaria a mostrar (opcional)">
+          <select className={inputClass} style={inputStyle} value={bankAccountId} onChange={(e) => setBankAccountId(e.target.value)}>
+            <option value="">No mostrar ninguna</option>
+            {bankAccounts.map((a) => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_type ? `${a.account_type} ` : ""}{a.account_number}{a.is_default ? " (predeterminada)" : ""}</option>)}
+          </select>
+        </Field>
+      )}
+      <Field label="Observaciones (opcional — sale en el impreso)">
+        <textarea className={inputClass} style={{ ...inputStyle, minHeight: 70 }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej. Se recibió un adelanto de RD$ 10,000 el 10/09." />
       </Field>
       <Field label={`Descuento (% — máximo permitido: ${maxDiscountPct}%)`}>
         <input type="number" min="0" max={maxDiscountPct} step="0.5" className={inputClass} style={inputStyle} value={discountPct} onChange={(e) => onDiscountChange(e.target.value)} disabled={maxDiscountPct <= 0} />
@@ -2755,9 +3199,9 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
                     <ProductSearchSelect products={products} value={b.product_id} onChange={(id) => onProductPick(b.id, id)} placeholder="Buscar producto o servicio..." />
                   </div>
                 </div>
-                <input className={`${inputClass} col-span-3`} style={inputStyle} value={b.description} onChange={(e) => updateBlock(b.id, { description: e.target.value })} placeholder="Descripción" />
-                <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
-                <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_price} onChange={(e) => updateBlock(b.id, { unit_price: e.target.value })} placeholder="Precio" />
+                <input className={`${inputClass} col-span-3`} style={{ ...inputStyle, ...(!b.product_id ? { borderColor: C.amber + "60" } : {}) }} value={b.description} onChange={(e) => updateBlock(b.id, { description: e.target.value })} placeholder={b.product_id ? "Descripción" : "👈 Escribe aquí la descripción del trabajo"} />
+                <input type="text" inputMode="decimal" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
+                <input type="text" inputMode="decimal" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_price} onChange={(e) => updateBlock(b.id, { unit_price: e.target.value })} placeholder="Precio" />
                 <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
                   <input type="checkbox" checked={b.is_taxable} onChange={(e) => updateBlock(b.id, { is_taxable: e.target.checked })} /> ITBIS
                 </label>
@@ -2829,7 +3273,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, defaultBr
   );
 }
 
-function InvoiceDetailModal({ invoice, items, payments, clientName, companyName, canEdit, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
+function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, canEdit, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
   const statusColor = invoice.status === "anulada" ? C.red : C.green;
   const payCfg = PAYMENT_STATUS_CFG[invoice.payment_status] || PAYMENT_STATUS_CFG.pendiente;
   const balance = Number(invoice.total) - Number(invoice.amount_paid || 0) - Number(invoice.credit_applied || 0);
@@ -2843,16 +3287,19 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
   const [payNotes, setPayNotes] = useState("");
   const [paymentFiles, setPaymentFiles] = useState([]);
 
+  const selectedBankAccount = (bankAccounts || []).find((a) => a.id === invoice.bank_account_id) || null;
   const doPrint = () => {
     const html = invoiceLikeHtml({
-      docLabel: "Factura", code: invoice.ncf, docTitle: invoice.title, companyName, clientName,
-      dateLabel: "Fecha", dateValue: fmtDate(invoice.invoice_date), extraMeta: `<br/>NCF: ${invoice.ncf}`,
+      docLabel: "Factura", code: invoice.invoice_number || invoice.ncf, docTitle: invoice.title, companyName, clientName, clientRnc, clientAddress,
+      companyLogo: company?.logo_url, companyRnc: company?.rnc, companyAddress: company?.address, companyPhone: company?.phone,
+      companyBankName: selectedBankAccount?.bank_name, companyBankAccountType: selectedBankAccount?.account_type, companyBankAccountNumber: selectedBankAccount?.account_number,
+      dateLabel: "Fecha", dateValue: fmtDate(invoice.invoice_date), extraMeta: `<br/>NCF: ${invoice.ncf}`, paymentTerms: invoice.payment_terms, notes: invoice.notes,
       items, subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total, discountPct: invoice.discount_pct,
       retainedLabel: "Retención ITBIS 30% (Norma 02-05)", retainedAmount: invoice.itbis_retained || 0,
       legalNote: [invoice.exempt_itbis ? "Factura exenta de ITBIS." : null, invoice.applies_norma_0205 ? "Aplica Norma 02-05 — Retención del 30% del ITBIS." : null].filter(Boolean).join(" ") || null,
       currency: invoice.currency, foreignTotal: invoice.foreign_total, exchangeRate: invoice.exchange_rate,
     });
-    printDocument(`Factura ${invoice.ncf}`, html);
+    printDocument(`Factura ${invoice.invoice_number || invoice.ncf}`, html);
   };
 
   const submitPayment = () => {
@@ -2865,10 +3312,11 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
   };
 
   return (
-    <Modal title={`Factura ${invoice.ncf}`} onClose={onClose} wide>
+    <Modal title={`Factura ${invoice.invoice_number || invoice.ncf}`} onClose={onClose} wide>
       <div className="flex items-center justify-between mb-2">
         <div>
           <div className="font-bold text-base" style={{ color: C.text }}>{companyName}</div>
+          {invoice.invoice_number && <div className="text-xs" style={{ color: C.muted }}>Factura: <span className="font-mono" style={{ color: C.text }}>{invoice.invoice_number}</span></div>}
           <div className="text-xs" style={{ color: C.muted }}>NCF: <span className="font-mono">{invoice.ncf}</span></div>
         </div>
         <Pill label={invoice.status === "anulada" ? "Anulada" : "Emitida"} color={statusColor} />
@@ -2882,9 +3330,19 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, companyName,
       {invoice.applies_norma_0205 && <div className="text-xs mb-2 font-semibold" style={{ color: C.amber }}>Aplica Norma 02-05 — Retención del 30% del ITBIS.</div>}
       <div className="mb-4"><Pill label={payCfg.label} color={payCfg.color} /></div>
       <div className="grid grid-cols-2 gap-3 text-xs mb-4" style={{ color: C.muted }}>
-        <div>Cliente<br /><span style={{ color: C.text }}>{clientName}</span></div>
-        <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(invoice.invoice_date)}</span></div>
+        <div>Cliente<br /><span style={{ color: C.text }}>{clientName}</span>{clientRnc && <span style={{ color: C.muted }}> · RNC/Cédula: {clientRnc}</span>}{clientAddress && <><br /><span style={{ color: C.muted }}>{clientAddress}</span></>}</div>
+        <div>
+          <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(invoice.invoice_date)}</span></div>
+          {invoice.payment_terms && <div className="mt-2">Forma de pago<br /><span style={{ color: C.text }}>{invoice.payment_terms}</span></div>}
+          {selectedBankAccount && <div className="mt-2">Cuenta bancaria<br /><span style={{ color: C.text }}>{selectedBankAccount.bank_name} — {selectedBankAccount.account_number}</span></div>}
+        </div>
       </div>
+      {invoice.notes && (
+        <div className="text-xs mb-4 px-3 py-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+          <div className="uppercase tracking-wide mb-1" style={{ color: C.muted }}>Observaciones</div>
+          {invoice.notes}
+        </div>
+      )}
       <div className="space-y-1 mb-3">
         {showChapters ? chapterGroups.map((g) => (
           <div key={g.chapter}>
@@ -3062,7 +3520,7 @@ function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, onSave,
           items={invoices.filter((i) => i.status !== "anulada")}
           value={invoiceId}
           onChange={setInvoiceId}
-          getLabel={(i) => `${i.ncf} — ${clients.find((c) => c.id === i.client_id)?.name || "Cliente"}`}
+          getLabel={(i) => `${i.invoice_number || i.ncf} — ${clients.find((c) => c.id === i.client_id)?.name || "Cliente"}`}
           placeholder="Buscar factura por NCF o cliente..."
         />
       </Field>
@@ -3097,8 +3555,8 @@ function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, onSave,
                   <input type="checkbox" checked={it.selected} onChange={(e) => updateItem(it.id, { selected: e.target.checked })} />
                 </label>
                 <div className="col-span-4 text-sm truncate">{it.description}</div>
-                <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(it.id, { quantity: e.target.value })} disabled={!it.selected} />
-                <input type="number" step="0.01" className={`${inputClass} col-span-3`} style={inputStyle} value={it.unit_price} onChange={(e) => updateItem(it.id, { unit_price: e.target.value })} disabled={!it.selected} />
+                <input type="text" inputMode="decimal" className={`${inputClass} col-span-2`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(it.id, { quantity: e.target.value })} disabled={!it.selected} />
+                <input type="text" inputMode="decimal" className={`${inputClass} col-span-3`} style={inputStyle} value={it.unit_price} onChange={(e) => updateItem(it.id, { unit_price: e.target.value })} disabled={!it.selected} />
                 <div className="col-span-2 text-right font-mono text-sm" style={{ color: C.muted }}>{fmtMoney(itemAmount(it))}</div>
               </div>
             ))}
@@ -3136,6 +3594,7 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
   const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
   const [frequencyDays, setFrequencyDays] = useState(initial?.frequency_days ?? 30);
   const [nextInvoiceDate, setNextInvoiceDate] = useState(initial?.next_invoice_date || new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState(initial?.end_date || "");
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [notes, setNotes] = useState(initial?.notes || "");
 
@@ -3143,10 +3602,11 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
 
   const submit = () => {
     if (!clientId || !title.trim() || !amount || !frequencyDays || !nextInvoiceDate) return;
+    if (endDate && endDate < nextInvoiceDate) return;
     onSave({
       client_id: clientId, branch_id: branchId || null, ncf_sequence_id: ncfSequenceId || null,
       title: title.trim(), description: description.trim() || null, amount: Number(amount), is_taxable: isTaxable,
-      frequency_days: Number(frequencyDays), next_invoice_date: nextInvoiceDate, is_active: isActive, notes: notes.trim() || null,
+      frequency_days: Number(frequencyDays), next_invoice_date: nextInvoiceDate, end_date: endDate || null, is_active: isActive, notes: notes.trim() || null,
     });
   };
 
@@ -3183,9 +3643,15 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
           </select>
         </Field>
       </div>
-      <Field label="Próxima fecha de facturación">
-        <input type="date" className={inputClass} style={inputStyle} value={nextInvoiceDate} onChange={(e) => setNextInvoiceDate(e.target.value)} />
-      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Próxima fecha de facturación">
+          <input type="date" className={inputClass} style={inputStyle} value={nextInvoiceDate} onChange={(e) => setNextInvoiceDate(e.target.value)} />
+        </Field>
+        <Field label="Fecha de término del contrato (opcional)">
+          <input type="date" className={inputClass} style={inputStyle} value={endDate} min={nextInvoiceDate || undefined} onChange={(e) => setEndDate(e.target.value)} />
+        </Field>
+      </div>
+      {endDate && <div className="text-xs mb-3" style={{ color: C.muted }}>Después de esta fecha el contrato no generará más facturas automáticamente, aunque siga marcado como activo.</div>}
       <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
         <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} /> Aplica ITBIS (18%)
       </label>
@@ -3206,10 +3672,11 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
   );
 }
 
-function CreditNoteDetailModal({ note, items, invoice, clientName, companyName, onClose }) {
+function CreditNoteDetailModal({ note, items, invoice, clientName, clientRnc, companyName, company, onClose }) {
   const doPrint = () => {
     const html = invoiceLikeHtml({
-      docLabel: "Nota de Crédito", code: note.ncf, companyName, clientName,
+      docLabel: "Nota de Crédito", code: note.ncf, companyName, clientName, clientRnc,
+      companyLogo: company?.logo_url, companyRnc: company?.rnc, companyAddress: company?.address, companyPhone: company?.phone,
       dateLabel: "Fecha", dateValue: fmtDate(note.note_date), extraMeta: invoice ? `<br/>Factura original: ${invoice.ncf}` : "",
       items, subtotal: note.subtotal, itbis: note.itbis, total: note.total,
       notes: note.reason ? `Motivo: ${note.reason}` : "",
@@ -3219,7 +3686,7 @@ function CreditNoteDetailModal({ note, items, invoice, clientName, companyName, 
   return (
     <Modal title={`Nota de Crédito ${note.ncf}`} onClose={onClose} wide>
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span></div>
+        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span>{clientRnc && <span> · RNC/Cédula: {clientRnc}</span>}</div>
         <Pill label="Emitida" color={C.blue} />
       </div>
       {invoice && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.muted }}>Factura original: <span className="font-mono" style={{ color: C.text }}>{invoice.ncf}</span></div>}
@@ -3256,7 +3723,7 @@ const QUOTE_STATUS_CFG = {
   pendiente: { label: "Pendiente", color: "#8B92A0" },
   aprobada: { label: "Aprobada", color: "#4CAF6D" },
   rechazada: { label: "Rechazada", color: "#E8654F" },
-  en_orden: { label: "En orden de trabajo", color: "#4FA8D8" },
+  en_orden: { label: "En orden de venta", color: "#4FA8D8" },
   parcial: { label: "Facturada parcialmente", color: "#4FA8D8" },
   convertida: { label: "Convertida en factura", color: "#F2A93B" },
 };
@@ -3275,6 +3742,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
   const [discountPct, setDiscountPct] = useState(initial?.discount_pct ?? 0);
   const [currency, setCurrency] = useState(initial?.currency || "DOP");
   const [exchangeRate, setExchangeRate] = useState(initial?.exchange_rate ?? 1);
+  const [notes, setNotes] = useState(initial?.notes || "");
   const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true };
   const [blocks, setBlocks] = useState(() => {
     if (initial) return itemsToBlocks(initialItems, blankItem);
@@ -3338,7 +3806,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
     onSave({
       title: title.trim() || null, client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, discount_pct: discountPct,
       subtotal: subtotal * rate, itbis: itbis * rate, total: total * rate,
-      currency, exchange_rate: rate,
+      currency, exchange_rate: rate, notes: notes.trim() || null,
       foreign_subtotal: currency === "USD" ? subtotal : null,
       foreign_itbis: currency === "USD" ? itbis : null,
       foreign_total: currency === "USD" ? total : null,
@@ -3424,9 +3892,9 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
                   <ProductSearchSelect products={products} value={b.product_id} onChange={(id) => onProductPick(b.id, id)} placeholder="Buscar producto o servicio..." />
                 </div>
               </div>
-              <input className={`${inputClass} col-span-3`} style={inputStyle} value={b.description} onChange={(e) => updateBlock(b.id, { description: e.target.value })} placeholder="Descripción" />
-              <input type="number" step="0.01" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
-              <input type="number" step="0.01" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_price} onChange={(e) => updateBlock(b.id, { unit_price: e.target.value })} placeholder="Precio" />
+              <input className={`${inputClass} col-span-3`} style={{ ...inputStyle, ...(!b.product_id ? { borderColor: C.amber + "60" } : {}) }} value={b.description} onChange={(e) => updateBlock(b.id, { description: e.target.value })} placeholder={b.product_id ? "Descripción" : "👈 Escribe aquí la descripción del trabajo"} />
+              <input type="text" inputMode="decimal" className={`${inputClass} col-span-1`} style={inputStyle} value={b.quantity} onChange={(e) => updateBlock(b.id, { quantity: e.target.value })} placeholder="Cant." />
+              <input type="text" inputMode="decimal" className={`${inputClass} col-span-2`} style={inputStyle} value={b.unit_price} onChange={(e) => updateBlock(b.id, { unit_price: e.target.value })} placeholder="Precio" />
               <label className="col-span-1 flex items-center gap-1 text-xs" style={{ color: C.muted }}>
                 <input type="checkbox" checked={b.is_taxable} onChange={(e) => updateBlock(b.id, { is_taxable: e.target.checked })} /> ITBIS
               </label>
@@ -3449,6 +3917,10 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
         </div>
       )}
 
+      <Field label="Observaciones (opcional — sale en el impreso)">
+        <textarea className={inputClass} style={{ ...inputStyle, minHeight: 70 }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej. Se requiere un adelanto del 50% para iniciar el trabajo." />
+      </Field>
+
       <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
         {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal bruto</span><span className="font-mono">{currency === "USD" ? `US$ ${grossSubtotal.toFixed(2)}` : fmtMoney(grossSubtotal)}</span></div>}
         {discountPct > 0 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Descuento ({discountPct}%)</span><span className="font-mono">-{currency === "USD" ? `US$ ${discountAmount.toFixed(2)}` : fmtMoney(discountAmount)}</span></div>}
@@ -3468,94 +3940,32 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
   );
 }
 
-function PartialInvoiceModal({ quote, items, onClose, onConfirm }) {
-  const invoiceable = items.map((it) => {
-    const remaining = Number(it.quantity) - Number(it.quantity_invoiced || 0);
-    return { ...it, remaining };
-  }).filter((it) => it.remaining > 0.0001);
-
-  const [quantities, setQuantities] = useState(() => Object.fromEntries(invoiceable.map((it) => [it.id, it.remaining])));
-
-  const setQty = (id, value, max) => {
-    const v = Math.max(0, Math.min(Number(value) || 0, max));
-    setQuantities((prev) => ({ ...prev, [id]: v }));
-  };
-
-  const selectedItems = invoiceable.filter((it) => (quantities[it.id] || 0) > 0.0001);
-  const subtotal = selectedItems.reduce((sum, it) => sum + (quantities[it.id] || 0) * Number(it.unit_price), 0);
-  const itbis = selectedItems.filter((it) => it.is_taxable).reduce((sum, it) => sum + (quantities[it.id] || 0) * Number(it.unit_price) * 0.18, 0);
-  const isFullInvoice = invoiceable.every((it) => Math.abs((quantities[it.id] || 0) - it.remaining) < 0.0001);
-
-  const confirm = () => {
-    if (selectedItems.length === 0) return;
-    onConfirm(quote, selectedItems.map((it) => ({
-      quote_item_id: it.id,
-      product_id: it.product_id || "",
-      description: it.description,
-      quantity: quantities[it.id],
-      unit_price: it.unit_price,
-      is_taxable: it.is_taxable,
-      chapter: it.chapter || "",
-    })));
-  };
-
-  return (
-    <Modal title={`Facturar cotización ${quote.quote_number || ""}`} onClose={onClose} wide>
-      <div className="text-xs mb-3" style={{ color: C.muted }}>
-        Ajusta la cantidad a facturar en cada renglón (por defecto, lo que falta por facturar). Si reduces alguna cantidad, la cotización queda marcada como "Facturada parcialmente" y podrás facturar el resto después.
-      </div>
-      <div className="space-y-2 mb-3">
-        {invoiceable.map((it) => (
-          <div key={it.id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center px-3 py-2 text-sm" style={{ background: C.panelAlt }}>
-            <div className="col-span-5 truncate">{it.description}</div>
-            <div className="col-span-3 text-xs text-right" style={{ color: C.muted }}>Pendiente: {it.remaining} de {it.quantity}</div>
-            <div className="col-span-2">
-              <input type="number" min="0" max={it.remaining} step="0.01" className={inputClass} style={inputStyle} value={quantities[it.id] ?? 0} onChange={(e) => setQty(it.id, e.target.value, it.remaining)} />
-            </div>
-            <div className="col-span-2 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney((quantities[it.id] || 0) * Number(it.unit_price))}</div>
-          </div>
-        ))}
-        {invoiceable.length === 0 && <div className="text-sm text-center py-4" style={{ color: C.muted }}>Esta cotización ya se facturó por completo.</div>}
-      </div>
-      <div className="p-3 space-y-1" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal a facturar ahora</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
-        <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
-        <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total a facturar ahora</span><span className="font-mono">{fmtMoney(subtotal + itbis)}</span></div>
-      </div>
-      <div className="text-xs mt-2" style={{ color: isFullInvoice ? C.green : C.amber }}>
-        {invoiceable.length > 0 && (isFullInvoice ? "Se facturará el total restante de la cotización." : "Quedará un saldo de la cotización sin facturar.")}
-      </div>
-      <div className="flex justify-end gap-2 mt-4">
-        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
-        <button onClick={confirm} disabled={selectedItems.length === 0} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
-          Continuar a factura
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, canEdit, onClose, onMarkStatus, onConvert, onConvertToOrder, onEdit, onDuplicate }) {
+function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, orderInfo, canEdit, onClose, onMarkStatus, onConvertToOrder, onEdit, onDuplicate, onDelete }) {
+  const defaultBankAccount = (bankAccounts || []).find((a) => a.is_default) || null;
   const s = QUOTE_STATUS_CFG[quote.status] || QUOTE_STATUS_CFG.pendiente;
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const doPrint = () => {
     const html = invoiceLikeHtml({
-      docLabel: "Cotización", code: quote.quote_number, docTitle: quote.title, companyName, clientName,
+      docLabel: "Cotización", code: quote.quote_number, docTitle: quote.title, companyName, clientName, clientRnc, clientAddress,
+      companyLogo: company?.logo_url, companyRnc: company?.rnc, companyAddress: company?.address, companyPhone: company?.phone,
+      companyBankName: defaultBankAccount?.bank_name, companyBankAccountType: defaultBankAccount?.account_type, companyBankAccountNumber: defaultBankAccount?.account_number,
       dateLabel: "Fecha", dateValue: fmtDate(quote.quote_date),
       extraMeta: quote.valid_until ? `<br/>Válida hasta: ${fmtDate(quote.valid_until)}` : "",
       items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, discountPct: quote.discount_pct,
-      currency: quote.currency, foreignTotal: quote.foreign_total, exchangeRate: quote.exchange_rate,
+      currency: quote.currency, foreignTotal: quote.foreign_total, exchangeRate: quote.exchange_rate, notes: quote.notes,
     });
     printDocument(`Cotización ${quote.quote_number || ""}`, html);
   };
   const doPrintProforma = () => {
     const html = invoiceLikeHtml({
-      docLabel: "FACTURA PRO-FORMA", code: quote.quote_number, docTitle: quote.title, companyName, clientName,
+      docLabel: "FACTURA PRO-FORMA", code: quote.quote_number, docTitle: quote.title, companyName, clientName, clientRnc, clientAddress,
+      companyLogo: company?.logo_url, companyRnc: company?.rnc, companyAddress: company?.address, companyPhone: company?.phone,
+      companyBankName: defaultBankAccount?.bank_name, companyBankAccountType: defaultBankAccount?.account_type, companyBankAccountNumber: defaultBankAccount?.account_number,
       dateLabel: "Fecha", dateValue: fmtDate(quote.quote_date),
       extraMeta: quote.valid_until ? `<br/>Válida hasta: ${fmtDate(quote.valid_until)}` : "",
       items, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, discountPct: quote.discount_pct,
-      notes: "Este documento es una Factura Pro-Forma sin valor fiscal — únicamente para fines informativos, no constituye un comprobante válido ante la DGII.",
+      notes: [quote.notes, "Este documento es una Factura Pro-Forma sin valor fiscal — únicamente para fines informativos, no constituye un comprobante válido ante la DGII."].filter(Boolean).join(" — "),
       currency: quote.currency, foreignTotal: quote.foreign_total, exchangeRate: quote.exchange_rate,
     });
     printDocument(`Factura Pro-Forma ${quote.quote_number || ""}`, html);
@@ -3563,7 +3973,7 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
   return (
     <Modal title={`Cotización ${quote.quote_number || ""}`} onClose={onClose} wide>
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span></div>
+        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span>{clientRnc && <span> · RNC/Cédula: {clientRnc}</span>}</div>
         <Pill label={s.label} color={s.color} />
       </div>
       {quote.currency === "USD" && (
@@ -3577,6 +3987,12 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
         <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(quote.quote_date)}</span></div>
         <div>Válida hasta<br /><span style={{ color: C.text }}>{quote.valid_until ? fmtDate(quote.valid_until) : "Sin definir"}</span></div>
       </div>
+      {quote.notes && (
+        <div className="text-xs mb-4 px-3 py-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+          <div className="uppercase tracking-wide mb-1" style={{ color: C.muted }}>Observaciones</div>
+          {quote.notes}
+        </div>
+      )}
       <div className="space-y-1 mb-3">
         {showChapters ? chapterGroups.map((g) => (
           <div key={g.chapter}>
@@ -3622,15 +4038,13 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
             <Layers size={14} /> Pasar a Orden de Venta
           </button>
         )}
-        {canEdit && (quote.status === "pendiente" || quote.status === "aprobada" || quote.status === "parcial") && (
-          <button onClick={() => onConvert(quote, items)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
-            {quote.status === "parcial" ? "Facturar el resto" : "Convertir en factura"}
-          </button>
-        )}
         {canEdit && quote.status !== "convertida" && quote.status !== "en_orden" && (
           <button onClick={() => onEdit(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}><Pencil size={14} /> Editar</button>
         )}
         {canEdit && <button onClick={() => onDuplicate(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}><Copy size={14} /> Duplicar</button>}
+        {canEdit && quote.status !== "convertida" && quote.status !== "en_orden" && quote.status !== "parcial" && (
+          <button onClick={() => onDelete(quote)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}><Trash2 size={14} /> Eliminar</button>
+        )}
         <button onClick={doPrintProforma} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.blue, border: `1px solid ${C.border}` }}><Receipt size={14} /> Imprimir Pro-Forma</button>
         <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
@@ -3639,14 +4053,16 @@ function QuoteDetailModal({ quote, items, clientName, companyName, orderInfo, ca
   );
 }
 
-function SalesOrderDetailModal({ order, items, clientName, companyName, workOrderInfo, canEdit, onClose, onGenerateInvoice, onGenerateWorkOrder, onCancel, onDelete }) {
+function SalesOrderDetailModal({ order, items, clientName, clientRnc, companyName, company, workOrderInfo, canEdit, onClose, onGenerateInvoice, onGenerateWorkOrder, onCancel, onDelete, onUpdateNotes }) {
   const s = SALES_ORDER_STATUS_CFG[order.status] || SALES_ORDER_STATUS_CFG.en_proceso;
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
+  const [notes, setNotes] = useState(order.notes || "");
   const doPrint = () => {
     const html = invoiceLikeHtml({
-      docLabel: "Orden de venta", code: order.order_number, docTitle: order.title, companyName, clientName,
-      dateLabel: "Fecha", dateValue: fmtDate(order.order_date),
+      docLabel: "Orden de venta", code: order.order_number, docTitle: order.title, companyName, clientName, clientRnc,
+      companyLogo: company?.logo_url, companyRnc: company?.rnc, companyAddress: company?.address, companyPhone: company?.phone,
+      dateLabel: "Fecha", dateValue: fmtDate(order.order_date), notes: order.notes,
       items, subtotal: order.subtotal, itbis: order.itbis, total: order.total,
     });
     printDocument(`Orden de venta ${order.order_number || ""}`, html);
@@ -3654,7 +4070,7 @@ function SalesOrderDetailModal({ order, items, clientName, companyName, workOrde
   return (
     <Modal title={`Orden de venta ${order.order_number || ""}`} onClose={onClose} wide>
       <div className="flex items-center justify-between mb-2">
-        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span></div>
+        <div className="text-sm" style={{ color: C.muted }}>Cliente: <span style={{ color: C.text }}>{clientName}</span>{clientRnc && <span> · RNC/Cédula: {clientRnc}</span>}</div>
         <Pill label={s.label} color={s.color} />
       </div>
       {order.title && <div className="text-sm font-semibold mb-2" style={{ color: C.text }}>{order.title}</div>}
@@ -3689,6 +4105,15 @@ function SalesOrderDetailModal({ order, items, clientName, companyName, workOrde
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(order.subtotal)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(order.itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(order.total)}</span></div>
+      </div>
+      <div className="mt-3">
+        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Observaciones (opcional — sale en el impreso)</div>
+        <textarea className={inputClass} style={{ ...inputStyle, minHeight: 70 }} value={notes} onChange={(e) => setNotes(e.target.value)} disabled={!canEdit} placeholder="Ej. Se solicitó un adelanto del 50% antes de iniciar el trabajo." />
+        {canEdit && notes !== (order.notes || "") && (
+          <div className="flex justify-end mt-1">
+            <button onClick={() => onUpdateNotes(order, notes)} className="text-xs px-3 py-1.5 font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Guardar observaciones</button>
+          </div>
+        )}
       </div>
       <ActivityHistorySection
         tableName="sales_orders"
@@ -3975,7 +4400,7 @@ function StatementModal({ clients, invoices, companyName, onClose }) {
               const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
               return (
                 <div key={inv.id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center text-sm px-3 py-2" style={{ background: C.panelAlt }}>
-                  <div className="col-span-3 font-mono text-xs">{inv.ncf}</div>
+                  <div className="col-span-3 font-mono text-xs">{inv.invoice_number || inv.ncf}</div>
                   <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
                   <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
                   <div className="col-span-2 text-right font-mono" style={{ color: C.green }}>{fmtMoney(inv.amount_paid || 0)}</div>
@@ -4491,6 +4916,10 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
             <span style={{ color: C.muted }}> + {extraTechnicianIds.map((id) => techName(id)).join(", ")}</span>
           )}
         </div>
+        <div>Fecha programada<br /><span style={{ color: C.text }}>{fmtDate(order.scheduled)}</span></div>
+        {order.deadline && (
+          <div>Fecha límite (deadline)<br /><span style={{ color: order.status !== "completada" && order.deadline < new Date().toISOString().slice(0, 10) ? C.red : C.text }}>{fmtDate(order.deadline)}</span></div>
+        )}
       </div>
 
       {!isTecnico && !readOnly && checklistItems && checklistItems.length === 0 && checklistTemplates && checklistTemplates.length > 0 && (
@@ -4762,7 +5191,8 @@ function HistoryModal({ title, orders, branchName, equipName, techName, onClose 
 // ---------------------------------------------------------------------------
 // Aplicación principal (una vez ya hay sesión + empresa)
 // ---------------------------------------------------------------------------
-function Dashboard({ session, profile, companyName, onSignOut }) {
+function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
+  const companyName = company?.name || "Tu empresa";
   const companyId = profile.company_id;
   const canManage = profile.role === "admin" || profile.role === "supervisor";
   const isAdmin = profile.role === "admin";
@@ -4787,6 +5217,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [invites, setInvites] = useState([]);
   const [clients, setClients] = useState([]);
   const [products, setProducts] = useState([]);
+  const [productComponents, setProductComponents] = useState([]);
   const [clientAssets, setClientAssets] = useState([]);
   const [checklistTemplates, setChecklistTemplates] = useState([]);
   const [importingChecklists, setImportingChecklists] = useState(false);
@@ -4809,6 +5240,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [purchases, setPurchases] = useState([]);
   const [otherExpenses, setOtherExpenses] = useState([]);
   const [tools, setTools] = useState([]);
+  const [toolLists, setToolLists] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [chartOfAccounts, setChartOfAccounts] = useState([]);
   const [taxRates, setTaxRates] = useState([]);
@@ -4819,6 +5251,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [creditNotes, setCreditNotes] = useState([]);
   const [recurringContracts, setRecurringContracts] = useState([]);
   const [bankTransactions, setBankTransactions] = useState([]);
+  const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
   const [importingBankStatement, setImportingBankStatement] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
@@ -4839,6 +5272,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [activityDateTo, setActivityDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [financialDateFrom, setFinancialDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [financialDateTo, setFinancialDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [salesReportDateFrom, setSalesReportDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
+  const [salesReportDateTo, setSalesReportDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [invoicePaymentsAll, setInvoicePaymentsAll] = useState([]);
   const [purchasePaymentsAll, setPurchasePaymentsAll] = useState([]);
   const [loadingFinancial, setLoadingFinancial] = useState(false);
@@ -4851,6 +5286,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [incidents, setIncidents] = useState([]);
 
   const [branchFilter, setBranchFilter] = useState("all");
+  const [equipmentTechFilter, setEquipmentTechFilter] = useState("all");
+  const [equipmentTypeFilter, setEquipmentTypeFilter] = useState("all");
+  const [equipmentSearch, setEquipmentSearch] = useState("");
+  const [selectedEquipment, setSelectedEquipment] = useState(new Set());
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; });
   const [searchedDate, setSearchedDate] = useState("");
   const [view, setView] = useState(() => new URLSearchParams(window.location.search).get("view") || "dashboard");
@@ -4901,6 +5340,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [toolStatusFilter, setToolStatusFilter] = useState("all");
   const [toolTechnicianFilter, setToolTechnicianFilter] = useState("all");
   const [groupToolsByTechnician, setGroupToolsByTechnician] = useState(false);
+  const [toolViewMode, setToolViewMode] = useState("herramientas");
+  const [showAddToolList, setShowAddToolList] = useState(false);
+  const [editingToolList, setEditingToolList] = useState(null);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState(null);
   const [showAddAccount, setShowAddAccount] = useState(false);
@@ -4921,7 +5363,6 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const [showStatement, setShowStatement] = useState(false);
   const [invoiceDetail, setInvoiceDetail] = useState(null);
   const [invoicePrefill, setInvoicePrefill] = useState(null);
-  const [partialInvoiceFor, setPartialInvoiceFor] = useState(null);
   const [showAddCreditNote, setShowAddCreditNote] = useState(false);
   const [creditNoteDetail, setCreditNoteDetail] = useState(null);
   const [showAddQuote, setShowAddQuote] = useState(false);
@@ -4947,7 +5388,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, mats, wot, rcon, banktx] = await Promise.all([
+    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, mats, wot, rcon, banktx, cba] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
@@ -4960,6 +5401,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       isAdmin ? supabase.from("invites").select("*").eq("company_id", companyId).eq("used", false).order("created_at") : Promise.resolve({ data: [] }),
       supabase.from("clients").select("*").eq("company_id", companyId).order("name"),
       supabase.from("products").select("*").eq("company_id", companyId).order("name"),
+      supabase.from("product_components").select("*").eq("company_id", companyId),
       supabase.from("client_assets").select("*").eq("company_id", companyId).order("install_date"),
       supabase.from("suppliers").select("*").eq("company_id", companyId).order("name"),
       supabase.from("purchases").select("*").eq("company_id", companyId).order("purchase_date", { ascending: false }),
@@ -4974,10 +5416,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       supabase.from("tax_rates").select("*").eq("company_id", companyId).order("name"),
       supabase.from("cash_sessions").select("*").eq("company_id", companyId).order("opened_at", { ascending: false }),
       supabase.from("tools").select("*").eq("company_id", companyId).order("name"),
+      supabase.from("tool_lists").select("*").eq("company_id", companyId).order("created_at"),
       supabase.from("inventory_materials").select("*").eq("company_id", companyId).order("name"),
       supabase.from("work_order_technicians").select("*").eq("company_id", companyId),
       supabase.from("recurring_contracts").select("*").eq("company_id", companyId).order("next_invoice_date"),
       supabase.from("bank_transactions").select("*").eq("company_id", companyId).order("transaction_date", { ascending: false }),
+      supabase.from("company_bank_accounts").select("*").eq("company_id", companyId).order("created_at"),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -4991,6 +5435,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setInvites(inv.data || []);
     setClients(cli.data || []);
     setProducts(prod.data || []);
+    setProductComponents(pcomp.data || []);
     setClientAssets(ast.data || []);
     setSuppliers(sup.data || []);
     setPurchases(purch.data || []);
@@ -5005,10 +5450,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setTaxRates(txr.data || []);
     setCashSessions(csess.data || []);
     setTools(tls.data || []);
+    setToolLists(tlists.data || []);
     setMaterials(mats.data || []);
     setOrderTechnicians(wot.data || []);
     setRecurringContracts(rcon.data || []);
     setBankTransactions(banktx.data || []);
+    setCompanyBankAccounts(cba.data || []);
     setLoadingScope(false);
   };
 
@@ -5142,6 +5589,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const activityUsers = useMemo(() => Array.from(new Set(activityLog.map((l) => l.changed_by_email).filter(Boolean))).sort(), [activityLog]);
   const activityTablesPresent = useMemo(() => Array.from(new Set(activityLog.map((l) => l.table_name))).sort(), [activityLog]);
+  const activityUserName = useMemo(() => {
+    const map = Object.fromEntries(profiles.map((p) => [p.email, p.full_name || p.email]));
+    return (email) => (email ? map[email] || email : "—");
+  }, [profiles]);
 
   const describeActivityEntry = (l) => {
     const d = l.new_data || l.old_data || {};
@@ -5187,9 +5638,42 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     return { cashIn, cashOutSuppliers, cashOutExpenses, cashOut, net: cashIn - cashOut };
   }, [invoicePaymentsAll, purchasePaymentsAll, otherExpenses, financialDateFrom, financialDateTo]);
 
+  const salesReportData = useMemo(() => {
+    const inRange = (d) => d && d >= salesReportDateFrom && d <= salesReportDateTo;
+    const invoicesInRange = invoices.filter((i) => i.status !== "anulada" && inRange(i.invoice_date));
+    const quotesInRange = quotes.filter((q) => inRange(q.quote_date));
+    const totalInvoiced = invoicesInRange.reduce((sum, i) => sum + Number(i.total || 0), 0);
+    const totalCollected = invoicesInRange.reduce((sum, i) => sum + Number(i.amount_paid || 0) + Number(i.credit_applied || 0), 0);
+    const totalPending = totalInvoiced - totalCollected;
+    const totalQuoted = quotesInRange.reduce((sum, q) => sum + Number(q.total || 0), 0);
+    const quotesDecided = quotesInRange.filter((q) => q.status !== "pendiente");
+    const quotesWon = quotesInRange.filter((q) => ["aprobada", "en_orden", "parcial", "convertida"].includes(q.status));
+    const conversionRate = quotesDecided.length > 0 ? (quotesWon.length / quotesDecided.length) * 100 : null;
+    const quoteStatusCounts = quotesInRange.reduce((acc, q) => { acc[q.status] = (acc[q.status] || 0) + 1; return acc; }, {});
+
+    const byClient = {};
+    invoicesInRange.forEach((i) => { byClient[i.client_id] = (byClient[i.client_id] || 0) + Number(i.total || 0); });
+    const topClients = Object.entries(byClient)
+      .map(([clientId, total]) => ({ clientId, total, name: clients.find((c) => c.id === clientId)?.name || "Cliente eliminado" }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
+      const monthKey = d.toISOString().slice(0, 7);
+      const label = d.toLocaleDateString("es-DO", { month: "short", year: "2-digit" });
+      const total = invoices.filter((inv) => inv.status !== "anulada" && (inv.invoice_date || "").slice(0, 7) === monthKey).reduce((sum, inv) => sum + Number(inv.total || 0), 0);
+      months.push({ label, total });
+    }
+    const maxMonthTotal = Math.max(1, ...months.map((m) => m.total));
+
+    return { totalInvoiced, totalCollected, totalPending, totalQuoted, conversionRate, quotesCount: quotesInRange.length, invoicesCount: invoicesInRange.length, quoteStatusCounts, topClients, months, maxMonthTotal };
+  }, [invoices, quotes, clients, salesReportDateFrom, salesReportDateTo]);
+
   const todayStr = new Date().toISOString().slice(0, 10);
   const dueContracts = useMemo(
-    () => recurringContracts.filter((c) => c.is_active && c.next_invoice_date <= todayStr)
+    () => recurringContracts.filter((c) => c.is_active && c.next_invoice_date <= todayStr && (!c.end_date || c.end_date >= todayStr))
       .sort((a, b) => (a.next_invoice_date || "").localeCompare(b.next_invoice_date || "")),
     [recurringContracts, todayStr]
   );
@@ -5263,6 +5747,35 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     return Array.from(map.values()).filter((g) => g.tools.length > 0);
   }, [groupToolsByTechnician, toolsFiltered, technicians]);
 
+  // Vista del técnico: sus herramientas agrupadas por "Listado" (kit) al que
+  // pertenecen, para que las vea organizadas igual que se las asignaron,
+  // en vez de una tabla plana con columnas que no le sirven (sucursal, etc.)
+  const technicianToolGroups = useMemo(() => {
+    if (!isTecnico) return null;
+    const groups = [];
+    toolLists.forEach((list) => {
+      const mine = toolsFiltered.filter((t) => (list.tool_ids || []).includes(t.id));
+      if (mine.length > 0) groups.push({ id: list.id, name: list.name, tools: mine });
+    });
+    const idsInAnyList = new Set(toolLists.flatMap((l) => l.tool_ids || []));
+    const loose = toolsFiltered.filter((t) => !idsInAnyList.has(t.id));
+    if (loose.length > 0) groups.push({ id: "sueltas", name: "Otras herramientas asignadas", tools: loose });
+    return groups;
+  }, [isTecnico, toolsFiltered, toolLists]);
+
+  const equipmentTypes = useMemo(() => Array.from(new Set(equipment.map((e) => e.type).filter(Boolean))).sort(), [equipment]);
+  const equipmentFiltered = useMemo(() => equipment.filter((e) => {
+    if (branchFilter !== "all" && e.branch_id !== branchFilter) return false;
+    if (equipmentTechFilter === "none" && e.default_technician_id) return false;
+    if (equipmentTechFilter !== "all" && equipmentTechFilter !== "none" && e.default_technician_id !== equipmentTechFilter) return false;
+    if (equipmentTypeFilter !== "all" && e.type !== equipmentTypeFilter) return false;
+    if (equipmentSearch) {
+      const q = equipmentSearch.toLowerCase();
+      if (![e.name, e.brand, e.model, e.serial_number].some((v) => (v || "").toLowerCase().includes(q))) return false;
+    }
+    return true;
+  }), [equipment, branchFilter, equipmentTechFilter, equipmentTypeFilter, equipmentSearch]);
+
   const ordersByDate = useMemo(() => {
     const map = {};
     scopedOrders.forEach((o) => {
@@ -5278,6 +5791,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     return visibleOrders.filter((o) => o.status !== "completada" && o.scheduled && new Date(o.scheduled + "T00:00:00") < today);
   }, [visibleOrders]);
 
+  const pastDeadlineOrders = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return visibleOrders.filter((o) => o.status !== "completada" && o.deadline && new Date(o.deadline + "T00:00:00") < today);
+  }, [visibleOrders]);
+
   const orderDayColor = (o) => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const sched = new Date(o.scheduled + "T00:00:00");
@@ -5287,6 +5805,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     return C.blue;
   };
   const filteredOrders = useMemo(() => scopedOrders.filter((o) => {
+    // Un técnico ya no ve sus propias órdenes completadas en el listado por defecto
+    // (para no sobrecargar su sensación de carga de trabajo pendiente); puede seguir
+    // revisándolas a propósito eligiendo "Completada" en el filtro de estado.
+    if (isTecnico && statusFilter === "all" && o.status === "completada") return false;
     if (typeFilter !== "all" && o.type !== typeFilter) return false;
     if (statusFilter !== "all" && o.status !== statusFilter) return false;
     if (technicianFilter !== "all" && o.technician_id !== technicianFilter) return false;
@@ -5442,7 +5964,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     const clientNameStr = clients.find((c) => c.id === inv.client_id)?.name || "";
     if (invoiceStatusFilter !== "all" && inv.status !== invoiceStatusFilter) return false;
     if (invoicePaymentFilter !== "all" && (inv.payment_status || "pendiente") !== invoicePaymentFilter) return false;
-    if (invoiceSearch && !clientNameStr.toLowerCase().includes(invoiceSearch.toLowerCase()) && !(inv.ncf || "").toLowerCase().includes(invoiceSearch.toLowerCase())) return false;
+    if (invoiceSearch && !clientNameStr.toLowerCase().includes(invoiceSearch.toLowerCase()) && !(inv.ncf || "").toLowerCase().includes(invoiceSearch.toLowerCase()) && !(inv.invoice_number || "").toLowerCase().includes(invoiceSearch.toLowerCase())) return false;
     return true;
   }), [invoices, clients, invoiceStatusFilter, invoicePaymentFilter, invoiceSearch]);
 
@@ -5680,6 +6202,55 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setDetailOrder((prev) => (prev ? data : prev));
   };
 
+  // ---- Perfil de la empresa ----
+  const saveCompanyProfile = async (payload, logoFile) => {
+    setSaving(true);
+    let logo_url = company?.logo_url || null;
+    if (logoFile) {
+      const ext = logoFile.name.split(".").pop();
+      const path = `logos/${companyId}/logo-${Date.now()}.${ext}`;
+      const { error: upError } = await supabase.storage.from("evidence").upload(path, logoFile, { upsert: true });
+      if (upError) { setSaving(false); setErrorMsg(upError.message); return; }
+      const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
+      logo_url = pub.publicUrl;
+    }
+    const { data, error } = await supabase.from("companies").update({ ...payload, logo_url }).eq("id", companyId).select().maybeSingle();
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return; }
+    if (!data) { setErrorMsg("No se pudo guardar el perfil de la empresa: la base de datos no permitió la actualización (revisa los permisos/RLS de la tabla 'companies'). No se perdieron tus datos, puedes reintentar."); return; }
+    onUpdateCompany(data);
+  };
+
+  // ---- Cuentas bancarias de la empresa (para elegir en las facturas) ----
+  const saveBankAccount = async (payload, editingId) => {
+    setSaving(true);
+    if (editingId) {
+      const { data, error } = await supabase.from("company_bank_accounts").update(payload).eq("id", editingId).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setCompanyBankAccounts((prev) => prev.map((a) => (a.id === data.id ? data : a)));
+    } else {
+      const { data, error } = await supabase.from("company_bank_accounts").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setCompanyBankAccounts((prev) => [...prev, data]);
+    }
+  };
+
+  const deleteBankAccount = async (id) => {
+    if (!window.confirm("¿Eliminar esta cuenta bancaria? Ya no aparecerá como opción al facturar.")) return;
+    const { error } = await supabase.from("company_bank_accounts").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setCompanyBankAccounts((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const setDefaultBankAccount = async (id) => {
+    await supabase.from("company_bank_accounts").update({ is_default: false }).eq("company_id", companyId).neq("id", id);
+    const { data, error } = await supabase.from("company_bank_accounts").update({ is_default: true }).eq("id", id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setCompanyBankAccounts((prev) => prev.map((a) => (a.id === id ? data : { ...a, is_default: false })));
+  };
+
   // ---- Sucursales ----
   const saveBranch = async (name, city) => {
     setSaving(true);
@@ -5828,19 +6399,32 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   };
 
   // ---- Catálogo de productos ----
-  const saveProduct = async (payload) => {
+  const syncProductComponents = async (parentProductId, components) => {
+    await supabase.from("product_components").delete().eq("parent_product_id", parentProductId);
+    setProductComponents((prev) => prev.filter((c) => c.parent_product_id !== parentProductId));
+    if (components && components.length > 0) {
+      const rows = components.map((c) => ({ company_id: companyId, parent_product_id: parentProductId, component_product_id: c.component_product_id, quantity: Number(c.quantity) || 1 }));
+      const { data, error } = await supabase.from("product_components").insert(rows).select();
+      if (error) { setErrorMsg(`El producto se guardó, pero no se pudieron guardar sus componentes: ${error.message}`); return; }
+      if (data) setProductComponents((prev) => [...prev, ...data]);
+    }
+  };
+
+  const saveProduct = async (payload, components) => {
     setSaving(true);
     if (editingProduct) {
       const { data, error } = await supabase.from("products").update(payload).eq("id", editingProduct.id).select().single();
-      setSaving(false);
-      if (error) { setErrorMsg(error.message); return; }
+      if (error) { setSaving(false); setErrorMsg(error.message); return; }
       setProducts((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+      if (payload.is_composite) await syncProductComponents(data.id, components);
+      setSaving(false);
       setEditingProduct(null);
     } else {
       const { data, error } = await supabase.from("products").insert({ ...payload, company_id: companyId }).select().single();
-      setSaving(false);
-      if (error) { setErrorMsg(error.message); return; }
+      if (error) { setSaving(false); setErrorMsg(error.message); return; }
       setProducts((prev) => [...prev, data]);
+      if (payload.is_composite) await syncProductComponents(data.id, components);
+      setSaving(false);
       setShowAddProduct(false);
     }
   };
@@ -5850,6 +6434,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     const { error } = await supabase.from("products").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); return; }
     setProducts((prev) => prev.filter((p) => p.id !== id));
+    setProductComponents((prev) => prev.filter((c) => c.parent_product_id !== id));
   };
 
   // ---- Proveedores ----
@@ -5912,6 +6497,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       if (error) { setErrorMsg(error.message); return; }
       setTools((prev) => prev.map((t) => (t.id === data.id ? data : t)));
       setEditingTool(null);
+    } else if (Array.isArray(payload)) {
+      // Varias unidades idénticas a la vez (campo "Cantidad" del formulario).
+      const { data, error } = await supabase.from("tools").insert(payload.map((p) => ({ ...p, company_id: companyId }))).select();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setTools((prev) => [...(data || []), ...prev]);
+      setShowAddTool(false);
     } else {
       const { data, error } = await supabase.from("tools").insert({ ...payload, company_id: companyId }).select().single();
       setSaving(false);
@@ -5925,6 +6517,51 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     const { error } = await supabase.from("tools").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); return; }
     setTools((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // ---- Inventario: Listados de herramientas (kits asignables a un técnico) ----
+  const saveToolList = async (payload, editingId) => {
+    setSaving(true);
+    if (editingId) {
+      const { data, error } = await supabase.from("tool_lists").update(payload).eq("id", editingId).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setToolLists((prev) => prev.map((l) => (l.id === data.id ? data : l)));
+      setEditingToolList(null);
+    } else {
+      const { data, error } = await supabase.from("tool_lists").insert({ ...payload, company_id: companyId }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setToolLists((prev) => [...prev, data]);
+      setShowAddToolList(false);
+    }
+  };
+
+  const deleteToolList = async (id) => {
+    if (!window.confirm("¿Eliminar este listado? Las herramientas que contiene NO se eliminan, solo el listado.")) return;
+    const { error } = await supabase.from("tool_lists").delete().eq("id", id);
+    if (error) { setErrorMsg(error.message); return; }
+    setToolLists((prev) => prev.filter((l) => l.id !== id));
+  };
+
+  const assignToolsByQuantity = async (list, toolName, qty, technicianId) => {
+    setSaving(true);
+    const candidates = tools.filter((t) => (list.tool_ids || []).includes(t.id) && t.name === toolName && !t.technician_id).slice(0, qty);
+    if (candidates.length === 0) { setSaving(false); return; }
+    const { data, error } = await supabase.from("tools").update({ technician_id: technicianId, status: "asignada" }).in("id", candidates.map((t) => t.id)).select();
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => prev.map((t) => data.find((u) => u.id === t.id) || t));
+  };
+
+  const returnToolsByQuantity = async (list, toolName, technicianId, qty) => {
+    setSaving(true);
+    const candidates = tools.filter((t) => (list.tool_ids || []).includes(t.id) && t.name === toolName && t.technician_id === technicianId).slice(0, qty);
+    if (candidates.length === 0) { setSaving(false); return; }
+    const { data, error } = await supabase.from("tools").update({ technician_id: null, status: "disponible" }).in("id", candidates.map((t) => t.id)).select();
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => prev.map((t) => data.find((u) => u.id === t.id) || t));
   };
   const createBulkTools = async (rows) => {
     if (rows.length === 0) return;
@@ -6305,8 +6942,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       return;
     }
     const ncf = `${freshSeq.prefix}${String(freshSeq.next_number).padStart(8, "0")}`;
+    // Número de factura interno, propio de MantenPro — distinto del NCF (que es el
+    // comprobante fiscal que exige la DGII). Sirve como referencia interna/para el
+    // cliente sin depender del formato ni de la disponibilidad del NCF.
+    const invoice_number = `FAC-${String(invoices.length + 1).padStart(5, "0")}`;
 
-    const { data: invoice, error: invError } = await supabase.from("invoices").insert({ ...payload, company_id: companyId, ncf, status: "emitida" }).select().single();
+    const { data: invoice, error: invError } = await supabase.from("invoices").insert({ ...payload, company_id: companyId, ncf, invoice_number, status: "emitida" }).select().single();
     if (invError) { setSaving(false); setErrorMsg(invError.message); return; }
 
     const itemRows = items.map((it) => ({
@@ -6338,28 +6979,6 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       if (assetError) setErrorMsg(`La factura se emitió, pero no se pudieron registrar todos los activos en garantía: ${assetError.message}`);
     }
 
-    if (invoicePrefill?.sourceQuoteId) {
-      if (invoicePrefill.partialInvoice && invoicePrefill.partialSelections?.length > 0) {
-        const { data: qItems } = await supabase.from("quote_items").select("*").eq("quote_id", invoicePrefill.sourceQuoteId);
-        let allDone = true;
-        for (const sel of invoicePrefill.partialSelections) {
-          const qi = (qItems || []).find((x) => x.id === sel.quote_item_id);
-          if (!qi) continue;
-          const newInvoiced = Number(qi.quantity_invoiced || 0) + Number(sel.quantity);
-          await supabase.from("quote_items").update({ quantity_invoiced: newInvoiced }).eq("id", qi.id);
-          if (newInvoiced < Number(qi.quantity) - 0.0001) allDone = false;
-        }
-        (qItems || []).forEach((qi) => {
-          const touched = invoicePrefill.partialSelections.find((s) => s.quote_item_id === qi.id);
-          if (!touched && Number(qi.quantity_invoiced || 0) < Number(qi.quantity) - 0.0001) allDone = false;
-        });
-        const { data: updatedQuote } = await supabase.from("quotes").update({ status: allDone ? "convertida" : "parcial" }).eq("id", invoicePrefill.sourceQuoteId).select().single();
-        if (updatedQuote) setQuotes((prev) => prev.map((q) => (q.id === updatedQuote.id ? updatedQuote : q)));
-      } else {
-        const { data: updatedQuote } = await supabase.from("quotes").update({ status: "convertida" }).eq("id", invoicePrefill.sourceQuoteId).select().single();
-        if (updatedQuote) setQuotes((prev) => prev.map((q) => (q.id === updatedQuote.id ? updatedQuote : q)));
-      }
-    }
     if (invoicePrefill?.sourceOrderId) {
       const { data: updatedOrder, error: orderUpdateError } = await supabase.from("sales_orders").update({ status: "facturada", invoice_id: invoice.id }).eq("id", invoicePrefill.sourceOrderId).select().single();
       if (orderUpdateError) {
@@ -6373,6 +6992,18 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       if (!row.product_id) continue;
       const prod = products.find((p) => p.id === row.product_id);
       if (!prod) continue;
+      if (prod.is_composite) {
+        // Producto compuesto (kit): no tiene stock propio — se descuenta cada
+        // componente por separado, multiplicado por la cantidad vendida del kit.
+        const parts = productComponents.filter((c) => c.parent_product_id === prod.id);
+        for (const part of parts) {
+          const compProd = products.find((p) => p.id === part.component_product_id);
+          if (!compProd) continue;
+          const newCompStock = Math.max(0, Number(compProd.stock_qty) - Number(part.quantity) * row.quantity);
+          await supabase.from("products").update({ stock_qty: newCompStock }).eq("id", compProd.id);
+        }
+        continue;
+      }
       const newStock = Math.max(0, Number(prod.stock_qty) - row.quantity);
       await supabase.from("products").update({ stock_qty: newStock }).eq("id", prod.id);
     }
@@ -6407,6 +7038,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setRecurringContracts((prev) => prev.filter((c) => c.id !== id));
   };
   const generateContractInvoice = async (contract) => {
+    if (contract.end_date && contract.end_date < todayStr) {
+      setErrorMsg(`El contrato "${contract.title}" venció el ${fmtDate(contract.end_date)} y ya no genera facturas.`);
+      return false;
+    }
     if (!contract.ncf_sequence_id) {
       setErrorMsg(`El contrato "${contract.title}" no tiene una secuencia NCF asignada. Edítalo primero para indicarla.`);
       return false;
@@ -6495,20 +7130,20 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     const withinDays = (dateStr, days) => Math.abs(new Date(dateStr).getTime() - txDate) <= days * 86400000;
     const closeAmount = (a, b) => Math.abs(Number(a) - Number(b)) < 1;
     if (tx.amount > 0) {
-      const candidates = invoicePaymentsAll.filter((p) => closeAmount(p.amount, tx.amount) && withinDays(p.payment_date, 5));
+      const candidates = invoicePaymentsAll.filter((p) => closeAmount(p.amount, tx.amount) && withinDays(p.payment_date, BANK_MATCH_WINDOW_DAYS));
       if (candidates.length === 0) return null;
       const inv = (id) => invoices.find((i) => i.id === id);
       const best = candidates.sort((a, b) => Math.abs(new Date(a.payment_date) - txDate) - Math.abs(new Date(b.payment_date) - txDate))[0];
       return { type: "invoice_payment", id: best.id, label: `Cobro factura ${inv(best.invoice_id)?.ncf || ""} — ${fmtMoney(best.amount)}` };
     } else {
       const absAmt = Math.abs(tx.amount);
-      const ppCandidates = purchasePaymentsAll.filter((p) => closeAmount(p.amount, absAmt) && withinDays(p.payment_date, 5));
+      const ppCandidates = purchasePaymentsAll.filter((p) => closeAmount(p.amount, absAmt) && withinDays(p.payment_date, BANK_MATCH_WINDOW_DAYS));
       if (ppCandidates.length > 0) {
         const sup = (purchaseId) => { const pu = purchases.find((x) => x.id === purchaseId); return suppliers.find((s) => s.id === pu?.supplier_id)?.name || ""; };
         const best = ppCandidates.sort((a, b) => Math.abs(new Date(a.payment_date) - txDate) - Math.abs(new Date(b.payment_date) - txDate))[0];
         return { type: "purchase_payment", id: best.id, label: `Pago a ${sup(best.purchase_id)} — ${fmtMoney(best.amount)}` };
       }
-      const expCandidates = otherExpenses.filter((e) => closeAmount(e.amount, absAmt) && withinDays(e.expense_date, 5));
+      const expCandidates = otherExpenses.filter((e) => closeAmount(e.amount, absAmt) && withinDays(e.expense_date, BANK_MATCH_WINDOW_DAYS));
       if (expCandidates.length > 0) {
         const best = expCandidates.sort((a, b) => Math.abs(new Date(a.expense_date) - txDate) - Math.abs(new Date(b.expense_date) - txDate))[0];
         return { type: "other_expense", id: best.id, label: `Gasto: ${best.description} — ${fmtMoney(best.amount)}` };
@@ -6541,6 +7176,15 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       if (!it.product_id) continue;
       const prod = products.find((p) => p.id === it.product_id);
       if (!prod) continue;
+      if (prod.is_composite) {
+        const parts = productComponents.filter((c) => c.parent_product_id === prod.id);
+        for (const part of parts) {
+          const compProd = products.find((p) => p.id === part.component_product_id);
+          if (!compProd) continue;
+          await supabase.from("products").update({ stock_qty: Number(compProd.stock_qty) + Number(part.quantity) * Number(it.quantity) }).eq("id", compProd.id);
+        }
+        continue;
+      }
       await supabase.from("products").update({ stock_qty: Number(prod.stock_qty) + Number(it.quantity) }).eq("id", prod.id);
     }
     const { error } = await supabase.from("invoices").update({ status: "anulada" }).eq("id", invoice.id);
@@ -6758,23 +7402,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setQuoteDetail((prev) => (prev ? { ...prev, quote: data } : prev));
   };
 
-  const convertQuoteToInvoice = (quote, items) => {
+  const deleteQuote = async (quote) => {
+    if (!window.confirm(`¿Eliminar definitivamente la cotización ${quote.quote_number || ""}? Esta acción no se puede deshacer.`)) return;
+    const { error } = await supabase.from("quotes").delete().eq("id", quote.id);
+    if (error) { setErrorMsg(error.message); return; }
+    setQuotes((prev) => prev.filter((q) => q.id !== quote.id));
     setQuoteDetail(null);
-    setPartialInvoiceFor({ quote, items });
-  };
-
-  const confirmPartialInvoice = (quote, selectedItems) => {
-    setInvoicePrefill({
-      client_id: quote.client_id,
-      sourceQuoteId: quote.id,
-      partialInvoice: true,
-      partialSelections: selectedItems.map((it) => ({ quote_item_id: it.quote_item_id, quantity: it.quantity })),
-      currency: quote.currency,
-      exchange_rate: quote.exchange_rate,
-      items: selectedItems.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable, chapter: it.chapter || "" })),
-    });
-    setPartialInvoiceFor(null);
-    setShowAddInvoice(true);
   };
 
   // ---- Órdenes comerciales (cotización aprobada -> orden -> factura) ----
@@ -6791,7 +7424,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     const order_number = `ORD-${String(salesOrders.length + 1).padStart(4, "0")}`;
     const { data: order, error: orderError } = await supabase.from("sales_orders").insert({
       company_id: companyId, client_id: quote.client_id, quote_id: quote.id, order_number,
-      title: quote.title, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, status: "en_proceso",
+      title: quote.title, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, status: "en_proceso", notes: quote.notes || null,
     }).select().single();
     if (orderError) { setSaving(false); setErrorMsg(orderError.message); return; }
 
@@ -6829,10 +7462,18 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       client_id: order.client_id,
       sourceOrderId: order.id,
       title: order.title,
+      notes: order.notes || "",
       items: items.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable, chapter: it.chapter || "" })),
     });
     setSalesOrderDetail(null);
     setShowAddInvoice(true);
+  };
+
+  const updateSalesOrderNotes = async (order, notes) => {
+    const { data, error } = await supabase.from("sales_orders").update({ notes: notes.trim() || null }).eq("id", order.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setSalesOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+    setSalesOrderDetail((prev) => (prev ? { ...prev, order: data } : prev));
   };
 
   const cancelSalesOrder = async (order) => {
@@ -7052,6 +7693,15 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     setEquipment((prev) => prev.filter((e) => e.id !== id));
   };
 
+  const bulkDeleteEquipment = async (ids) => {
+    if (ids.length === 0) return;
+    if (!window.confirm(`¿Eliminar ${ids.length} equipo${ids.length !== 1 ? "s" : ""} seleccionado${ids.length !== 1 ? "s" : ""}? Esta acción no se puede deshacer.`)) return;
+    const { error } = await supabase.from("equipment").delete().in("id", ids);
+    if (error) { setErrorMsg(error.message); return; }
+    setEquipment((prev) => prev.filter((e) => !ids.includes(e.id)));
+    setSelectedEquipment(new Set());
+  };
+
   const addLocation = async (name, branchId) => {
     setSaving(true);
     const { data, error } = await supabase.from("locations").insert({ company_id: companyId, branch_id: branchId, name }).select().single();
@@ -7099,7 +7749,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
   const CATALOG_CHILD_KEYS = ["clients", "products", "services", "warranty"];
   const SALES_CHILD_KEYS = ["quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja"];
   const COMPRAS_CHILD_KEYS = ["suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger"];
-  const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "payables", "chartOfAccounts", "taxRates", "fiscalReports"];
+  const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "payables", "chartOfAccounts", "taxRates", "bankReconciliation"];
+  const INFORMES_CHILD_KEYS = ["reports", "salesReports", "financialReports", "fiscalReports"];
   const _urlView = new URLSearchParams(window.location.search).get("view") || "dashboard";
   const [openSubmenus, setOpenSubmenus] = useState(() => ({
     inventoryMenu: INVENTORY_CHILD_KEYS.includes(_urlView),
@@ -7107,6 +7758,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
     salesMenu: SALES_CHILD_KEYS.includes(_urlView),
     purchasesMenu: COMPRAS_CHILD_KEYS.includes(_urlView),
     accountingMenu: CONTABLE_CHILD_KEYS.includes(_urlView),
+    informesMenu: INFORMES_CHILD_KEYS.includes(_urlView),
   }));
   const toggleSubmenu = (key) => setOpenSubmenus((prev) => ({ ...prev, [key]: !prev[key] }));
   const [openSections, setOpenSections] = useState({ "Departamento Técnico": true, "Comercial": true, "Administración": true });
@@ -7114,12 +7766,20 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
   const RAW_NAV = [
     { key: "dashboard", label: "Panel", Icon: LayoutDashboard },
+    {
+      key: "informesMenu", label: "Informes", Icon: BarChart3,
+      children: [
+        { key: "reports", label: "Departamento Técnico", Icon: Wrench },
+        { key: "salesReports", label: "Comercial / Ventas", Icon: Layers },
+        { key: "financialReports", label: "Financieros", Icon: Wallet },
+        { key: "fiscalReports", label: "Fiscales (DGII)", Icon: Hash },
+      ],
+    },
     { section: "Departamento Técnico" },
     { key: "incidents", label: "Incidentes", Icon: AlertTriangle },
     { key: "agenda", label: "Agenda", Icon: CalendarDays },
     { key: "orders", label: "Órdenes de trabajo", Icon: ClipboardList },
     { key: "equipment", label: "Gestión de Equipos", Icon: Settings2 },
-    { key: "reports", label: "Reportes", Icon: BarChart3 },
     { key: "checklists", label: "Checklists", Icon: ClipboardCheck },
     { key: "technicians", label: "Técnicos", Icon: Users },
     {
@@ -7172,13 +7832,12 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
         { key: "receivables", label: "Cuentas por Cobrar", Icon: Receipt },
         { key: "payables", label: "Cuentas por Pagar", Icon: ShoppingCart },
         { key: "taxRates", label: "Tasas impositivas", Icon: Hash },
-        { key: "fiscalReports", label: "Reportes fiscales", Icon: BarChart3 },
-        { key: "financialReports", label: "Reportes financieros", Icon: BarChart3 },
         { key: "bankReconciliation", label: "Conciliación bancaria", Icon: Wallet },
         { key: "ncf", label: "Secuencia NCF", Icon: Hash },
       ],
     },
     { key: "users", label: "Usuarios", Icon: ShieldCheck },
+    { key: "companyProfile", label: "Perfil de la empresa", Icon: Building2 },
     { key: "activityLog", label: "Historial de actividad", Icon: History },
   ];
   const NAV = [];
@@ -7429,6 +8088,15 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <button onClick={() => changeView("agenda")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.red}40`, color: C.red }}>Ver en agenda</button>
                 </div>
               )}
+              {pastDeadlineOrders.length > 0 && (
+                <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2020", border: `1px solid ${C.red}40` }}>
+                  <div className="flex items-center gap-2 text-sm" style={{ color: C.red }}>
+                    <AlertTriangle size={16} />
+                    Tienes {pastDeadlineOrders.length} orden{pastDeadlineOrders.length !== 1 ? "es" : ""} que pasó{pastDeadlineOrders.length !== 1 ? "ron" : ""} su fecha límite (deadline) sin completarse.
+                  </div>
+                  <button onClick={() => changeView("orders")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.red}40`, color: C.red }}>Ver órdenes</button>
+                </div>
+              )}
               {hasPerm("maintenanceSchedule") && (dueEquipment.length + dueClientAssets.length) > 0 && (
                 <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2E14", border: `1px solid ${C.amber}40` }}>
                   <div className="flex items-center gap-2 text-sm" style={{ color: C.amber }}>
@@ -7645,8 +8313,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 {filteredOrders.map((o) => {
                   const t = TYPE_CFG[o.type], p = PRIORITY_CFG[o.priority], s = STATUS_CFG[o.status];
                   return (
-                    <div key={o.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${t.color}` }}>
-                      <input type="checkbox" checked={selectedOrders.has(o.id)} onChange={() => setSelectedOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })} />
+                    <div key={o.id} onClick={() => openOrderDetail(o)} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${t.color}` }}>
+                      <input type="checkbox" checked={selectedOrders.has(o.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })} />
                       <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
                         <div className="col-span-3 min-w-0">
                           <div className="font-mono text-xs" style={{ color: C.muted }}>{o.code}</div>
@@ -7662,8 +8330,15 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                           )}
                         </div>
                         <div className="col-span-1"><Pill label={p.label} color={p.color} /></div>
-                        <div className="col-span-1 text-xs" style={{ color: C.muted }}>{fmtDate(o.scheduled)}</div>
-                        <div className="col-span-2 flex items-center justify-end gap-2">
+                        <div className="col-span-1 text-xs" style={{ color: C.muted }}>
+                          {fmtDate(o.scheduled)}
+                          {o.deadline && (
+                            <div style={{ color: o.status !== "completada" && o.deadline < todayStr ? C.red : C.muted }}>
+                              Límite: {fmtDate(o.deadline)}
+                            </div>
+                          )}
+                        </div>
+                        <div className="col-span-2 flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                           {isTecnico && o.status === "completada" ? (
                             <Pill label={s.label} color={s.color} />
                           ) : (
@@ -7787,8 +8462,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           {!loadingScope && hasPerm("equipment") && view === "equipment" && (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{equipment.length} equipos</div>
+                <div className="text-sm" style={{ color: C.muted }}>{equipmentFiltered.length}{equipmentFiltered.length !== equipment.length ? ` de ${equipment.length}` : ""} equipos{selectedEquipment.size > 0 ? ` · ${selectedEquipment.size} seleccionados` : ""}</div>
                 <div className="flex gap-2">
+                  {canEdit("equipment") && selectedEquipment.size > 0 && (
+                    <button onClick={() => bulkDeleteEquipment(Array.from(selectedEquipment))} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#fff" }}>
+                      <Trash2 size={14} /> Eliminar seleccionados ({selectedEquipment.size})
+                    </button>
+                  )}
                   <button onClick={() => { setPendingLocationBranch(branchFilter !== "all" ? branchFilter : branches[0]?.id); setShowAddLocation(true); }} disabled={branches.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
                     <Plus size={14} /> Agregar ubicación
                   </button>
@@ -7797,14 +8477,52 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   </button>
                 </div>
               </div>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[200px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <Search size={14} style={{ color: C.muted }} />
+                  <input value={equipmentSearch} onChange={(e) => setEquipmentSearch(e.target.value)} placeholder="Buscar por nombre, marca, modelo o serie..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                </div>
+                <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todas las sucursales</option>
+                  {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <select value={equipmentTechFilter} onChange={(e) => setEquipmentTechFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los técnicos</option>
+                  <option value="none">Sin técnico asignado</option>
+                  {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <select value={equipmentTypeFilter} onChange={(e) => setEquipmentTypeFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los tipos</option>
+                  {equipmentTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              {canEdit("equipment") && equipmentFiltered.length > 0 && (
+                <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
+                  <input
+                    type="checkbox"
+                    checked={equipmentFiltered.length > 0 && equipmentFiltered.every((e) => selectedEquipment.has(e.id))}
+                    onChange={() => setSelectedEquipment((prev) => {
+                      const allSelected = equipmentFiltered.every((e) => prev.has(e.id));
+                      if (allSelected) return new Set();
+                      return new Set(equipmentFiltered.map((e) => e.id));
+                    })}
+                  />
+                  Seleccionar todos los que se ven ({equipmentFiltered.length})
+                </label>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {equipment.filter((e) => branchFilter === "all" || e.branch_id === branchFilter).map((eq) => {
+                {equipmentFiltered.map((eq) => {
                   const openOrders = orders.filter((o) => o.equipment_id === eq.id && o.status !== "completada").length;
                   return (
-                    <div key={eq.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div key={eq.id} className="p-4" style={{ background: C.panel, border: `1px solid ${selectedEquipment.has(eq.id) ? C.amber : C.border}` }}>
                       <div className="flex items-center justify-between">
-                        <div className="font-semibold">{eq.name}</div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {canEdit("equipment") && (
+                            <input type="checkbox" checked={selectedEquipment.has(eq.id)} onChange={() => setSelectedEquipment((prev) => { const next = new Set(prev); next.has(eq.id) ? next.delete(eq.id) : next.add(eq.id); return next; })} />
+                          )}
+                          <div className="font-semibold truncate">{eq.name}</div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           {openOrders > 0 && <Pill label={`${openOrders} abierta${openOrders !== 1 ? "s" : ""}`} color={C.amber} />}
                           <button onClick={() => setEditingEquipment(eq)} style={iconBtnStyle}><Pencil size={13} /></button>
                           {canEdit("equipment") && <button onClick={() => deleteEquipment(eq.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
@@ -7817,11 +8535,13 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         {eq.serial_number && <div className="font-mono">S/N: <span style={{ color: C.text }}>{eq.serial_number}</span></div>}
                         {eq.installed_at && <div>Instalado: <span style={{ color: C.text }}>{fmtDate(eq.installed_at)}</span></div>}
                         {locationName(eq.location_id) && <div>Ubicación: <span style={{ color: C.text }}>{locationName(eq.location_id)}</span></div>}
+                        <div>Técnico: <span style={{ color: eq.default_technician_id ? C.text : C.muted }}>{eq.default_technician_id ? (technicians.find((t) => t.id === eq.default_technician_id)?.name || "—") : "Sin asignar"}</span></div>
                       </div>
                       <div className="flex items-center gap-1 text-xs mt-3" style={{ color: C.muted }}><MapPin size={12} /> {branchName(eq.branch_id)}</div>
                     </div>
                   );
                 })}
+                {equipmentFiltered.length === 0 && equipment.length > 0 && <div className="text-sm" style={{ color: C.muted }}>Ningún equipo coincide con los filtros.</div>}
                 {equipment.length === 0 && <div className="text-sm" style={{ color: C.muted }}>Todavía no hay equipos registrados.</div>}
                 {branches.length === 0 && <div className="text-sm" style={{ color: C.muted }}>Primero crea una sucursal para poder agregar equipos.</div>}
               </div>
@@ -7870,6 +8590,70 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
 
           {!loadingScope && hasPerm("tools") && view === "tools" && (
             <div>
+              {!isTecnico && (
+                <div className="flex gap-2 mb-4">
+                  <button onClick={() => setToolViewMode("herramientas")} className="px-3 py-1.5 text-sm font-semibold" style={toolViewMode === "herramientas" ? { background: C.amber, color: "#1A1500" } : { color: C.muted, border: `1px solid ${C.border}` }}>Herramientas</button>
+                  <button onClick={() => setToolViewMode("listados")} className="px-3 py-1.5 text-sm font-semibold" style={toolViewMode === "listados" ? { background: C.amber, color: "#1A1500" } : { color: C.muted, border: `1px solid ${C.border}` }}>Listados</button>
+                </div>
+              )}
+              {isTecnico ? (
+                <div className="space-y-4">
+                  {technicianToolGroups.map((g) => (
+                    <div key={g.id}>
+                      <div className="flex items-center gap-2 mb-1.5 px-1">
+                        <ClipboardList size={14} style={{ color: C.amber }} />
+                        <span className="text-sm font-semibold">{g.name}</span>
+                        <span className="text-xs" style={{ color: C.muted }}>({g.tools.length})</span>
+                      </div>
+                      <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                        {g.tools.map((t) => {
+                          const st = TOOL_STATUS_CFG[t.status] || TOOL_STATUS_CFG.disponible;
+                          return (
+                            <div key={t.id} className="flex items-center justify-between px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                              <div className="min-w-0">
+                                <div className="truncate">{t.name}</div>
+                                {(t.category || t.serial_number) && (
+                                  <div className="text-xs truncate" style={{ color: C.muted }}>{[t.category, t.serial_number ? `S/N ${t.serial_number}` : null].filter(Boolean).join(" · ")}</div>
+                                )}
+                              </div>
+                              <Pill label={st.label} color={st.color} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {technicianToolGroups.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No tienes herramientas asignadas todavía.</div>}
+                </div>
+              ) : toolViewMode === "listados" ? (
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="text-sm" style={{ color: C.muted }}>{toolLists.length} listado{toolLists.length !== 1 ? "s" : ""}</div>
+                    {canEdit("tools") && (
+                      <button onClick={() => setShowAddToolList(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                        <Plus size={14} /> Nuevo listado
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {toolLists.map((list) => (
+                      <ToolListCard
+                        key={list.id}
+                        list={list}
+                        tools={tools.filter((t) => (list.tool_ids || []).includes(t.id))}
+                        technicians={technicians}
+                        canEdit={canEdit("tools")}
+                        onEdit={() => setEditingToolList(list)}
+                        onDelete={() => deleteToolList(list.id)}
+                        onAssign={assignToolsByQuantity}
+                        onReturn={returnToolsByQuantity}
+                      />
+                    ))}
+                    {toolLists.length === 0 && <div className="text-sm col-span-2 text-center py-8" style={{ color: C.muted }}>Todavía no has creado ningún listado. Un listado te permite agrupar varias herramientas (ej. "Kit básico de electricista") y asignarlas todas de una vez a un técnico.</div>}
+                  </div>
+                </div>
+              ) : (
+              <>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <div className="text-sm" style={{ color: C.muted }}>
                   {toolsFiltered.length} herramienta{toolsFiltered.length !== 1 ? "s" : ""}{isTecnico ? " asignada" + (toolsFiltered.length !== 1 ? "s" : "") + " a ti" : ""}
@@ -7942,6 +8726,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   {toolsFiltered.map(renderToolRow)}
                   {toolsFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>{isTecnico ? "No tienes herramientas asignadas todavía." : "Todavía no hay herramientas para este filtro."}</div>}
                 </div>
+              )}
+              </>
               )}
             </div>
           )}
@@ -8487,14 +9273,21 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                     <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => setSelectedProducts((prev) => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; })} />
                     <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
                       <div className={(isServicesView ? "col-span-6" : "col-span-4") + " min-w-0"}>
-                        <div className="truncate">{p.name}</div>
+                        <div className="truncate flex items-center gap-1.5">
+                          {p.name}
+                          {p.is_composite && <Pill label="Kit" color={C.blue} />}
+                        </div>
                         <div className="text-xs truncate" style={{ color: C.muted }}>
                           {p.sku ? `SKU: ${p.sku}` : ""}{p.sku && p.category ? " · " : ""}{p.category || (!p.sku ? p.description || "—" : "")}
                         </div>
                       </div>
                       <div className="col-span-2 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney(p.cost_price)}</div>
                       <div className="col-span-2 text-right font-mono">{fmtMoney(p.unit_price)}</div>
-                      {!isServicesView && <div className="col-span-2 text-right font-mono" style={{ color: p.stock_qty <= 0 ? C.red : C.text }}>{p.stock_qty} {p.unit}</div>}
+                      {!isServicesView && (
+                        <div className="col-span-2 text-right font-mono text-xs" style={{ color: p.is_composite ? C.muted : (p.stock_qty <= 0 ? C.red : C.text) }}>
+                          {p.is_composite ? `${productComponents.filter((c) => c.parent_product_id === p.id).length} componentes` : `${p.stock_qty} ${p.unit}`}
+                        </div>
+                      )}
                       <div className="col-span-2 flex items-center justify-end gap-2">
                         {canEdit(isServicesView ? "services" : "products") && <button onClick={() => setEditingProduct(p)} style={iconBtnStyle}><Pencil size={14} /></button>}
                         {canEdit(isServicesView ? "services" : "products") && <button onClick={() => deleteProduct(p.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
@@ -8858,6 +9651,87 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && hasPerm("salesReports") && view === "salesReports" && (
+            <div>
+              <div className="flex flex-wrap items-end gap-3 mb-4">
+                <div>
+                  <div className="text-xs mb-1" style={{ color: C.muted }}>Desde</div>
+                  <input type="date" value={salesReportDateFrom} onChange={(e) => setSalesReportDateFrom(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+                <div>
+                  <div className="text-xs mb-1" style={{ color: C.muted }}>Hasta</div>
+                  <input type="date" value={salesReportDateTo} onChange={(e) => setSalesReportDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3 mb-6">
+                <div className="p-4 flex-1 min-w-[180px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Total facturado</div>
+                  <div className="text-xl font-bold font-mono" style={{ color: C.text }}>{fmtMoney(salesReportData.totalInvoiced)}</div>
+                  <div className="text-xs mt-1" style={{ color: C.muted }}>{salesReportData.invoicesCount} factura{salesReportData.invoicesCount !== 1 ? "s" : ""}</div>
+                </div>
+                <div className="p-4 flex-1 min-w-[180px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Cobrado / Pendiente</div>
+                  <div className="text-xl font-bold font-mono" style={{ color: C.green }}>{fmtMoney(salesReportData.totalCollected)}</div>
+                  <div className="text-xs mt-1 font-mono" style={{ color: salesReportData.totalPending > 0 ? C.amber : C.muted }}>Pendiente: {fmtMoney(salesReportData.totalPending)}</div>
+                </div>
+                <div className="p-4 flex-1 min-w-[180px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Total cotizado</div>
+                  <div className="text-xl font-bold font-mono" style={{ color: C.text }}>{fmtMoney(salesReportData.totalQuoted)}</div>
+                  <div className="text-xs mt-1" style={{ color: C.muted }}>{salesReportData.quotesCount} cotización{salesReportData.quotesCount !== 1 ? "es" : ""}</div>
+                </div>
+                <div className="p-4 flex-1 min-w-[180px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Tasa de conversión</div>
+                  <div className="text-xl font-bold font-mono" style={{ color: C.blue }}>{salesReportData.conversionRate === null ? "—" : `${salesReportData.conversionRate.toFixed(0)}%`}</div>
+                  <div className="text-xs mt-1" style={{ color: C.muted }}>De cotizaciones ya decididas</div>
+                </div>
+              </div>
+
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Facturación mensual — últimos 6 meses</div>
+              <div className="p-4 mb-6 space-y-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                {salesReportData.months.map((m) => (
+                  <div key={m.label} className="flex items-center gap-3">
+                    <div className="text-xs w-14 flex-shrink-0" style={{ color: C.muted }}>{m.label}</div>
+                    <div className="flex-1 h-4" style={{ background: C.panelAlt }}>
+                      <div className="h-4" style={{ width: `${(m.total / salesReportData.maxMonthTotal) * 100}%`, background: C.amber }} />
+                    </div>
+                    <div className="text-xs font-mono w-24 text-right flex-shrink-0" style={{ color: C.text }}>{fmtMoney(m.total)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Top 5 clientes por facturación (en el rango)</div>
+                  <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    {salesReportData.topClients.length === 0 && <div className="text-sm text-center py-4" style={{ color: C.muted }}>Sin facturación en este rango.</div>}
+                    {salesReportData.topClients.map((c, idx) => (
+                      <div key={c.clientId} className="flex items-center justify-between px-3 py-2 text-sm" style={{ borderBottom: idx < salesReportData.topClients.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                        <span className="truncate">{c.name}</span>
+                        <span className="font-mono flex-shrink-0" style={{ color: C.muted }}>{fmtMoney(c.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Cotizaciones por estado (en el rango)</div>
+                  <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    {Object.keys(salesReportData.quoteStatusCounts).length === 0 && <div className="text-sm text-center py-4" style={{ color: C.muted }}>Sin cotizaciones en este rango.</div>}
+                    {Object.entries(salesReportData.quoteStatusCounts).map(([status, count], idx, arr) => {
+                      const cfg = QUOTE_STATUS_CFG[status] || QUOTE_STATUS_CFG.pendiente;
+                      return (
+                        <div key={status} className="flex items-center justify-between px-3 py-2 text-sm" style={{ borderBottom: idx < arr.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                          <Pill label={cfg.label} color={cfg.color} />
+                          <span className="font-mono" style={{ color: C.muted }}>{count}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {!loadingScope && hasPerm("financialReports") && view === "financialReports" && (
             <div>
               <div className="flex flex-wrap items-end gap-3 mb-4">
@@ -9054,7 +9928,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   const payCfg = PAYABLE_STATUS_CFG[pu.payment_status] || PAYABLE_STATUS_CFG.pendiente;
                   return (
                     <div key={pu.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
+                      <div className="col-span-3 min-w-0">
+                        <div className="truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>{suppliers.find((s) => s.id === pu.supplier_id)?.rnc || ""}</div>
+                      </div>
                       <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
                       <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
                       <div className="col-span-2 text-right font-mono">{fmtMoney(pu.total)}</div>
@@ -9109,7 +9986,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         return (
                           <div key={inv.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                             <div className="col-span-3 truncate">{cli?.name || "—"}</div>
-                            <div className="col-span-2 truncate" style={{ color: C.muted }}>{inv.ncf}</div>
+                            <div className="col-span-2 truncate" style={{ color: C.muted }}>{inv.invoice_number || inv.ncf}</div>
                             <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
                             <div className="col-span-1 text-right" style={{ color: inv.days > 60 ? C.red : C.muted }}>{inv.days}</div>
                             <div className="col-span-2 text-right font-mono" style={{ color: C.red }}>{fmtMoney(inv.balance)}</div>
@@ -9283,7 +10160,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                           <div className="font-mono text-xs">{q.quote_number}</div>
                           {q.title && <div className="text-xs truncate" style={{ color: C.muted }}>{q.title}</div>}
                         </div>
-                        <div className="col-span-3 truncate">{clients.find((c) => c.id === q.client_id)?.name || "—"}</div>
+                        <div className="col-span-3 min-w-0">
+                          <div className="truncate">{clients.find((c) => c.id === q.client_id)?.name || "—"}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === q.client_id)?.rnc_cedula || ""}</div>
+                        </div>
                         <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(q.quote_date)}</div>
                         <div className="col-span-2 text-right font-mono">{fmtMoney(q.total)}</div>
                         <div className="col-span-3 text-right"><Pill label={s.label} color={s.color} /></div>
@@ -9349,7 +10229,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                           <div className="font-mono text-xs">{o.order_number}</div>
                           {o.title && <div className="text-xs truncate" style={{ color: C.muted }}>{o.title}</div>}
                         </div>
-                        <div className="col-span-3 truncate">{clients.find((c) => c.id === o.client_id)?.name || "—"}</div>
+                        <div className="col-span-3 min-w-0">
+                          <div className="truncate">{clients.find((c) => c.id === o.client_id)?.name || "—"}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === o.client_id)?.rnc_cedula || ""}</div>
+                        </div>
                         <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(o.order_date)}</div>
                         <div className="col-span-2 text-right font-mono">{fmtMoney(o.total)}</div>
                         <div className="col-span-2 flex items-center justify-end gap-2">
@@ -9385,7 +10268,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               <div className="flex flex-wrap gap-2 mb-4">
                 <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[220px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                   <Search size={14} color={C.muted} />
-                  <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Buscar por cliente o NCF..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                  <input value={invoiceSearch} onChange={(e) => setInvoiceSearch(e.target.value)} placeholder="Buscar por cliente, N° factura o NCF..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
                 </div>
                 <select value={invoiceStatusFilter} onChange={(e) => setInvoiceStatusFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
                   <option value="all">Todos los estados</option>
@@ -9399,7 +10282,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
               </div>
               <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-2">NCF</div>
+                  <div className="col-span-2">Factura</div>
                   <div className="col-span-3">Cliente</div>
                   <div className="col-span-2">Fecha</div>
                   <div className="col-span-2 text-right">Total</div>
@@ -9410,10 +10293,14 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   return (
                     <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${inv.status === "anulada" ? C.red : "transparent"}` }}>
                       <div className="col-span-2 min-w-0">
-                        <div className="font-mono text-xs">{inv.ncf}</div>
+                        <div className="font-mono text-xs">{inv.invoice_number || inv.ncf}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>NCF: {inv.ncf}</div>
                         {inv.title && <div className="text-xs truncate" style={{ color: C.muted }}>{inv.title}</div>}
                       </div>
-                      <div className="col-span-3 truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
+                      <div className="col-span-3 min-w-0">
+                        <div className="truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === inv.client_id)?.rnc_cedula || ""}</div>
+                      </div>
                       <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
                       <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
                       <div className="col-span-3 text-right"><Pill label={inv.status === "anulada" ? "Anulada" : payCfg.label} color={inv.status === "anulada" ? C.red : payCfg.color} /></div>
@@ -9600,7 +10487,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
                 {recurringContracts.map((c) => {
-                  const due = c.is_active && c.next_invoice_date <= todayStr;
+                  const expired = c.end_date && c.end_date < todayStr;
+                  const due = c.is_active && c.next_invoice_date <= todayStr && !expired;
                   return (
                     <div key={c.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                       <div className="col-span-3">
@@ -9608,10 +10496,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         <div className="text-xs truncate" style={{ color: C.muted }}>{c.title}</div>
                       </div>
                       <div className="col-span-2 text-right font-mono">{fmtMoney(c.amount)}{c.is_taxable ? " +ITBIS" : ""}</div>
-                      <div className="col-span-2" style={{ color: C.muted }}>Cada {c.frequency_days} días</div>
+                      <div className="col-span-2" style={{ color: C.muted }}>Cada {c.frequency_days} días{c.end_date ? ` · hasta ${fmtDate(c.end_date)}` : ""}</div>
                       <div className="col-span-2 font-mono" style={{ color: due ? C.red : C.muted }}>{fmtDate(c.next_invoice_date)}{due ? " (vencido)" : ""}</div>
                       <div className="col-span-1 text-center">
-                        {c.is_active ? <Pill label="Activo" color={C.green} /> : <Pill label="Inactivo" color={C.muted} />}
+                        {expired ? <Pill label="Finalizado" color={C.muted} /> : c.is_active ? <Pill label="Activo" color={C.green} /> : <Pill label="Inactivo" color={C.muted} />}
                       </div>
                       <div className="col-span-2 flex items-center justify-end gap-2">
                         {canEdit("recurringContracts") && due && (
@@ -9686,6 +10574,10 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && hasPerm("companyProfile") && view === "companyProfile" && (
+            <CompanyProfileForm company={company} bankAccounts={companyBankAccounts} onSave={saveCompanyProfile} onSaveBankAccount={saveBankAccount} onDeleteBankAccount={deleteBankAccount} onSetDefaultBankAccount={setDefaultBankAccount} saving={saving} />
+          )}
+
           {!loadingScope && hasPerm("activityLog") && view === "activityLog" && (
             <div>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
@@ -9702,7 +10594,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                         dt.toLocaleTimeString("es-DO"),
                         ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name,
                         ACTIVITY_ACTION_LABELS[l.action]?.label || l.action,
-                        l.changed_by_email || "—",
+                        activityUserName(l.changed_by_email),
                         describeActivityEntry(l),
                       ];
                     });
@@ -9739,7 +10631,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                 </select>
                 <select value={activityUserFilter} onChange={(e) => setActivityUserFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
                   <option value="all">Todos los usuarios</option>
-                  {activityUsers.map((email) => <option key={email} value={email}>{email}</option>)}
+                  {activityUsers.map((email) => <option key={email} value={email}>{activityUserName(email)}</option>)}
                 </select>
               </div>
 
@@ -9759,7 +10651,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
                       <div className="col-span-2 text-xs" style={{ color: C.muted }}>{dt.toLocaleDateString("es-DO")} · {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</div>
                       <div className="col-span-2 truncate">{ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name}</div>
                       <div className="col-span-2"><Pill label={a.label} color={a.color} /></div>
-                      <div className="col-span-3 truncate" style={{ color: C.muted }}>{l.changed_by_email || "—"}</div>
+                      <div className="col-span-3 truncate" style={{ color: C.muted }}>{activityUserName(l.changed_by_email)}</div>
                       <div className="col-span-3 truncate" style={{ color: C.muted }}>{describeActivityEntry(l) || "—"}</div>
                     </div>
                   );
@@ -9846,6 +10738,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       {showAddProduct && (
         <ProductFormModal
           existingProducts={products.filter((p) => (p.item_type || "producto") === (view === "services" ? "servicio" : "producto"))}
+          allProducts={products}
           defaultItemType={view === "services" ? "servicio" : "producto"}
           onClose={() => setShowAddProduct(false)}
           onSave={saveProduct}
@@ -9855,7 +10748,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       {editingProduct && (
         <ProductFormModal
           initial={editingProduct}
+          initialComponents={productComponents.filter((c) => c.parent_product_id === editingProduct.id)}
           existingProducts={products.filter((p) => (p.item_type || "producto") === (editingProduct.item_type || "producto"))}
+          allProducts={products}
           onClose={() => setEditingProduct(null)}
           onSave={saveProduct}
           saving={saving}
@@ -9867,6 +10762,8 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
       {editingExpense && <ExpenseFormModal suppliers={suppliers} initial={editingExpense} onClose={() => setEditingExpense(null)} onSave={saveExpense} saving={saving} />}
       {showAddTool && <ToolFormModal branches={branches} technicians={technicians} onClose={() => setShowAddTool(false)} onSave={saveTool} saving={saving} />}
       {editingTool && <ToolFormModal branches={branches} technicians={technicians} initial={editingTool} onClose={() => setEditingTool(null)} onSave={saveTool} saving={saving} />}
+      {showAddToolList && <ToolListFormModal tools={tools} technicians={technicians} onClose={() => setShowAddToolList(false)} onSave={saveToolList} saving={saving} />}
+      {editingToolList && <ToolListFormModal tools={tools} technicians={technicians} initial={editingToolList} onClose={() => setEditingToolList(null)} onSave={saveToolList} saving={saving} />}
       {showBulkTools && <BulkToolFormModal branches={branches} technicians={technicians} onClose={() => setShowBulkTools(false)} onSave={createBulkTools} saving={saving} />}
       {showAddMaterial && <MaterialFormModal branches={branches} onClose={() => setShowAddMaterial(false)} onSave={saveMaterial} saving={saving} />}
       {editingMaterial && <MaterialFormModal branches={branches} initial={editingMaterial} onClose={() => setEditingMaterial(null)} onSave={saveMaterial} saving={saving} />}
@@ -9892,7 +10789,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           items={purchaseDetail.items}
           payments={purchaseDetail.payments}
           supplierName={suppliers.find((s) => s.id === purchaseDetail.purchase.supplier_id)?.name || "—"}
+          supplierRnc={suppliers.find((s) => s.id === purchaseDetail.purchase.supplier_id)?.rnc || ""}
           companyName={companyName}
+          company={company}
           canEdit={canEdit("purchases")}
           onClose={() => setPurchaseDetail(null)}
           onRegisterPayment={registerPurchasePayment}
@@ -9907,6 +10806,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           products={products}
           ncfSequences={ncfSequences}
           branches={branches}
+          bankAccounts={companyBankAccounts}
           defaultBranchId={profile.branch_id}
           prefill={invoicePrefill}
           maxDiscountPct={maxDiscountPct}
@@ -9933,23 +10833,19 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           quote={quoteDetail.quote}
           items={quoteDetail.items}
           clientName={clients.find((c) => c.id === quoteDetail.quote.client_id)?.name || "—"}
+          clientRnc={clients.find((c) => c.id === quoteDetail.quote.client_id)?.rnc_cedula || ""}
+          clientAddress={clients.find((c) => c.id === quoteDetail.quote.client_id)?.address || ""}
           companyName={companyName}
+          company={company}
+          bankAccounts={companyBankAccounts}
           orderInfo={salesOrders.find((o) => o.quote_id === quoteDetail.quote.id) || null}
           canEdit={canEdit("quotes")}
           onClose={() => setQuoteDetail(null)}
           onMarkStatus={markQuoteStatus}
-          onConvert={convertQuoteToInvoice}
           onConvertToOrder={convertQuoteToOrder}
           onEdit={openEditQuote}
           onDuplicate={duplicateQuote}
-        />
-      )}
-      {partialInvoiceFor && (
-        <PartialInvoiceModal
-          quote={partialInvoiceFor.quote}
-          items={partialInvoiceFor.items}
-          onClose={() => setPartialInvoiceFor(null)}
-          onConfirm={confirmPartialInvoice}
+          onDelete={deleteQuote}
         />
       )}
       {salesOrderDetail && (
@@ -9957,7 +10853,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           order={salesOrderDetail.order}
           items={salesOrderDetail.items}
           clientName={clients.find((c) => c.id === salesOrderDetail.order.client_id)?.name || "—"}
+          clientRnc={clients.find((c) => c.id === salesOrderDetail.order.client_id)?.rnc_cedula || ""}
           companyName={companyName}
+          company={company}
           workOrderInfo={orders.find((o) => o.id === salesOrderDetail.order.work_order_id) || null}
           canEdit={canEdit("salesOrders")}
           onClose={() => setSalesOrderDetail(null)}
@@ -9965,6 +10863,7 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           onGenerateWorkOrder={convertSalesOrderToWorkOrder}
           onCancel={cancelSalesOrder}
           onDelete={deleteSalesOrder}
+          onUpdateNotes={updateSalesOrderNotes}
         />
       )}
       {editingQuote && (
@@ -10036,7 +10935,11 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           items={invoiceDetail.items}
           payments={invoiceDetail.payments}
           clientName={clients.find((c) => c.id === invoiceDetail.invoice.client_id)?.name || "—"}
+          clientRnc={clients.find((c) => c.id === invoiceDetail.invoice.client_id)?.rnc_cedula || ""}
+          clientAddress={clients.find((c) => c.id === invoiceDetail.invoice.client_id)?.address || ""}
           companyName={companyName}
+          company={company}
+          bankAccounts={companyBankAccounts}
           canEdit={canEdit("invoices")}
           isAdmin={isAdmin}
           onClose={() => setInvoiceDetail(null)}
@@ -10083,7 +10986,9 @@ function Dashboard({ session, profile, companyName, onSignOut }) {
           items={creditNoteDetail.items}
           invoice={invoices.find((i) => i.id === creditNoteDetail.note.invoice_id) || null}
           clientName={clients.find((c) => c.id === creditNoteDetail.note.client_id)?.name || "—"}
+          clientRnc={clients.find((c) => c.id === creditNoteDetail.note.client_id)?.rnc_cedula || ""}
           companyName={companyName}
+          company={company}
           onClose={() => setCreditNoteDetail(null)}
         />
       )}
@@ -10175,5 +11080,5 @@ export default function MantenProApp() {
   }
   if (profile === null) return <OnboardingScreen userId={session.user.id} userEmail={session.user.email} onDone={() => loadProfile(session.user.id)} />;
 
-  return <Dashboard session={session} profile={profile} companyName={company?.name || "Tu empresa"} onSignOut={signOut} />;
+  return <Dashboard session={session} profile={profile} company={company} onUpdateCompany={setCompany} onSignOut={signOut} />;
 }
