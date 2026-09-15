@@ -8297,48 +8297,45 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   </button>
                 )}
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input type="checkbox" checked={filteredOrders.length > 0 && selectedOrders.size === filteredOrders.length} onChange={() => setSelectedOrders(selectedOrders.size === filteredOrders.length ? new Set() : new Set(filteredOrders.map((o) => o.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
-                    <div className="col-span-3">Orden</div>
-                    <div className="col-span-2">Tipo</div>
-                    <div className="col-span-1">Sucursal</div>
-                    <div className="col-span-2">Técnico</div>
-                    <div className="col-span-1">Prioridad</div>
-                    <div className="col-span-1">Fecha</div>
-                    <div className="col-span-2 text-right">Estado</div>
-                  </div>
-                </div>
+              {filteredOrders.length > 0 && (
+                <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
+                  <input type="checkbox" checked={selectedOrders.size === filteredOrders.length} onChange={() => setSelectedOrders(selectedOrders.size === filteredOrders.length ? new Set() : new Set(filteredOrders.map((o) => o.id)))} />
+                  Seleccionar todas las que se ven ({filteredOrders.length})
+                </label>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {filteredOrders.map((o) => {
                   const t = TYPE_CFG[o.type], p = PRIORITY_CFG[o.priority], s = STATUS_CFG[o.status];
+                  const extraCount = orderTechnicians.filter((wt) => wt.work_order_id === o.id).length;
                   return (
-                    <div key={o.id} onClick={() => openOrderDetail(o)} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${t.color}` }}>
-                      <input type="checkbox" checked={selectedOrders.has(o.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })} />
-                      <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
-                        <div className="col-span-3 min-w-0">
-                          <div className="font-mono text-xs" style={{ color: C.muted }}>{o.code}</div>
-                          <div className="truncate">{o.title}</div>
-                          <div className="text-xs truncate" style={{ color: C.muted }}>{equipName(o.equipment_id)}</div>
+                    <div key={o.id} onClick={() => openOrderDetail(o)} className="p-4 cursor-pointer" style={{ background: C.panel, border: `1px solid ${C.border}`, borderLeft: `3px solid ${t.color}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input type="checkbox" checked={selectedOrders.has(o.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })} />
+                          <div className="min-w-0">
+                            <div className="font-mono text-xs" style={{ color: C.muted }}>{o.code}</div>
+                            <div className="font-semibold truncate">{o.title}</div>
+                          </div>
                         </div>
-                        <div className="col-span-2"><Pill label={t.label} color={t.color} /></div>
-                        <div className="col-span-1 truncate" style={{ color: C.muted }}>{branchName(o.branch_id)}</div>
-                        <div className="col-span-2 truncate">
-                          {techName(o.technician_id)}
-                          {orderTechnicians.filter((wt) => wt.work_order_id === o.id).length > 0 && (
-                            <span className="ml-1 text-xs" style={{ color: C.amber }}>+{orderTechnicians.filter((wt) => wt.work_order_id === o.id).length}</span>
-                          )}
+                        <Pill label={t.label} color={t.color} />
+                      </div>
+                      <div className="text-xs mb-3" style={{ color: C.muted }}>{equipName(o.equipment_id)}</div>
+                      <div className="grid grid-cols-2 gap-2 text-xs mb-3" style={{ color: C.muted }}>
+                        <div>Sucursal<br /><span style={{ color: C.text }}>{branchName(o.branch_id)}</span></div>
+                        <div>
+                          Técnico<br />
+                          <span style={{ color: C.text }}>{techName(o.technician_id)}</span>
+                          {extraCount > 0 && <span className="ml-1" style={{ color: C.amber }}>+{extraCount}</span>}
                         </div>
-                        <div className="col-span-1"><Pill label={p.label} color={p.color} /></div>
-                        <div className="col-span-1 text-xs" style={{ color: C.muted }}>
-                          {fmtDate(o.scheduled)}
-                          {o.deadline && (
-                            <div style={{ color: o.status !== "completada" && o.deadline < todayStr ? C.red : C.muted }}>
-                              Límite: {fmtDate(o.deadline)}
-                            </div>
-                          )}
+                        <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(o.scheduled)}</span></div>
+                        <div>
+                          Límite<br />
+                          <span style={{ color: o.deadline && o.status !== "completada" && o.deadline < todayStr ? C.red : C.text }}>{o.deadline ? fmtDate(o.deadline) : "—"}</span>
                         </div>
-                        <div className="col-span-2 flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pt-2" style={{ borderTop: `1px solid ${C.border}` }} onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <Pill label={p.label} color={p.color} />
                           {isTecnico && o.status === "completada" ? (
                             <Pill label={s.label} color={s.color} />
                           ) : (
@@ -8346,6 +8343,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                               {s.label} <ArrowRight size={12} />
                             </button>
                           )}
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           <button onClick={() => openOrderDetail(o)} title={isTecnico && o.status === "completada" ? "Ver nota y foto" : "Nota de cierre y foto"} style={{ color: o.resolution_notes || o.photo_url || orderAttachmentIds.has(o.id) ? C.amber : C.muted }}>
                             {o.photo_url ? <Paperclip size={14} /> : <FileText size={14} />}
                           </button>
@@ -8360,7 +8359,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
                   );
                 })}
-                {filteredOrders.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Ninguna orden coincide con los filtros aplicados.</div>}
+                {filteredOrders.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Ninguna orden coincide con el filtro.</div>}
               </div>
             </div>
           )}
@@ -8919,32 +8918,27 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               <div className="text-xs mb-3" style={{ color: C.muted }}>
                 Los activos vencidos salen automáticamente de esta lista (siguen guardados, solo dejan de contar como "en garantía").
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Activo</div>
-                  <div className="col-span-3">Cliente</div>
-                  <div className="col-span-2">Instalado</div>
-                  <div className="col-span-2">Vence</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {activeWarrantyAssets.map((a) => (
-                  <div key={a.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3 min-w-0">
-                      <div className="truncate">{a.name}</div>
-                      <div className="text-xs truncate" style={{ color: C.muted }}>{[a.brand, a.model].filter(Boolean).join(" · ") || a.serial_number || ""}</div>
+                  <div key={a.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">{a.name}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>{[a.brand, a.model].filter(Boolean).join(" · ") || a.serial_number || ""}</div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        {canEdit("warranty") && <button onClick={() => setEditingAsset(a)} style={iconBtnStyle}><Pencil size={14} /></button>}
+                        {canEdit("warranty") && <button onClick={() => deleteClientAsset(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      </div>
                     </div>
-                    <div className="col-span-3 truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === a.client_id)?.name || "—"}</div>
-                    <div className="col-span-2 text-xs" style={{ color: C.muted }}>{fmtDate(a.install_date)}</div>
-                    <div className="col-span-2">
+                    <div className="text-sm truncate">{clients.find((c) => c.id === a.client_id)?.name || "—"}</div>
+                    <div className="flex items-center justify-between pt-2 mt-2 text-xs" style={{ borderTop: `1px solid ${C.border}`, color: C.muted }}>
+                      <span>Instalado: <span style={{ color: C.text }}>{fmtDate(a.install_date)}</span></span>
                       <Pill label={a.daysLeft <= 30 ? `${a.daysLeft} días` : fmtDate(a.warrantyEnd.toISOString().slice(0, 10))} color={a.daysLeft <= 7 ? C.red : a.daysLeft <= 30 ? C.amber : C.green} />
-                    </div>
-                    <div className="col-span-2 flex items-center justify-end gap-2">
-                      {canEdit("warranty") && <button onClick={() => setEditingAsset(a)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                      {canEdit("warranty") && <button onClick={() => deleteClientAsset(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                     </div>
                   </div>
                 ))}
-                {activeWarrantyAssets.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay activos vigentes en garantía en este momento.</div>}
+                {activeWarrantyAssets.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay activos vigentes en garantía en este momento.</div>}
               </div>
             </div>
           )}
@@ -9192,36 +9186,35 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 <Search size={14} color={C.muted} />
                 <input value={clientSearch} onChange={(e) => setClientSearch(e.target.value)} placeholder="Buscar por nombre, RNC, teléfono o correo..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input type="checkbox" checked={filteredClients.length > 0 && selectedClients.size === filteredClients.length} onChange={() => setSelectedClients(selectedClients.size === filteredClients.length ? new Set() : new Set(filteredClients.map((c) => c.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
-                    <div className="col-span-3">Cliente</div>
-                    <div className="col-span-2">RNC / Cédula</div>
-                    <div className="col-span-2">Teléfono</div>
-                    <div className="col-span-2">Correo</div>
-                    <div className="col-span-2">Dirección</div>
-                    <div className="col-span-1 text-right">Acciones</div>
-                  </div>
-                </div>
+              {filteredClients.length > 0 && (
+                <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
+                  <input type="checkbox" checked={selectedClients.size === filteredClients.length} onChange={() => setSelectedClients(selectedClients.size === filteredClients.length ? new Set() : new Set(filteredClients.map((c) => c.id)))} />
+                  Seleccionar todos los que se ven ({filteredClients.length})
+                </label>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {filteredClients.map((c) => (
-                  <div key={c.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <input type="checkbox" checked={selectedClients.has(c.id)} onChange={() => setSelectedClients((prev) => { const next = new Set(prev); next.has(c.id) ? next.delete(c.id) : next.add(c.id); return next; })} />
-                    <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
-                      <div className="col-span-3 truncate">{c.name}</div>
-                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.rnc_cedula || "—"}</div>
-                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.phone || "—"}</div>
-                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.email || "—"}</div>
-                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{c.address || "—"}</div>
-                      <div className="col-span-1 flex items-center justify-end gap-2">
+                  <div key={c.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input type="checkbox" checked={selectedClients.has(c.id)} onChange={() => setSelectedClients((prev) => { const next = new Set(prev); next.has(c.id) ? next.delete(c.id) : next.add(c.id); return next; })} />
+                        <div className="font-semibold truncate">{c.name}</div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
                         {canEdit("clients") && <button onClick={() => setEditingClient(c)} style={iconBtnStyle}><Pencil size={14} /></button>}
                         {canEdit("clients") && <button onClick={() => deleteClient(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
+                    <div className="text-xs mt-2 space-y-1" style={{ color: C.muted }}>
+                      <div>RNC/Cédula: <span style={{ color: C.text }}>{c.rnc_cedula || "—"}</span></div>
+                      <div>Teléfono: <span style={{ color: C.text }}>{c.phone || "—"}</span></div>
+                      <div>Correo: <span style={{ color: C.text }}>{c.email || "—"}</span></div>
+                      <div>Dirección: <span style={{ color: C.text }}>{c.address || "—"}</span></div>
+                    </div>
                   </div>
                 ))}
                 {filteredClients.length === 0 && (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                  <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>
                     {clients.length === 0 ? "Todavía no hay clientes registrados." : "Ningún cliente coincide con la búsqueda."}
                   </div>
                 )}
@@ -9264,46 +9257,46 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   {productCategories.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input type="checkbox" checked={filteredProducts.length > 0 && selectedProducts.size === filteredProducts.length} onChange={() => setSelectedProducts(selectedProducts.size === filteredProducts.length ? new Set() : new Set(filteredProducts.map((p) => p.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
-                    <div className={isServicesView ? "col-span-6" : "col-span-4"}>{isServicesView ? "Servicio" : "Producto"}</div>
-                    <div className="col-span-2 text-right">Costo</div>
-                    <div className="col-span-2 text-right">Precio venta</div>
-                    {!isServicesView && <div className="col-span-2 text-right">Stock</div>}
-                    <div className={isServicesView ? "col-span-2 text-right" : "col-span-2 text-right"}>Acciones</div>
-                  </div>
-                </div>
+              {filteredProducts.length > 0 && (
+                <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
+                  <input type="checkbox" checked={selectedProducts.size === filteredProducts.length} onChange={() => setSelectedProducts(selectedProducts.size === filteredProducts.length ? new Set() : new Set(filteredProducts.map((p) => p.id)))} />
+                  Seleccionar todos los que se ven ({filteredProducts.length})
+                </label>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {filteredProducts.map((p) => (
-                  <div key={p.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => setSelectedProducts((prev) => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; })} />
-                    <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
-                      <div className={(isServicesView ? "col-span-6" : "col-span-4") + " min-w-0"}>
-                        <div className="truncate flex items-center gap-1.5">
-                          {p.name}
-                          {p.is_composite && <Pill label="Kit" color={C.blue} />}
-                        </div>
-                        <div className="text-xs truncate" style={{ color: C.muted }}>
-                          {p.sku ? `SKU: ${p.sku}` : ""}{p.sku && p.category ? " · " : ""}{p.category || (!p.sku ? p.description || "—" : "")}
+                  <div key={p.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input type="checkbox" checked={selectedProducts.has(p.id)} onChange={() => setSelectedProducts((prev) => { const next = new Set(prev); next.has(p.id) ? next.delete(p.id) : next.add(p.id); return next; })} />
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate flex items-center gap-1.5">
+                            {p.name}
+                            {p.is_composite && <Pill label="Kit" color={C.blue} />}
+                          </div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>
+                            {p.sku ? `SKU: ${p.sku}` : ""}{p.sku && p.category ? " · " : ""}{p.category || (!p.sku ? p.description || "—" : "")}
+                          </div>
                         </div>
                       </div>
-                      <div className="col-span-2 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney(p.cost_price)}</div>
-                      <div className="col-span-2 text-right font-mono">{fmtMoney(p.unit_price)}</div>
-                      {!isServicesView && (
-                        <div className="col-span-2 text-right font-mono text-xs" style={{ color: p.is_composite ? C.muted : (p.stock_qty <= 0 ? C.red : C.text) }}>
-                          {p.is_composite ? `${productComponents.filter((c) => c.parent_product_id === p.id).length} componentes` : `${p.stock_qty} ${p.unit}`}
-                        </div>
-                      )}
-                      <div className="col-span-2 flex items-center justify-end gap-2">
+                      <div className="flex items-center gap-1 flex-shrink-0">
                         {canEdit(isServicesView ? "services" : "products") && <button onClick={() => setEditingProduct(p)} style={iconBtnStyle}><Pencil size={14} /></button>}
                         {canEdit(isServicesView ? "services" : "products") && <button onClick={() => deleteProduct(p.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
+                    <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                      <div className="text-xs" style={{ color: C.muted }}>Costo: <span style={{ color: C.text }}>{fmtMoney(p.cost_price)}</span></div>
+                      <div className="font-mono font-semibold">{fmtMoney(p.unit_price)}</div>
+                    </div>
+                    {!isServicesView && (
+                      <div className="text-xs mt-1" style={{ color: p.is_composite ? C.muted : (p.stock_qty <= 0 ? C.red : C.muted) }}>
+                        {p.is_composite ? `${productComponents.filter((c) => c.parent_product_id === p.id).length} componentes` : `Stock: ${p.stock_qty} ${p.unit}`}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {filteredProducts.length === 0 && (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                  <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>
                     {products.filter((p) => (p.item_type || "producto") === (isServicesView ? "servicio" : "producto")).length === 0
                       ? (isServicesView ? "Todavía no hay servicios en el catálogo." : "Todavía no hay productos en el catálogo.")
                       : (isServicesView ? "Ningún servicio coincide con la búsqueda." : "Ningún producto coincide con la búsqueda.")}
@@ -9386,28 +9379,26 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Proveedor</div>
-                  <div className="col-span-2">Factura</div>
-                  <div className="col-span-2">Fecha</div>
-                  <div className="col-span-2 text-right">Total</div>
-                  <div className="col-span-1 text-right">Estado</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {filteredPurchases.map((pu) => {
                   const payCfg = PAYABLE_STATUS_CFG[pu.payment_status] || PAYABLE_STATUS_CFG.pendiente;
+                  const sup = suppliers.find((s) => s.id === pu.supplier_id);
                   return (
-                    <div key={pu.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-3 min-w-0">
-                        <div className="truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
-                        {pu.title && <div className="text-xs truncate" style={{ color: C.muted }}>{pu.title}</div>}
+                    <div key={pu.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{sup?.name || "—"}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>{sup?.rnc || ""}</div>
+                          {pu.title && <div className="text-xs truncate mt-0.5" style={{ color: C.muted }}>{pu.title}</div>}
+                        </div>
+                        <div className="text-xs flex-shrink-0" style={{ color: payCfg.color }}>{payCfg.label}</div>
                       </div>
-                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
-                      <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
-                      <div className="col-span-2 text-right font-mono">{fmtMoney(pu.total)}</div>
-                      <div className="col-span-1 text-right text-xs" style={{ color: payCfg.color }}>{payCfg.label}</div>
-                      <div className="col-span-2 flex items-center justify-end gap-3">
+                      <div className="text-xs mt-1" style={{ color: C.muted }}>Factura: {pu.invoice_number || "—"}</div>
+                      <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <span style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</span>
+                        <span className="font-mono font-semibold">{fmtMoney(pu.total)}</span>
+                      </div>
+                      <div className="flex items-center justify-end gap-3 mt-2">
                         <button onClick={() => openPurchaseDetail(pu)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
                         {canEdit("purchases") && <button onClick={() => deletePurchase(pu)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
@@ -9415,7 +9406,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   );
                 })}
                 {filteredPurchases.length === 0 && (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                  <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>
                     {purchases.length === 0 ? "Todavía no hay compras registradas." : "Ninguna compra coincide con la búsqueda."}
                   </div>
                 )}
@@ -9440,27 +9431,22 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   <Plus size={14} /> Registrar gasto
                 </button>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-2">Fecha</div>
-                  <div className="col-span-2">Categoría</div>
-                  <div className="col-span-4">Descripción</div>
-                  <div className="col-span-2 text-right">Monto</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {otherExpenses.map((ex) => (
-                  <div key={ex.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(ex.expense_date)}</div>
-                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{ex.category || "—"}</div>
-                    <div className="col-span-4 truncate">{ex.description}{ex.supplier_id && <span className="text-xs" style={{ color: C.muted }}> · {suppliers.find((s) => s.id === ex.supplier_id)?.name}</span>}</div>
-                    <div className="col-span-2 text-right font-mono">{fmtMoney(ex.amount)}</div>
-                    <div className="col-span-2 flex items-center justify-end gap-2">
-                      {canEdit("otherExpenses") && <button onClick={() => setEditingExpense(ex)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                      {canEdit("otherExpenses") && <button onClick={() => deleteExpense(ex.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                  <div key={ex.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="text-xs" style={{ color: C.muted }}>{fmtDate(ex.expense_date)}</div>
+                      <div className="flex items-center gap-1">
+                        {canEdit("otherExpenses") && <button onClick={() => setEditingExpense(ex)} style={iconBtnStyle}><Pencil size={14} /></button>}
+                        {canEdit("otherExpenses") && <button onClick={() => deleteExpense(ex.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      </div>
                     </div>
+                    <div className="text-sm">{ex.description}</div>
+                    <div className="text-xs mt-1" style={{ color: C.muted }}>{ex.category || "—"}{ex.supplier_id && <span> · {suppliers.find((s) => s.id === ex.supplier_id)?.name}</span>}</div>
+                    <div className="pt-2 mt-2 text-right font-mono font-semibold" style={{ borderTop: `1px solid ${C.border}` }}>{fmtMoney(ex.amount)}</div>
                   </div>
                 ))}
-                {otherExpenses.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay gastos registrados.</div>}
+                {otherExpenses.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay gastos registrados.</div>}
               </div>
             </div>
           )}
@@ -9473,27 +9459,26 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   <Plus size={14} /> Agregar cuenta
                 </button>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-2">Código</div>
-                  <div className="col-span-5">Nombre</div>
-                  <div className="col-span-2">Tipo</div>
-                  <div className="col-span-1">Activa</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {chartOfAccounts.map((a) => (
-                  <div key={a.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-2 font-mono" style={{ color: C.muted }}>{a.code}</div>
-                    <div className="col-span-5 truncate">{a.name}</div>
-                    <div className="col-span-2" style={{ color: C.muted }}>{a.account_type}</div>
-                    <div className="col-span-1" style={{ color: a.is_active ? C.green : C.muted }}>{a.is_active ? "Sí" : "No"}</div>
-                    <div className="col-span-2 flex items-center justify-end gap-2">
-                      {canEdit("chartOfAccounts") && <button onClick={() => setEditingAccount(a)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                      {canEdit("chartOfAccounts") && <button onClick={() => deleteAccount(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                  <div key={a.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <div className="font-mono text-xs" style={{ color: C.muted }}>{a.code}</div>
+                        <div className="font-semibold truncate">{a.name}</div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {canEdit("chartOfAccounts") && <button onClick={() => setEditingAccount(a)} style={iconBtnStyle}><Pencil size={14} /></button>}
+                        {canEdit("chartOfAccounts") && <button onClick={() => deleteAccount(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-2 mt-2 text-xs" style={{ borderTop: `1px solid ${C.border}`, color: C.muted }}>
+                      <span>{a.account_type}</span>
+                      <span style={{ color: a.is_active ? C.green : C.muted }}>{a.is_active ? "Activa" : "Inactiva"}</span>
                     </div>
                   </div>
                 ))}
-                {chartOfAccounts.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay cuentas en el catálogo.</div>}
+                {chartOfAccounts.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay cuentas en el catálogo.</div>}
               </div>
             </div>
           )}
@@ -9507,25 +9492,23 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 </button>
               </div>
               <div className="text-xs mb-3" style={{ color: C.muted }}>Catálogo informativo — las cotizaciones y facturas siguen calculando ITBIS al 18% de forma fija.</div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-5">Nombre</div>
-                  <div className="col-span-3 text-right">Tasa</div>
-                  <div className="col-span-2">Por defecto</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {taxRates.map((t) => (
-                  <div key={t.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-5 truncate">{t.name}</div>
-                    <div className="col-span-3 text-right font-mono">{Number(t.rate_pct)}%</div>
-                    <div className="col-span-2" style={{ color: t.is_default ? C.amber : C.muted }}>{t.is_default ? "Sí" : "No"}</div>
-                    <div className="col-span-2 flex items-center justify-end gap-2">
-                      {canEdit("taxRates") && <button onClick={() => setEditingTaxRate(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                      {canEdit("taxRates") && <button onClick={() => deleteTaxRate(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                  <div key={t.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="font-semibold truncate">{t.name}</div>
+                      <div className="flex items-center gap-1">
+                        {canEdit("taxRates") && <button onClick={() => setEditingTaxRate(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
+                        {canEdit("taxRates") && <button onClick={() => deleteTaxRate(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                      <span className="font-mono font-semibold">{Number(t.rate_pct)}%</span>
+                      <span className="text-xs" style={{ color: t.is_default ? C.amber : C.muted }}>{t.is_default ? "Por defecto" : ""}</span>
                     </div>
                   </div>
                 ))}
-                {taxRates.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay tasas configuradas.</div>}
+                {taxRates.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay tasas configuradas.</div>}
               </div>
 
             </div>
@@ -9922,34 +9905,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           {!loadingScope && hasPerm("purchaseLedger") && view === "purchaseLedger" && (
             <div>
               <div className="text-sm mb-3" style={{ color: C.muted }}>{purchases.length} factura{purchases.length !== 1 ? "s" : ""} de proveedor recibida{purchases.length !== 1 ? "s" : ""}</div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Proveedor</div>
-                  <div className="col-span-2">Factura</div>
-                  <div className="col-span-2">Fecha</div>
-                  <div className="col-span-2 text-right">Total</div>
-                  <div className="col-span-1 text-right">Estado</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {purchases.map((pu) => {
                   const payCfg = PAYABLE_STATUS_CFG[pu.payment_status] || PAYABLE_STATUS_CFG.pendiente;
+                  const sup = suppliers.find((s) => s.id === pu.supplier_id);
                   return (
-                    <div key={pu.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-3 min-w-0">
-                        <div className="truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
-                        <div className="text-xs truncate" style={{ color: C.muted }}>{suppliers.find((s) => s.id === pu.supplier_id)?.rnc || ""}</div>
+                    <div key={pu.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{sup?.name || "—"}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>{sup?.rnc || ""}</div>
+                        </div>
+                        <div className="text-xs flex-shrink-0" style={{ color: payCfg.color }}>{payCfg.label}</div>
                       </div>
-                      <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
-                      <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
-                      <div className="col-span-2 text-right font-mono">{fmtMoney(pu.total)}</div>
-                      <div className="col-span-1 text-right text-xs" style={{ color: payCfg.color }}>{payCfg.label}</div>
-                      <div className="col-span-2 flex items-center justify-end gap-3">
+                      <div className="text-xs mt-1" style={{ color: C.muted }}>Factura: {pu.invoice_number || "—"}</div>
+                      <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <span style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</span>
+                        <span className="font-mono font-semibold">{fmtMoney(pu.total)}</span>
+                      </div>
+                      <div className="flex items-center justify-end gap-3 mt-2">
                         <button onClick={() => openPurchaseDetail(pu)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
                       </div>
                     </div>
                   );
                 })}
-                {purchases.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay facturas de proveedor registradas.</div>}
+                {purchases.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay facturas de proveedor registradas.</div>}
               </div>
             </div>
           )}
@@ -9978,26 +9958,24 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="text-sm" style={{ color: C.muted }}>{pending.length} factura{pending.length !== 1 ? "s" : ""} pendiente{pending.length !== 1 ? "s" : ""} de cobro</div>
                       <div className="text-lg font-mono font-bold" style={{ color: C.red }}>{fmtMoney(totalPending)}</div>
                     </div>
-                    <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                      <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                        <div className="col-span-3">Cliente</div>
-                        <div className="col-span-2">NCF</div>
-                        <div className="col-span-2">Fecha</div>
-                        <div className="col-span-1 text-right">Días</div>
-                        <div className="col-span-2 text-right">Saldo</div>
-                        <div className="col-span-2 text-right">Acciones</div>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {pending.map((inv) => {
                         const cli = clients.find((c) => c.id === inv.client_id);
                         const reminderText = invoiceReminderText(companyName, cli?.name || "Cliente", inv, inv.balance, inv.days);
                         return (
-                          <div key={inv.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                            <div className="col-span-3 truncate">{cli?.name || "—"}</div>
-                            <div className="col-span-2 truncate" style={{ color: C.muted }}>{inv.invoice_number || inv.ncf}</div>
-                            <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
-                            <div className="col-span-1 text-right" style={{ color: inv.days > 60 ? C.red : C.muted }}>{inv.days}</div>
-                            <div className="col-span-2 text-right font-mono" style={{ color: C.red }}>{fmtMoney(inv.balance)}</div>
-                            <div className="col-span-2 flex items-center justify-end gap-3">
+                          <div key={inv.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <div className="min-w-0">
+                                <div className="font-semibold truncate">{cli?.name || "—"}</div>
+                                <div className="text-xs truncate font-mono" style={{ color: C.muted }}>{inv.invoice_number || inv.ncf}</div>
+                              </div>
+                              <div className="text-xs flex-shrink-0" style={{ color: inv.days > 60 ? C.red : C.muted }}>{inv.days} días</div>
+                            </div>
+                            <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                              <span style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</span>
+                              <span className="font-mono font-semibold" style={{ color: C.red }}>{fmtMoney(inv.balance)}</span>
+                            </div>
+                            <div className="flex items-center justify-end gap-3 mt-2">
                               {cli?.phone && (
                                 <a href={waLink(cli.phone, reminderText)} target="_blank" rel="noreferrer" title="Recordar por WhatsApp" style={{ color: C.green }}><MessageCircle size={15} /></a>
                               )}
@@ -10019,7 +9997,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         );
                       })}
                       {pending.length === 0 && (
-                        <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay cuentas por cobrar pendientes.</div>
+                        <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay cuentas por cobrar pendientes.</div>
                       )}
                     </div>
                   </>
@@ -10041,29 +10019,27 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="text-sm" style={{ color: C.muted }}>{pending.length} compra{pending.length !== 1 ? "s" : ""} pendiente{pending.length !== 1 ? "s" : ""} de pago</div>
                       <div className="text-lg font-mono font-bold" style={{ color: C.red }}>{fmtMoney(totalPending)}</div>
                     </div>
-                    <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                      <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                        <div className="col-span-3">Proveedor</div>
-                        <div className="col-span-2">Factura</div>
-                        <div className="col-span-2">Fecha</div>
-                        <div className="col-span-1 text-right">Días</div>
-                        <div className="col-span-2 text-right">Saldo</div>
-                        <div className="col-span-2 text-right">Acciones</div>
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {pending.map((pu) => (
-                        <div key={pu.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                          <div className="col-span-3 truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
-                          <div className="col-span-2 truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
-                          <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</div>
-                          <div className="col-span-1 text-right" style={{ color: pu.days > 60 ? C.red : C.muted }}>{pu.days}</div>
-                          <div className="col-span-2 text-right font-mono" style={{ color: C.red }}>{fmtMoney(pu.balance)}</div>
-                          <div className="col-span-2 flex items-center justify-end gap-3">
+                        <div key={pu.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                          <div className="flex items-start justify-between gap-2 mb-1">
+                            <div className="min-w-0">
+                              <div className="font-semibold truncate">{suppliers.find((s) => s.id === pu.supplier_id)?.name || "—"}</div>
+                              <div className="text-xs truncate" style={{ color: C.muted }}>{pu.invoice_number || "—"}</div>
+                            </div>
+                            <div className="text-xs flex-shrink-0" style={{ color: pu.days > 60 ? C.red : C.muted }}>{pu.days} días</div>
+                          </div>
+                          <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                            <span style={{ color: C.muted }}>{fmtDate(pu.purchase_date)}</span>
+                            <span className="font-mono font-semibold" style={{ color: C.red }}>{fmtMoney(pu.balance)}</span>
+                          </div>
+                          <div className="flex items-center justify-end gap-3 mt-2">
                             <button onClick={() => openPurchaseDetail(pu)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
                           </div>
                         </div>
                       ))}
                       {pending.length === 0 && (
-                        <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>No hay cuentas por pagar pendientes.</div>
+                        <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay cuentas por pagar pendientes.</div>
                       )}
                     </div>
                   </>
@@ -10080,36 +10056,30 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   <Plus size={14} /> Agregar secuencia
                 </button>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-2">Tipo</div>
-                  <div className="col-span-3">Rango autorizado</div>
-                  <div className="col-span-2">Próximo número</div>
-                  <div className="col-span-2">Restantes</div>
-                  <div className="col-span-1">Estado</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {ncfSequences.map((s) => {
                   const remaining = s.range_end - s.next_number + 1;
                   return (
-                    <div key={s.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-2 font-mono">{s.ncf_type}</div>
-                      <div className="col-span-3 font-mono text-xs" style={{ color: C.muted }}>{s.range_start} – {s.range_end}</div>
-                      <div className="col-span-2 font-mono">{s.next_number}</div>
-                      <div className="col-span-2 font-mono" style={{ color: remaining <= 10 ? C.red : C.muted }}>{Math.max(0, remaining)}</div>
-                      <div className="col-span-1">
-                        <button onClick={() => toggleNcfActive(s)}>
-                          <Pill label={s.active ? "Activa" : "Inactiva"} color={s.active ? C.green : C.muted} />
-                        </button>
+                    <div key={s.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="font-mono font-semibold">{s.ncf_type}</div>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => toggleNcfActive(s)}>
+                            <Pill label={s.active ? "Activa" : "Inactiva"} color={s.active ? C.green : C.muted} />
+                          </button>
+                          {canEdit("ncf") && <button onClick={() => setEditingNcf(s)} style={iconBtnStyle}><Pencil size={14} /></button>}
+                          {canEdit("ncf") && <button onClick={() => deleteNcfSequence(s.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        </div>
                       </div>
-                      <div className="col-span-2 flex items-center justify-end gap-2">
-                        {canEdit("ncf") && <button onClick={() => setEditingNcf(s)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit("ncf") && <button onClick={() => deleteNcfSequence(s.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      <div className="text-xs font-mono mb-2" style={{ color: C.muted }}>{s.range_start} – {s.range_end}</div>
+                      <div className="flex items-center justify-between pt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <div className="text-xs" style={{ color: C.muted }}>Próximo: <span className="font-mono" style={{ color: C.text }}>{s.next_number}</span></div>
+                        <div className="text-xs font-mono" style={{ color: remaining <= 10 ? C.red : C.muted }}>{Math.max(0, remaining)} restantes</div>
                       </div>
                     </div>
                   );
                 })}
-                {ncfSequences.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no has configurado ninguna secuencia NCF.</div>}
+                {ncfSequences.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no has configurado ninguna secuencia NCF.</div>}
               </div>
             </div>
           )}
@@ -10146,40 +10116,39 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   {Object.entries(QUOTE_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input type="checkbox" checked={filteredQuotes.length > 0 && selectedQuotes.size === filteredQuotes.length} onChange={() => setSelectedQuotes(selectedQuotes.size === filteredQuotes.length ? new Set() : new Set(filteredQuotes.map((q) => q.id)))} />
-                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
-                    <div className="col-span-2">No.</div>
-                    <div className="col-span-3">Cliente</div>
-                    <div className="col-span-2">Fecha</div>
-                    <div className="col-span-2 text-right">Total</div>
-                    <div className="col-span-3 text-right">Estado</div>
-                  </div>
-                </div>
+              {filteredQuotes.length > 0 && (
+                <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
+                  <input type="checkbox" checked={selectedQuotes.size === filteredQuotes.length} onChange={() => setSelectedQuotes(selectedQuotes.size === filteredQuotes.length ? new Set() : new Set(filteredQuotes.map((q) => q.id)))} />
+                  Seleccionar todas las que se ven ({filteredQuotes.length})
+                </label>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {filteredQuotes.map((q) => {
                   const s = QUOTE_STATUS_CFG[q.status] || QUOTE_STATUS_CFG.pendiente;
+                  const cl = clients.find((c) => c.id === q.client_id);
                   return (
-                    <div key={q.id} onClick={() => openQuoteDetail(q)} className="flex items-center gap-3 px-4 py-3 text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <input type="checkbox" checked={selectedQuotes.has(q.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedQuotes((prev) => { const next = new Set(prev); next.has(q.id) ? next.delete(q.id) : next.add(q.id); return next; })} />
-                      <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center">
-                        <div className="col-span-2 min-w-0">
-                          <div className="font-mono text-xs">{q.quote_number}</div>
-                          {q.title && <div className="text-xs truncate" style={{ color: C.muted }}>{q.title}</div>}
+                    <div key={q.id} onClick={() => openQuoteDetail(q)} className="p-4 cursor-pointer" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input type="checkbox" checked={selectedQuotes.has(q.id)} onClick={(e) => e.stopPropagation()} onChange={() => setSelectedQuotes((prev) => { const next = new Set(prev); next.has(q.id) ? next.delete(q.id) : next.add(q.id); return next; })} />
+                          <div className="min-w-0">
+                            <div className="font-mono text-xs" style={{ color: C.muted }}>{q.quote_number}</div>
+                            {q.title && <div className="text-sm truncate" style={{ color: C.text }}>{q.title}</div>}
+                          </div>
                         </div>
-                        <div className="col-span-3 min-w-0">
-                          <div className="truncate">{clients.find((c) => c.id === q.client_id)?.name || "—"}</div>
-                          <div className="text-xs truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === q.client_id)?.rnc_cedula || ""}</div>
-                        </div>
-                        <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(q.quote_date)}</div>
-                        <div className="col-span-2 text-right font-mono">{fmtMoney(q.total)}</div>
-                        <div className="col-span-3 text-right"><Pill label={s.label} color={s.color} /></div>
+                        <Pill label={s.label} color={s.color} />
+                      </div>
+                      <div className="text-sm truncate">{cl?.name || "—"}</div>
+                      <div className="text-xs mb-3" style={{ color: C.muted }}>{cl?.rnc_cedula || ""}</div>
+                      <div className="flex items-center justify-between pt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <span style={{ color: C.muted }}>{fmtDate(q.quote_date)}</span>
+                        <span className="font-mono font-semibold">{fmtMoney(q.total)}</span>
                       </div>
                     </div>
                   );
                 })}
                 {filteredQuotes.length === 0 && (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                  <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>
                     {quotes.length === 0 ? "Todavía no hay cotizaciones registradas." : "Ninguna cotización coincide con la búsqueda."}
                   </div>
                 )}
@@ -10200,50 +10169,36 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               <div className="text-xs mb-3" style={{ color: C.muted }}>
                 Las órdenes de venta se generan desde una cotización aprobada (botón "Pasar a Orden de Venta") — representan un trabajo o venta ya en ejecución, antes de facturarse. Solo las canceladas se pueden marcar y borrar.
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="flex items-center gap-3 px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <input
-                    type="checkbox"
-                    checked={salesOrders.some((o) => o.status === "cancelada") && salesOrders.filter((o) => o.status === "cancelada").every((o) => selectedSalesOrders.has(o.id))}
-                    onChange={() => {
-                      const cancelledIds = salesOrders.filter((o) => o.status === "cancelada").map((o) => o.id);
-                      const allSelected = cancelledIds.every((id) => selectedSalesOrders.has(id)) && cancelledIds.length > 0;
-                      setSelectedSalesOrders(allSelected ? new Set() : new Set(cancelledIds));
-                    }}
-                  />
-                  <div className="flex-1 grid grid-cols-12 gap-2 min-w-[760px]">
-                    <div className="col-span-3">Orden</div>
-                    <div className="col-span-3">Cliente</div>
-                    <div className="col-span-2">Fecha</div>
-                    <div className="col-span-2 text-right">Total</div>
-                    <div className="col-span-2 text-right">Estado</div>
-                  </div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {salesOrders.map((o) => {
                   const s = SALES_ORDER_STATUS_CFG[o.status] || SALES_ORDER_STATUS_CFG.en_proceso;
                   const isCancelled = o.status === "cancelada";
+                  const cl = clients.find((c) => c.id === o.client_id);
                   return (
-                    <div key={o.id} className="flex items-center gap-3 px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <input
-                        type="checkbox"
-                        disabled={!isCancelled}
-                        checked={selectedSalesOrders.has(o.id)}
-                        onChange={() => setSelectedSalesOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })}
-                        style={{ opacity: isCancelled ? 1 : 0.3 }}
-                      />
-                      <div onClick={() => openSalesOrderDetail(o)} className="flex-1 grid grid-cols-12 gap-2 min-w-[760px] items-center cursor-pointer">
-                        <div className="col-span-3 min-w-0">
-                          <div className="font-mono text-xs">{o.order_number}</div>
-                          {o.title && <div className="text-xs truncate" style={{ color: C.muted }}>{o.title}</div>}
+                    <div key={o.id} onClick={() => openSalesOrderDetail(o)} className="p-4 cursor-pointer" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <input
+                            type="checkbox"
+                            disabled={!isCancelled}
+                            checked={selectedSalesOrders.has(o.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => setSelectedSalesOrders((prev) => { const next = new Set(prev); next.has(o.id) ? next.delete(o.id) : next.add(o.id); return next; })}
+                            style={{ opacity: isCancelled ? 1 : 0.3 }}
+                          />
+                          <div className="min-w-0">
+                            <div className="font-mono text-xs" style={{ color: C.muted }}>{o.order_number}</div>
+                            {o.title && <div className="text-sm truncate" style={{ color: C.text }}>{o.title}</div>}
+                          </div>
                         </div>
-                        <div className="col-span-3 min-w-0">
-                          <div className="truncate">{clients.find((c) => c.id === o.client_id)?.name || "—"}</div>
-                          <div className="text-xs truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === o.client_id)?.rnc_cedula || ""}</div>
-                        </div>
-                        <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(o.order_date)}</div>
-                        <div className="col-span-2 text-right font-mono">{fmtMoney(o.total)}</div>
-                        <div className="col-span-2 flex items-center justify-end gap-2">
-                          <Pill label={s.label} color={s.color} />
+                        <Pill label={s.label} color={s.color} />
+                      </div>
+                      <div className="text-sm truncate">{cl?.name || "—"}</div>
+                      <div className="text-xs mb-3" style={{ color: C.muted }}>{cl?.rnc_cedula || ""}</div>
+                      <div className="flex items-center justify-between pt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <span style={{ color: C.muted }}>{fmtDate(o.order_date)}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-semibold">{fmtMoney(o.total)}</span>
                           {isCancelled && canEdit("salesOrders") && (
                             <button onClick={(e) => { e.stopPropagation(); deleteSalesOrder(o); }} style={iconBtnStyle}><Trash2 size={14} /></button>
                           )}
@@ -10252,7 +10207,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
                   );
                 })}
-                {salesOrders.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay órdenes de venta generadas. Aprueba una cotización y dale "Pasar a Orden de Venta".</div>}
+                {salesOrders.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay órdenes de venta generadas. Aprueba una cotización y dale "Pasar a Orden de Venta".</div>}
               </div>
             </div>
           )}
@@ -10287,35 +10242,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   {Object.entries(PAYMENT_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-2">Factura</div>
-                  <div className="col-span-3">Cliente</div>
-                  <div className="col-span-2">Fecha</div>
-                  <div className="col-span-2 text-right">Total</div>
-                  <div className="col-span-3 text-right">Cobro</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {filteredInvoices.map((inv) => {
                   const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
+                  const cl = clients.find((c) => c.id === inv.client_id);
                   return (
-                    <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `3px solid ${inv.status === "anulada" ? C.red : "transparent"}` }}>
-                      <div className="col-span-2 min-w-0">
-                        <div className="font-mono text-xs">{inv.invoice_number || inv.ncf}</div>
-                        <div className="text-xs truncate" style={{ color: C.muted }}>NCF: {inv.ncf}</div>
-                        {inv.title && <div className="text-xs truncate" style={{ color: C.muted }}>{inv.title}</div>}
+                    <div key={inv.id} onClick={() => openInvoiceDetail(inv)} className="p-4 cursor-pointer" style={{ background: C.panel, border: `1px solid ${C.border}`, borderLeft: `3px solid ${inv.status === "anulada" ? C.red : "transparent"}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <div className="font-mono text-xs">{inv.invoice_number || inv.ncf}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>NCF: {inv.ncf}</div>
+                          {inv.title && <div className="text-sm truncate" style={{ color: C.text }}>{inv.title}</div>}
+                        </div>
+                        <Pill label={inv.status === "anulada" ? "Anulada" : payCfg.label} color={inv.status === "anulada" ? C.red : payCfg.color} />
                       </div>
-                      <div className="col-span-3 min-w-0">
-                        <div className="truncate">{clients.find((c) => c.id === inv.client_id)?.name || "—"}</div>
-                        <div className="text-xs truncate" style={{ color: C.muted }}>{clients.find((c) => c.id === inv.client_id)?.rnc_cedula || ""}</div>
+                      <div className="text-sm truncate">{cl?.name || "—"}</div>
+                      <div className="text-xs mb-3" style={{ color: C.muted }}>{cl?.rnc_cedula || ""}</div>
+                      <div className="flex items-center justify-between pt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <span style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</span>
+                        <span className="font-mono font-semibold">{fmtMoney(inv.total)}</span>
                       </div>
-                      <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(inv.invoice_date)}</div>
-                      <div className="col-span-2 text-right font-mono">{fmtMoney(inv.total)}</div>
-                      <div className="col-span-3 text-right"><Pill label={inv.status === "anulada" ? "Anulada" : payCfg.label} color={inv.status === "anulada" ? C.red : payCfg.color} /></div>
                     </div>
                   );
                 })}
                 {filteredInvoices.length === 0 && (
-                  <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>
+                  <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>
                     {invoices.length === 0 ? "Todavía no hay facturas emitidas." : "Ninguna factura coincide con la búsqueda."}
                   </div>
                 )}
@@ -10443,24 +10394,24 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               <div className="text-xs mb-3" style={{ color: C.muted }}>
                 Una nota de crédito ajusta el saldo de una factura ya emitida (que no se puede editar directamente) — útil para devoluciones o correcciones. Usa el tipo de comprobante B04.
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">NCF</div>
-                  <div className="col-span-2">Factura original</div>
-                  <div className="col-span-3">Cliente</div>
-                  <div className="col-span-2">Fecha</div>
-                  <div className="col-span-2 text-right">Total</div>
-                </div>
-                {creditNotes.map((cn) => (
-                  <div key={cn.id} onClick={() => openCreditNoteDetail(cn)} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm cursor-pointer" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3 font-mono text-xs">{cn.ncf}</div>
-                    <div className="col-span-2 font-mono text-xs" style={{ color: C.muted }}>{invoices.find((i) => i.id === cn.invoice_id)?.ncf || "—"}</div>
-                    <div className="col-span-3 truncate">{clients.find((c) => c.id === cn.client_id)?.name || "—"}</div>
-                    <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(cn.note_date)}</div>
-                    <div className="col-span-2 text-right font-mono">{fmtMoney(cn.total)}</div>
-                  </div>
-                ))}
-                {creditNotes.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay notas de crédito emitidas.</div>}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {creditNotes.map((cn) => {
+                  const cl = clients.find((c) => c.id === cn.client_id);
+                  return (
+                    <div key={cn.id} onClick={() => openCreditNoteDetail(cn)} className="p-4 cursor-pointer" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="font-mono text-xs" style={{ color: C.muted }}>{cn.ncf}</div>
+                        <div className="font-mono font-semibold">{fmtMoney(cn.total)}</div>
+                      </div>
+                      <div className="text-sm truncate">{cl?.name || "—"}</div>
+                      <div className="text-xs mt-2 pt-2" style={{ color: C.muted, borderTop: `1px solid ${C.border}` }}>
+                        <div>Factura original: <span style={{ color: C.text }} className="font-mono">{invoices.find((i) => i.id === cn.invoice_id)?.ncf || "—"}</span></div>
+                        <div>Fecha: <span style={{ color: C.text }}>{fmtDate(cn.note_date)}</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {creditNotes.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay notas de crédito emitidas.</div>}
               </div>
             </div>
           )}
@@ -10484,31 +10435,25 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   )}
                 </div>
               </div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Cliente / título</div>
-                  <div className="col-span-2 text-right">Monto</div>
-                  <div className="col-span-2">Frecuencia</div>
-                  <div className="col-span-2">Próxima factura</div>
-                  <div className="col-span-1 text-center">Estado</div>
-                  <div className="col-span-2 text-right">Acciones</div>
-                </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {recurringContracts.map((c) => {
                   const expired = c.end_date && c.end_date < todayStr;
                   const due = c.is_active && c.next_invoice_date <= todayStr && !expired;
                   return (
-                    <div key={c.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <div className="col-span-3">
-                        <div className="truncate">{clients.find((cl) => cl.id === c.client_id)?.name || "—"}</div>
-                        <div className="text-xs truncate" style={{ color: C.muted }}>{c.title}</div>
-                      </div>
-                      <div className="col-span-2 text-right font-mono">{fmtMoney(c.amount)}{c.is_taxable ? " +ITBIS" : ""}</div>
-                      <div className="col-span-2" style={{ color: C.muted }}>Cada {c.frequency_days} días{c.end_date ? ` · hasta ${fmtDate(c.end_date)}` : ""}</div>
-                      <div className="col-span-2 font-mono" style={{ color: due ? C.red : C.muted }}>{fmtDate(c.next_invoice_date)}{due ? " (vencido)" : ""}</div>
-                      <div className="col-span-1 text-center">
+                    <div key={c.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{clients.find((cl) => cl.id === c.client_id)?.name || "—"}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>{c.title}</div>
+                        </div>
                         {expired ? <Pill label="Finalizado" color={C.muted} /> : c.is_active ? <Pill label="Activo" color={C.green} /> : <Pill label="Inactivo" color={C.muted} />}
                       </div>
-                      <div className="col-span-2 flex items-center justify-end gap-2">
+                      <div className="text-xs mt-2 space-y-1" style={{ color: C.muted }}>
+                        <div>Monto: <span style={{ color: C.text }} className="font-mono">{fmtMoney(c.amount)}{c.is_taxable ? " +ITBIS" : ""}</span></div>
+                        <div>Frecuencia: <span style={{ color: C.text }}>Cada {c.frequency_days} días{c.end_date ? ` · hasta ${fmtDate(c.end_date)}` : ""}</span></div>
+                        <div>Próxima factura: <span style={{ color: due ? C.red : C.text }} className="font-mono">{fmtDate(c.next_invoice_date)}{due ? " (vencido)" : ""}</span></div>
+                      </div>
+                      <div className="flex items-center justify-end gap-2 pt-2 mt-2" style={{ borderTop: `1px solid ${C.border}` }}>
                         {canEdit("recurringContracts") && due && (
                           <button onClick={() => generateOneContractInvoice(c)} disabled={saving} className="text-xs px-2 py-1.5 font-semibold disabled:opacity-50" style={{ background: C.green, color: "#0B1F13" }}>
                             Facturar
@@ -10520,7 +10465,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
                   );
                 })}
-                {recurringContracts.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay contratos recurrentes. Ideal para clientes con mantenimiento mensual fijo.</div>}
+                {recurringContracts.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay contratos recurrentes. Ideal para clientes con mantenimiento mensual fijo.</div>}
               </div>
             </div>
           )}
@@ -10535,15 +10480,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               </div>
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Miembros de la empresa</div>
-              <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
                 {profiles.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div>
-                      <div>{p.full_name || p.email}</div>
-                      <div className="text-xs" style={{ color: C.muted }}>{p.email}</div>
+                  <div key={p.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <div className="font-semibold truncate">{p.full_name || p.email}</div>
+                        <div className="text-xs truncate" style={{ color: C.muted }}>{p.email}</div>
+                      </div>
+                      <Pill label={ROLE_CFG[p.role]?.label || p.role} color={ROLE_CFG[p.role]?.color || C.muted} />
                     </div>
-                    <div className="flex items-center gap-3">
-                      {p.role === "supervisor" && (
+                    <div className="flex items-center justify-between pt-2 mt-1" style={{ borderTop: `1px solid ${C.border}` }}>
+                      {p.role === "supervisor" ? (
                         <label className="flex items-center gap-1 text-xs" style={{ color: C.muted }}>
                           Descuento máx.
                           <input
@@ -10552,20 +10500,19 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                             className="w-16 px-2 py-1 text-xs" style={{ ...inputStyle }}
                           />%
                         </label>
-                      )}
+                      ) : <span />}
                       {p.role !== "admin" && (
                         <button onClick={() => setEditingPermissionsFor(p)} className="text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Permisos</button>
                       )}
-                      <Pill label={ROLE_CFG[p.role]?.label || p.role} color={ROLE_CFG[p.role]?.color || C.muted} />
                     </div>
                   </div>
                 ))}
               </div>
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Invitaciones pendientes</div>
-              <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {invites.map((i) => (
-                  <div key={i.id} className="flex items-center justify-between px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div key={i.id} className="p-4 flex items-center justify-between" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                     <div>
                       <div>{i.email}</div>
                       <div className="text-xs" style={{ color: C.muted }}>Pendiente de aceptar</div>
@@ -10576,7 +10523,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
                   </div>
                 ))}
-                {invites.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>No hay invitaciones pendientes.</div>}
+                {invites.length === 0 && <div className="col-span-full px-4 py-6 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay invitaciones pendientes.</div>}
               </div>
             </div>
           )}
