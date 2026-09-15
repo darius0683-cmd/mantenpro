@@ -8615,6 +8615,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                                 {(t.category || t.serial_number) && (
                                   <div className="text-xs truncate" style={{ color: C.muted }}>{[t.category, t.serial_number ? `S/N ${t.serial_number}` : null].filter(Boolean).join(" · ")}</div>
                                 )}
+                                {t.received_at ? (
+                                  <div className="text-[10px] mt-1" style={{ color: C.green }}>✓ Confirmada {fmtDate(t.received_at.slice(0, 10))}</div>
+                                ) : (
+                                  <button onClick={() => confirmToolReceipt(t.id)} className="mt-1 flex items-center gap-1 text-[11px] px-2 py-1" style={{ background: C.green + "20", color: C.green, border: `1px solid ${C.green}40` }}>
+                                    <CheckCircle2 size={12} /> Confirmar recepción
+                                  </button>
+                                )}
                               </div>
                               <Pill label={st.label} color={st.color} />
                             </div>
