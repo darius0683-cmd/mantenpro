@@ -10523,32 +10523,53 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 <div className="text-sm" style={{ color: C.muted }}>
                   {loadingActivityLog ? "Cargando..." : `${activityLogFiltered.length} registro${activityLogFiltered.length !== 1 ? "s" : ""}`}
                 </div>
-                <button
-                  onClick={() => {
-                    const header = ["Fecha", "Hora", "Módulo", "Acción", "Usuario", "Detalle"];
-                    const rows = activityLogFiltered.map((l) => {
-                      const dt = new Date(l.changed_at);
-                      return [
-                        dt.toLocaleDateString("es-DO"),
-                        dt.toLocaleTimeString("es-DO"),
-                        ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name,
-                        ACTIVITY_ACTION_LABELS[l.action]?.label || l.action,
-                        activityUserName(l.changed_by_email),
-                        describeActivityEntry(l),
-                      ];
-                    });
-                    const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
-                    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href = url; a.download = `historial-actividad_${activityDateFrom}_a_${activityDateTo}.csv`; a.click();
-                    URL.revokeObjectURL(url);
-                  }}
-                  disabled={activityLogFiltered.length === 0}
-                  className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}
-                >
-                  <FileText size={14} /> Descargar historial (CSV)
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      const rows = activityLogFiltered.map((l) => {
+                        const dt = new Date(l.changed_at);
+                        return [
+                          `${dt.toLocaleDateString("es-DO")} ${dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}`,
+                          ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name,
+                          ACTIVITY_ACTION_LABELS[l.action]?.label || l.action,
+                          activityUserName(l.changed_by_email),
+                          describeActivityEntry(l) || "—",
+                        ];
+                      });
+                      printDocument("Historial de actividad", listHtml(`Historial de actividad — ${fmtDate(activityDateFrom)} a ${fmtDate(activityDateTo)}`, companyName, ["Fecha y hora", "Módulo", "Acción", "Usuario", "Detalle"], rows));
+                    }}
+                    disabled={activityLogFiltered.length === 0}
+                    className="flex items-center gap-2 px-3 py-2 text-sm disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}
+                  >
+                    <FileText size={14} /> Descargar PDF
+                  </button>
+                  <button
+                    onClick={() => {
+                      const header = ["Fecha", "Hora", "Módulo", "Acción", "Usuario", "Detalle"];
+                      const rows = activityLogFiltered.map((l) => {
+                        const dt = new Date(l.changed_at);
+                        return [
+                          dt.toLocaleDateString("es-DO"),
+                          dt.toLocaleTimeString("es-DO"),
+                          ACTIVITY_TABLE_LABELS[l.table_name] || l.table_name,
+                          ACTIVITY_ACTION_LABELS[l.action]?.label || l.action,
+                          activityUserName(l.changed_by_email),
+                          describeActivityEntry(l),
+                        ];
+                      });
+                      const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+                      const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url; a.download = `historial-actividad_${activityDateFrom}_a_${activityDateTo}.csv`; a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    disabled={activityLogFiltered.length === 0}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}
+                  >
+                    <FileText size={14} /> Descargar historial (CSV)
+                  </button>
+                </div>
               </div>
 
               <div className="flex flex-wrap items-end gap-3 mb-4">
