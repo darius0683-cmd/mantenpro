@@ -241,6 +241,7 @@ const PERMISSION_CATALOG = [
     { key: "companyProfile", label: "Perfil de la empresa" },
     { key: "activityLog", label: "Historial de actividad" },
     { key: "bankReconciliation", label: "Conciliación bancaria" },
+    { key: "dgiiCatalog", label: "Catálogo RNC (DGII)" },
   ] },
 ];
 
@@ -1289,6 +1290,22 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
   const [phone, setPhone] = useState(initial?.phone || "");
   const [email, setEmail] = useState(initial?.email || "");
   const [address, setAddress] = useState(initial?.address || "");
+  const [dgiiMatch, setDgiiMatch] = useState(null);
+  const [dgiiLookupDismissed, setDgiiLookupDismissed] = useState(false);
+  const [dgiiSearched, setDgiiSearched] = useState(false);
+
+  useEffect(() => {
+    const digits = rnc.replace(/\D/g, "");
+    setDgiiLookupDismissed(false);
+    setDgiiSearched(false);
+    if (digits.length !== 9 && digits.length !== 11) { setDgiiMatch(null); return; }
+    let active = true;
+    const t = setTimeout(async () => {
+      const { data } = await supabase.from("dgii_rnc_catalog").select("name, commercial_name").eq("rnc", digits).maybeSingle();
+      if (active) { setDgiiMatch(data || null); setDgiiSearched(true); }
+    }, 400);
+    return () => { active = false; clearTimeout(t); };
+  }, [rnc]);
 
   const submit = () => {
     if (!name.trim()) return;
@@ -1305,6 +1322,27 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
           <input className={inputClass} style={inputStyle} value={rnc} onChange={(e) => setRnc(e.target.value)} placeholder="Ej. 101-01234-5" />
         </Field>
       </div>
+      {dgiiMatch && !dgiiLookupDismissed && dgiiMatch.name.trim().toLowerCase() !== name.trim().toLowerCase() && (
+        <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 text-sm" style={{ background: C.amber + "15", border: `1px solid ${C.amber}40` }}>
+          <div className="min-w-0">
+            <div className="text-xs" style={{ color: C.muted }}>Encontrado en el catálogo DGII:</div>
+            <div className="truncate" style={{ color: C.text }}>{dgiiMatch.name}{dgiiMatch.commercial_name ? ` (${dgiiMatch.commercial_name})` : ""}</div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button onClick={() => { setName(dgiiMatch.name); setDgiiLookupDismissed(true); }} className="text-xs px-2 py-1 font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Usar</button>
+            <button onClick={() => setDgiiLookupDismissed(true)} style={{ color: C.muted }}><X size={14} /></button>
+          </div>
+        </div>
+      )}
+      {dgiiSearched && !dgiiMatch && !dgiiLookupDismissed && (
+        <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <div className="text-xs" style={{ color: C.muted }}>No está en tu catálogo DGII importado — puede ser una persona registrada sin fines de contribuyente (esas no tienen archivo descargable).</div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <a href={`https://dgii.gov.do/app/WebApps/ConsultasWeb2/ConsultasWeb/consultas/ciudadanos.aspx`} target="_blank" rel="noreferrer" className="text-xs px-2 py-1 font-semibold whitespace-nowrap" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Buscar en DGII</a>
+            <button onClick={() => setDgiiLookupDismissed(true)} style={{ color: C.muted }}><X size={14} /></button>
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Teléfono">
           <input className={inputClass} style={inputStyle} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Ej. 809-555-1234" />
@@ -1745,7 +1783,7 @@ function ClientAssetFormModal({ clients, branches, technicians, initial, onClose
   );
 }
 
-function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, onClose, onSave, saving }) {
+function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, branches, restrictToBranchId, onClose, onSave, saving }) {
   const [itemType, setItemType] = useState(initial?.item_type || defaultItemType || "producto");
   const [sku, setSku] = useState(initial?.sku || "");
   const [skuManual, setSkuManual] = useState(!!initial?.sku);
@@ -1760,6 +1798,7 @@ function ProductFormModal({ initial, existingProducts, allProducts, initialCompo
     return c > 0 ? (((u - c) / c) * 100).toFixed(2) : "";
   });
   const [stockQty, setStockQty] = useState(initial?.stock_qty ?? "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || restrictToBranchId || "");
   const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
   const [isComposite, setIsComposite] = useState(initial?.is_composite ?? false);
   const [components, setComponents] = useState(() => (initialComponents || []).map((c) => ({ component_product_id: c.component_product_id, quantity: c.quantity })));
@@ -1847,6 +1886,7 @@ function ProductFormModal({ initial, existingProducts, allProducts, initialCompo
       cost_price: Number(costPrice) || 0,
       unit_price: Number(unitPrice) || 0,
       stock_qty: (isService || isComposite) ? 0 : Number(stockQty) || 0,
+      branch_id: isService ? null : (branchId || null),
       is_taxable: isTaxable,
       is_composite: isComposite,
     }, components);
@@ -1895,6 +1935,23 @@ function ProductFormModal({ initial, existingProducts, allProducts, initialCompo
           </Field>
         )}
       </div>
+      {!isService && (
+        <Field label={restrictToBranchId ? "Sucursal / dónde está guardado" : "Sucursal / dónde está guardado (opcional)"}>
+          {restrictToBranchId ? (
+            <div className={inputClass} style={{ ...inputStyle, color: C.muted, cursor: "not-allowed" }}>
+              {(branches || []).find((b) => b.id === branchId)?.name || "Tu sucursal"}
+              {initial && initial.branch_id && initial.branch_id !== restrictToBranchId && (
+                <span style={{ color: C.amber }}> (asignado por un administrador — no lo puedes cambiar)</span>
+              )}
+            </div>
+          ) : (
+            <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              <option value="">Sin especificar</option>
+              {(branches || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          )}
+        </Field>
+      )}
       {!isService && (
         <label className="flex items-center gap-2 text-sm mb-3 p-3 cursor-pointer" style={{ color: C.text, background: C.panelAlt, border: `1px solid ${C.border}` }}>
           <input type="checkbox" checked={isComposite} onChange={(e) => setIsComposite(e.target.checked)} />
@@ -2059,25 +2116,46 @@ function CashCloseModal({ session, branchName, expected, onClose, onSave, saving
   );
 }
 
-function UserPermissionsModal({ user, onClose, onSave, saving }) {
+function UserPermissionsModal({ user, branches, onClose, onSave, onUpdateBranch, onToggleActive, saving }) {
   const [permissions, setPermissions] = useState((user.permissions && typeof user.permissions === "object" && !Array.isArray(user.permissions)) ? user.permissions : (ROLE_DEFAULT_PERMISSIONS[user.role] || {}));
+  const [branchId, setBranchId] = useState(user.branch_id || "");
   const [localError, setLocalError] = useState("");
+  const isActive = user.is_active ?? true;
   const handleSave = async () => {
     setLocalError("");
+    if (branchId !== (user.branch_id || "")) await onUpdateBranch(user.id, branchId);
     const result = await onSave(user.id, permissions);
     if (result === true) onClose();
     else setLocalError(`No se pudieron guardar los permisos. Error de Supabase: ${result}`);
   };
   return (
-    <Modal title={`Permisos de ${user.full_name || user.email}`} onClose={onClose} wide>
-      <div className="text-xs mb-3" style={{ color: C.muted }}>Rol: <span style={{ color: ROLE_CFG[user.role]?.color }}>{ROLE_CFG[user.role]?.label || user.role}</span> — estas casillas controlan exactamente qué secciones puede ver y usar.</div>
+    <Modal title={`Gestionar a ${user.full_name || user.email}`} onClose={onClose} wide>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Rol: <span style={{ color: ROLE_CFG[user.role]?.color }}>{ROLE_CFG[user.role]?.label || user.role}</span></div>
+      {!isActive && (
+        <div className="text-xs mb-3 px-3 py-2" style={{ background: C.red + "15", border: `1px solid ${C.red}40`, color: C.red }}>
+          Este usuario está desactivado — no puede entrar al sistema hasta que lo reactives.
+        </div>
+      )}
+      <Field label="Sucursal fija (opcional)">
+        <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+          <option value="">Sin sucursal fija (ve/opera en varias)</option>
+          {(branches || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </Field>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Si le pones una sucursal fija, este usuario solo podrá asignar productos (y otras cosas restringidas por sucursal) a esa sucursal.</div>
+      <div className="text-xs mb-2" style={{ color: C.muted }}>Estas casillas controlan exactamente qué secciones puede ver y usar.</div>
       <PermissionChecklist value={permissions} onChange={setPermissions} />
       {localError && <div className="text-xs mt-3" style={{ color: C.red }}>{localError}</div>}
-      <div className="flex justify-end gap-2 mt-4">
-        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
-        <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
-          {saving ? "Guardando..." : "Guardar permisos"}
+      <div className="flex justify-between items-center gap-2 mt-4">
+        <button onClick={async () => { await onToggleActive(user); onClose(); }} className="px-4 py-2 text-sm font-semibold" style={{ background: isActive ? C.red + "15" : C.green + "15", color: isActive ? C.red : C.green, border: `1px solid ${isActive ? C.red : C.green}40` }}>
+          {isActive ? "Desactivar usuario" : "Reactivar usuario"}
         </button>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+          <button onClick={handleSave} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+            {saving ? "Guardando..." : "Guardar cambios"}
+          </button>
+        </div>
       </div>
     </Modal>
   );
@@ -2346,6 +2424,61 @@ function ToolListCard({ list, tools, technicians, canEdit, onEdit, onDelete, onA
         })}
         {groups.length === 0 && <div className="text-sm text-center py-3" style={{ color: C.muted }}>Este listado no tiene herramientas.</div>}
       </div>
+    </div>
+  );
+}
+
+function TechnicianToolRow({ tool, technicians, myTechnicianId, activeLoan, onConfirmReceipt, onLend, onReturn }) {
+  const [showLendForm, setShowLendForm] = useState(false);
+  const [lendTo, setLendTo] = useState("");
+  const st = TOOL_STATUS_CFG[tool.status] || TOOL_STATUS_CFG.disponible;
+  const isMine = tool.technician_id === myTechnicianId;
+  const isLoanedToMe = activeLoan && activeLoan.to_technician_id === myTechnicianId;
+  const lenderName = isLoanedToMe ? (technicians.find((t) => t.id === activeLoan.from_technician_id)?.name || "otro técnico") : null;
+  const otherTechnicians = technicians.filter((t) => t.id !== myTechnicianId);
+
+  return (
+    <div className="px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between">
+        <div className="min-w-0">
+          <div className="truncate">{tool.name}</div>
+          {(tool.category || tool.serial_number) && (
+            <div className="text-xs truncate" style={{ color: C.muted }}>{[tool.category, tool.serial_number ? `S/N ${tool.serial_number}` : null].filter(Boolean).join(" · ")}</div>
+          )}
+          {isLoanedToMe && <div className="text-[11px] mt-1" style={{ color: C.amber }}>Prestada por: {lenderName}</div>}
+          {tool.received_at ? (
+            <div className="text-[10px] mt-1" style={{ color: C.green }}>✓ Confirmada {fmtDate(tool.received_at.slice(0, 10))}</div>
+          ) : (
+            <button onClick={() => onConfirmReceipt(tool.id)} className="mt-1 flex items-center gap-1 text-[11px] px-2 py-1" style={{ background: C.green + "20", color: C.green, border: `1px solid ${C.green}40` }}>
+              <CheckCircle2 size={12} /> Confirmar recepción
+            </button>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <Pill label={st.label} color={st.color} />
+          {isMine && isLoanedToMe && (
+            <button onClick={() => onReturn(tool)} className="text-[11px] px-2 py-1" style={{ border: `1px solid ${C.amber}`, color: C.amber }}>Devolver</button>
+          )}
+          {isMine && (
+            <button onClick={() => setShowLendForm((v) => !v)} className="text-[11px] px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.text }}>Prestar</button>
+          )}
+        </div>
+      </div>
+      {showLendForm && (
+        <div className="flex items-center gap-1.5 mt-2 pt-2" style={{ borderTop: `1px solid ${C.border}` }}>
+          <select value={lendTo} onChange={(e) => setLendTo(e.target.value)} className="flex-1 px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+            <option value="">Elegir técnico...</option>
+            {otherTechnicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+          <button
+            onClick={() => { if (lendTo) { onLend(tool, lendTo); setShowLendForm(false); setLendTo(""); } }}
+            disabled={!lendTo}
+            className="text-xs px-2 py-1.5 font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}
+          >
+            Confirmar préstamo
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -5229,6 +5362,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [supplierSearch, setSupplierSearch] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [productCategoryFilter, setProductCategoryFilter] = useState("all");
+  const [productBranchFilter, setProductBranchFilter] = useState("all");
   const [purchaseSearch, setPurchaseSearch] = useState("");
   const [purchaseSupplierFilter, setPurchaseSupplierFilter] = useState("all");
   const [quoteSearch, setQuoteSearch] = useState("");
@@ -5241,6 +5375,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [otherExpenses, setOtherExpenses] = useState([]);
   const [tools, setTools] = useState([]);
   const [toolLists, setToolLists] = useState([]);
+  const [toolLoans, setToolLoans] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [chartOfAccounts, setChartOfAccounts] = useState([]);
   const [taxRates, setTaxRates] = useState([]);
@@ -5348,6 +5483,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
   const [showAddTaxRate, setShowAddTaxRate] = useState(false);
+  const [dgiiImporting, setDgiiImporting] = useState(false);
+  const [dgiiImportProgress, setDgiiImportProgress] = useState(null);
+  const [dgiiCatalogCount, setDgiiCatalogCount] = useState(null);
+  const [dgiiCatalogUpdatedAt, setDgiiCatalogUpdatedAt] = useState(null);
   const [taxReportPeriod, setTaxReportPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const [cajaBranch, setCajaBranch] = useState("");
   const [showOpenCaja, setShowOpenCaja] = useState(false);
@@ -5388,7 +5527,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, mats, wot, rcon, banktx, cba] = await Promise.all([
+    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, tloans, mats, wot, rcon, banktx, cba] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
@@ -5417,6 +5556,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       supabase.from("cash_sessions").select("*").eq("company_id", companyId).order("opened_at", { ascending: false }),
       supabase.from("tools").select("*").eq("company_id", companyId).order("name"),
       supabase.from("tool_lists").select("*").eq("company_id", companyId).order("created_at"),
+      supabase.from("tool_loans").select("*").eq("company_id", companyId).order("loaned_at", { ascending: false }),
       supabase.from("inventory_materials").select("*").eq("company_id", companyId).order("name"),
       supabase.from("work_order_technicians").select("*").eq("company_id", companyId),
       supabase.from("recurring_contracts").select("*").eq("company_id", companyId).order("next_invoice_date"),
@@ -5451,6 +5591,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setCashSessions(csess.data || []);
     setTools(tls.data || []);
     setToolLists(tlists.data || []);
+    setToolLoans(tloans.data || []);
     setMaterials(mats.data || []);
     setOrderTechnicians(wot.data || []);
     setRecurringContracts(rcon.data || []);
@@ -5460,6 +5601,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [companyId]);
+
+  useEffect(() => {
+    if (view === "dgiiCatalog") loadDgiiCatalogStats();
+    /* eslint-disable-next-line */
+  }, [view]);
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -5942,9 +6088,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const filteredProducts = useMemo(() => products.filter((p) => {
     if ((p.item_type || "producto") !== (isServicesView ? "servicio" : "producto")) return false;
     if (productCategoryFilter !== "all" && (p.category || "") !== productCategoryFilter) return false;
+    if (productBranchFilter === "none" && p.branch_id) return false;
+    if (productBranchFilter !== "all" && productBranchFilter !== "none" && p.branch_id !== productBranchFilter) return false;
     if (productSearch && !p.name.toLowerCase().includes(productSearch.toLowerCase()) && !(p.sku || "").toLowerCase().includes(productSearch.toLowerCase())) return false;
     return true;
-  }), [products, productCategoryFilter, productSearch, isServicesView]);
+  }), [products, productCategoryFilter, productBranchFilter, productSearch, isServicesView]);
 
   const filteredPurchases = useMemo(() => purchases.filter((pu) => {
     const supplierName = suppliers.find((s) => s.id === pu.supplier_id)?.name || "";
@@ -6596,6 +6744,39 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setTools((prev) => prev.map((t) => (t.id === data.id ? data : t)));
   };
 
+  // ---- Préstamos de herramientas entre técnicos ----
+  const lendTool = async (tool, toTechnicianId, notes) => {
+    if (!toTechnicianId || toTechnicianId === tool.technician_id) return;
+    setSaving(true);
+    const { data: loan, error: loanError } = await supabase.from("tool_loans").insert({
+      company_id: companyId, tool_id: tool.id, from_technician_id: tool.technician_id || null, to_technician_id: toTechnicianId, notes: notes?.trim() || null,
+    }).select().single();
+    if (loanError) { setSaving(false); setErrorMsg(loanError.message); return; }
+    const { data: updatedTool, error: toolError } = await supabase.from("tools")
+      .update({ technician_id: toTechnicianId, status: "asignada", received_at: null })
+      .eq("id", tool.id).select().single();
+    setSaving(false);
+    if (toolError) { setErrorMsg(`Se registró el préstamo pero no se pudo actualizar la herramienta: ${toolError.message}`); return; }
+    setTools((prev) => prev.map((t) => (t.id === updatedTool.id ? updatedTool : t)));
+    setToolLoans((prev) => [loan, ...prev]);
+  };
+
+  const returnTool = async (tool) => {
+    const activeLoan = toolLoans.find((l) => l.tool_id === tool.id && !l.returned_at);
+    if (!activeLoan) return;
+    setSaving(true);
+    const { data: updatedLoan, error: loanError } = await supabase.from("tool_loans")
+      .update({ returned_at: new Date().toISOString() }).eq("id", activeLoan.id).select().single();
+    if (loanError) { setSaving(false); setErrorMsg(loanError.message); return; }
+    const { data: updatedTool, error: toolError } = await supabase.from("tools")
+      .update({ technician_id: activeLoan.from_technician_id, status: activeLoan.from_technician_id ? "asignada" : "disponible", received_at: null })
+      .eq("id", tool.id).select().single();
+    setSaving(false);
+    if (toolError) { setErrorMsg(`Se registró la devolución pero no se pudo actualizar la herramienta: ${toolError.message}`); return; }
+    setTools((prev) => prev.map((t) => (t.id === updatedTool.id ? updatedTool : t)));
+    setToolLoans((prev) => prev.map((l) => (l.id === updatedLoan.id ? updatedLoan : l)));
+  };
+
   // ---- Inventario: Materiales sobrantes ----
   const saveMaterial = async (payload) => {
     setSaving(true);
@@ -6674,6 +6855,59 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const { error } = await supabase.from("tax_rates").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); return; }
     setTaxRates((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // ---- Catálogo RNC (DGII) ----
+  const loadDgiiCatalogStats = async () => {
+    const { count } = await supabase.from("dgii_rnc_catalog").select("rnc", { count: "exact", head: true });
+    setDgiiCatalogCount(count ?? 0);
+    const { data: latest } = await supabase.from("dgii_rnc_catalog").select("updated_at").order("updated_at", { ascending: false }).limit(1).maybeSingle();
+    setDgiiCatalogUpdatedAt(latest?.updated_at || null);
+  };
+
+  const importDgiiCatalogFile = async (file) => {
+    if (!file) return;
+    setDgiiImporting(true);
+    setDgiiImportProgress({ done: 0, total: 0, phase: "Leyendo archivo..." });
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/);
+      const rows = [];
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const parts = line.split("|").map((p) => p.trim().replace(/\s{2,}/g, " "));
+        const rnc = (parts[0] || "").replace(/\D/g, "");
+        if (!rnc || rnc.length < 9) continue;
+        rows.push({
+          rnc,
+          name: parts[1] || "Sin nombre",
+          commercial_name: parts[2] || null,
+          status: parts[5] || parts[4] || null,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      const total = rows.length;
+      if (total === 0) {
+        setErrorMsg("No se pudo leer ningún registro válido de ese archivo. Confirma que sea el DGII_RNC.TXT descomprimido, sin editar.");
+        setDgiiImporting(false);
+        setDgiiImportProgress(null);
+        return;
+      }
+      const batchSize = 1000;
+      setDgiiImportProgress({ done: 0, total, phase: "Importando..." });
+      for (let i = 0; i < total; i += batchSize) {
+        const batch = rows.slice(i, i + batchSize);
+        const { error } = await supabase.from("dgii_rnc_catalog").upsert(batch, { onConflict: "rnc" });
+        if (error) { setErrorMsg(`Se importaron ${i} de ${total} registros y ocurrió un error: ${error.message}`); break; }
+        setDgiiImportProgress({ done: Math.min(i + batchSize, total), total, phase: "Importando..." });
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      await loadDgiiCatalogStats();
+    } catch (err) {
+      setErrorMsg(`No se pudo procesar el archivo: ${err.message}`);
+    }
+    setDgiiImporting(false);
+    setDgiiImportProgress(null);
   };
 
   // ---- Recibos de proveedor (libro de pagos a proveedores) ----
@@ -7719,6 +7953,21 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
   };
 
+  const updateUserBranch = async (userId, branchId) => {
+    const { data, error } = await supabase.from("profiles").update({ branch_id: branchId || null }).eq("id", userId).select().single();
+    if (error) { setErrorMsg(error.message); return false; }
+    setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+    return true;
+  };
+
+  const toggleUserActive = async (user) => {
+    const nextActive = !(user.is_active ?? true);
+    if (!window.confirm(nextActive ? `¿Reactivar a ${user.full_name || user.email}?` : `¿Desactivar a ${user.full_name || user.email}? No podrá volver a entrar hasta que lo reactives.`)) return;
+    const { data, error } = await supabase.from("profiles").update({ is_active: nextActive }).eq("id", user.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+  };
+
   const updateUserPermissions = async (userId, permissions) => {
     setSaving(true);
     const { data, error } = await supabase.from("profiles").update({ permissions }).eq("id", userId).select().single();
@@ -7749,7 +7998,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const CATALOG_CHILD_KEYS = ["clients", "products", "services", "warranty"];
   const SALES_CHILD_KEYS = ["quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja"];
   const COMPRAS_CHILD_KEYS = ["suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger"];
-  const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "payables", "chartOfAccounts", "taxRates", "bankReconciliation"];
+  const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "payables", "chartOfAccounts", "taxRates", "bankReconciliation", "dgiiCatalog"];
   const INFORMES_CHILD_KEYS = ["reports", "salesReports", "financialReports", "fiscalReports"];
   const _urlView = new URLSearchParams(window.location.search).get("view") || "dashboard";
   const [openSubmenus, setOpenSubmenus] = useState(() => ({
@@ -7834,6 +8083,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         { key: "taxRates", label: "Tasas impositivas", Icon: Hash },
         { key: "bankReconciliation", label: "Conciliación bancaria", Icon: Wallet },
         { key: "ncf", label: "Secuencia NCF", Icon: Hash },
+        { key: "dgiiCatalog", label: "Catálogo RNC (DGII)", Icon: Search },
       ],
     },
     { key: "users", label: "Usuarios", Icon: ShieldCheck },
@@ -8606,27 +8856,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         <span className="text-xs" style={{ color: C.muted }}>({g.tools.length})</span>
                       </div>
                       <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                        {g.tools.map((t) => {
-                          const st = TOOL_STATUS_CFG[t.status] || TOOL_STATUS_CFG.disponible;
-                          return (
-                            <div key={t.id} className="flex items-center justify-between px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                              <div className="min-w-0">
-                                <div className="truncate">{t.name}</div>
-                                {(t.category || t.serial_number) && (
-                                  <div className="text-xs truncate" style={{ color: C.muted }}>{[t.category, t.serial_number ? `S/N ${t.serial_number}` : null].filter(Boolean).join(" · ")}</div>
-                                )}
-                                {t.received_at ? (
-                                  <div className="text-[10px] mt-1" style={{ color: C.green }}>✓ Confirmada {fmtDate(t.received_at.slice(0, 10))}</div>
-                                ) : (
-                                  <button onClick={() => confirmToolReceipt(t.id)} className="mt-1 flex items-center gap-1 text-[11px] px-2 py-1" style={{ background: C.green + "20", color: C.green, border: `1px solid ${C.green}40` }}>
-                                    <CheckCircle2 size={12} /> Confirmar recepción
-                                  </button>
-                                )}
-                              </div>
-                              <Pill label={st.label} color={st.color} />
-                            </div>
-                          );
-                        })}
+                        {g.tools.map((t) => (
+                          <TechnicianToolRow
+                            key={t.id}
+                            tool={t}
+                            technicians={technicians}
+                            myTechnicianId={profile.technician_id}
+                            activeLoan={toolLoans.find((l) => l.tool_id === t.id && !l.returned_at) || null}
+                            onConfirmReceipt={confirmToolReceipt}
+                            onLend={lendTool}
+                            onReturn={returnTool}
+                          />
+                        ))}
                       </div>
                     </div>
                   ))}
@@ -9241,6 +9482,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   <option value="all">Todas las categorías</option>
                   {productCategories.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
+                {!isServicesView && (
+                  <select value={productBranchFilter} onChange={(e) => setProductBranchFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                    <option value="all">Todas las sucursales</option>
+                    <option value="none">Sin especificar</option>
+                    {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                )}
               </div>
               {filteredProducts.length > 0 && (
                 <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
@@ -9277,6 +9525,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="text-xs mt-1" style={{ color: p.is_composite ? C.muted : (p.stock_qty <= 0 ? C.red : C.muted) }}>
                         {p.is_composite ? `${productComponents.filter((c) => c.parent_product_id === p.id).length} componentes` : `Stock: ${p.stock_qty} ${p.unit}`}
                       </div>
+                    )}
+                    {!isServicesView && p.branch_id && (
+                      <div className="flex items-center gap-1 text-xs mt-1" style={{ color: C.muted }}><MapPin size={11} /> {branches.find((b) => b.id === p.branch_id)?.name || "—"}</div>
                     )}
                   </div>
                 ))}
@@ -10069,6 +10320,47 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && hasPerm("dgiiCatalog") && view === "dgiiCatalog" && (
+            <div className="max-w-2xl">
+              <div className="text-sm mb-1" style={{ color: C.text }}>Catálogo de RNC de la DGII</div>
+              <div className="text-xs mb-4" style={{ color: C.muted }}>
+                La DGII no ofrece una consulta automática en tiempo real. Este catálogo se llena importando el listado oficial que la DGII publica periódicamente — una vez importado, el sistema lo usa para sugerir el nombre del cliente cuando escribes un RNC que todavía no tienes registrado.
+              </div>
+
+              <div className="p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="flex justify-between text-sm mb-1">
+                  <span style={{ color: C.muted }}>RNC cargados actualmente</span>
+                  <span className="font-mono font-semibold">{dgiiCatalogCount === null ? "…" : dgiiCatalogCount.toLocaleString("es-DO")}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span style={{ color: C.muted }}>Última importación</span>
+                  <span>{dgiiCatalogUpdatedAt ? fmtDate(dgiiCatalogUpdatedAt.slice(0, 10)) : "Nunca"}</span>
+                </div>
+              </div>
+
+              <div className="p-4" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+                <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Cómo actualizar el catálogo</div>
+                <ol className="text-sm space-y-1 mb-4 list-decimal list-inside" style={{ color: C.text }}>
+                  <li>Descarga el archivo oficial: <a href="https://dgii.gov.do/app/WebApps/Consultas/RNC/DGII_RNC.zip" target="_blank" rel="noreferrer" style={{ color: C.amber }}>DGII_RNC.zip</a></li>
+                  <li>Descomprímelo en tu computadora (obtendrás un archivo <span className="font-mono text-xs">DGII_RNC.TXT</span>)</li>
+                  <li>Selecciona ese archivo aquí abajo — la importación puede tardar varios minutos porque trae cientos de miles de registros. No cierres esta pantalla mientras corre.</li>
+                </ol>
+                <label className="flex items-center gap-2 px-4 py-2 text-sm font-semibold cursor-pointer w-fit" style={{ background: dgiiImporting ? C.panel : C.amber, color: dgiiImporting ? C.muted : "#1A1500" }}>
+                  <Upload size={14} /> {dgiiImporting ? "Importando..." : "Seleccionar archivo DGII_RNC.TXT"}
+                  <input type="file" accept=".txt" className="hidden" disabled={dgiiImporting || !canEdit("dgiiCatalog")} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDgiiCatalogFile(f); e.target.value = ""; }} />
+                </label>
+                {dgiiImportProgress && (
+                  <div className="mt-3">
+                    <div className="text-xs mb-1" style={{ color: C.muted }}>{dgiiImportProgress.phase} {dgiiImportProgress.total > 0 ? `(${dgiiImportProgress.done.toLocaleString("es-DO")} de ${dgiiImportProgress.total.toLocaleString("es-DO")})` : ""}</div>
+                    <div className="h-2" style={{ background: C.panel }}>
+                      <div className="h-2" style={{ width: dgiiImportProgress.total > 0 ? `${(dgiiImportProgress.done / dgiiImportProgress.total) * 100}%` : "5%", background: C.amber }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {!loadingScope && hasPerm("quotes") && view === "quotes" && (
             <div>
               <div className="flex justify-between items-center mb-3">
@@ -10467,14 +10759,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Miembros de la empresa</div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6">
                 {profiles.map((p) => (
-                  <div key={p.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <div key={p.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}`, opacity: (p.is_active ?? true) ? 1 : 0.5 }}>
                     <div className="flex items-start justify-between gap-2 mb-2">
                       <div className="min-w-0">
                         <div className="font-semibold truncate">{p.full_name || p.email}</div>
                         <div className="text-xs truncate" style={{ color: C.muted }}>{p.email}</div>
                       </div>
-                      <Pill label={ROLE_CFG[p.role]?.label || p.role} color={ROLE_CFG[p.role]?.color || C.muted} />
+                      <div className="flex flex-col items-end gap-1">
+                        <Pill label={ROLE_CFG[p.role]?.label || p.role} color={ROLE_CFG[p.role]?.color || C.muted} />
+                        {!(p.is_active ?? true) && <Pill label="Inactivo" color={C.red} />}
+                      </div>
                     </div>
+                    <div className="text-xs mb-2" style={{ color: C.muted }}>Sucursal: <span style={{ color: C.text }}>{branches.find((b) => b.id === p.branch_id)?.name || "Sin fijar (varias)"}</span></div>
                     <div className="flex items-center justify-between pt-2 mt-1" style={{ borderTop: `1px solid ${C.border}` }}>
                       {p.role === "supervisor" ? (
                         <label className="flex items-center gap-1 text-xs" style={{ color: C.muted }}>
@@ -10487,7 +10783,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         </label>
                       ) : <span />}
                       {p.role !== "admin" && (
-                        <button onClick={() => setEditingPermissionsFor(p)} className="text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Permisos</button>
+                        <button onClick={() => setEditingPermissionsFor(p)} className="text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Gestionar</button>
                       )}
                     </div>
                   </div>
@@ -10696,6 +10992,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         <ProductFormModal
           existingProducts={products.filter((p) => (p.item_type || "producto") === (view === "services" ? "servicio" : "producto"))}
           allProducts={products}
+          branches={branches}
+          restrictToBranchId={!isAdmin && profile.branch_id ? profile.branch_id : null}
           defaultItemType={view === "services" ? "servicio" : "producto"}
           onClose={() => setShowAddProduct(false)}
           onSave={saveProduct}
@@ -10708,6 +11006,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           initialComponents={productComponents.filter((c) => c.parent_product_id === editingProduct.id)}
           existingProducts={products.filter((p) => (p.item_type || "producto") === (editingProduct.item_type || "producto"))}
           allProducts={products}
+          branches={branches}
+          restrictToBranchId={!isAdmin && profile.branch_id ? profile.branch_id : null}
           onClose={() => setEditingProduct(null)}
           onSave={saveProduct}
           saving={saving}
@@ -10728,7 +11028,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {editingAccount && <AccountFormModal initial={editingAccount} onClose={() => setEditingAccount(null)} onSave={saveAccount} saving={saving} />}
       {showAddTaxRate && <TaxRateFormModal onClose={() => setShowAddTaxRate(false)} onSave={saveTaxRate} saving={saving} />}
       {editingTaxRate && <TaxRateFormModal initial={editingTaxRate} onClose={() => setEditingTaxRate(null)} onSave={saveTaxRate} saving={saving} />}
-      {editingPermissionsFor && <UserPermissionsModal user={editingPermissionsFor} onClose={() => setEditingPermissionsFor(null)} onSave={updateUserPermissions} saving={saving} />}
+      {editingPermissionsFor && <UserPermissionsModal user={editingPermissionsFor} branches={branches} onClose={() => setEditingPermissionsFor(null)} onSave={updateUserPermissions} onUpdateBranch={updateUserBranch} onToggleActive={toggleUserActive} saving={saving} />}
       {showAddPurchase && (
         <PurchaseFormModal
           suppliers={suppliers}
@@ -11036,6 +11336,18 @@ export default function MantenProApp() {
     return <SupportViewer onSignOut={signOut} />;
   }
   if (profile === null) return <OnboardingScreen userId={session.user.id} userEmail={session.user.email} onDone={() => loadProfile(session.user.id)} />;
+
+  if (profile.is_active === false) {
+    return (
+      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: "#12151A", color: "#E7EAF0", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        <div className="max-w-sm text-center p-6">
+          <div className="text-lg font-bold mb-2">Cuenta desactivada</div>
+          <div className="text-sm mb-5" style={{ color: "#8B92A0" }}>Tu acceso fue desactivado por un administrador de tu empresa. Si crees que es un error, contáctalo directamente.</div>
+          <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#F2A93B", color: "#1A1500" }}>Cerrar sesión</button>
+        </div>
+      </div>
+    );
+  }
 
   return <Dashboard session={session} profile={profile} company={company} onUpdateCompany={setCompany} onSignOut={signOut} />;
 }
