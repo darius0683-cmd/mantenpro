@@ -5474,6 +5474,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [editingTool, setEditingTool] = useState(null);
   const [toolStatusFilter, setToolStatusFilter] = useState("all");
   const [toolTechnicianFilter, setToolTechnicianFilter] = useState("all");
+  const [toolSearch, setToolSearch] = useState("");
   const [groupToolsByTechnician, setGroupToolsByTechnician] = useState(false);
   const [toolViewMode, setToolViewMode] = useState("herramientas");
   const [showAddToolList, setShowAddToolList] = useState(false);
@@ -5877,10 +5878,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     () => isTecnico ? tools.filter((t) => t.technician_id === profile.technician_id) : tools,
     [tools, isTecnico, profile.technician_id]
   );
-  const toolsFiltered = useMemo(() => visibleTools.filter((t) =>
-    (toolStatusFilter === "all" || t.status === toolStatusFilter) &&
-    (toolTechnicianFilter === "all" || (toolTechnicianFilter === "none" ? !t.technician_id : t.technician_id === toolTechnicianFilter))
-  ), [visibleTools, toolStatusFilter, toolTechnicianFilter]);
+  const toolsFiltered = useMemo(() => visibleTools.filter((t) => {
+    if (toolStatusFilter !== "all" && t.status !== toolStatusFilter) return false;
+    if (toolTechnicianFilter !== "all" && (toolTechnicianFilter === "none" ? t.technician_id : t.technician_id !== toolTechnicianFilter)) return false;
+    if (toolSearch.trim()) {
+      const q = toolSearch.toLowerCase();
+      if (!((t.name || "").toLowerCase().includes(q) || (t.serial_number || "").toLowerCase().includes(q) || (t.category || "").toLowerCase().includes(q))) return false;
+    }
+    return true;
+  }), [visibleTools, toolStatusFilter, toolTechnicianFilter, toolSearch]);
   const toolGroups = useMemo(() => {
     if (!groupToolsByTechnician) return null;
     const map = new Map();
@@ -8907,6 +8913,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   {toolsFiltered.length} herramienta{toolsFiltered.length !== 1 ? "s" : ""}{isTecnico ? " asignada" + (toolsFiltered.length !== 1 ? "s" : "") + " a ti" : ""}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <Search size={14} style={{ color: C.muted }} />
+                    <input value={toolSearch} onChange={(e) => setToolSearch(e.target.value)} placeholder="Buscar herramienta..." className="bg-transparent outline-none text-sm" style={{ color: C.text, width: 160 }} />
+                    {toolSearch && (
+                      <button onClick={() => setToolSearch("")} style={{ color: C.muted }}><X size={13} /></button>
+                    )}
+                  </div>
                   {!isTecnico && (
                     <select value={toolTechnicianFilter} onChange={(e) => setToolTechnicianFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
                       <option value="all">Todos los técnicos</option>
