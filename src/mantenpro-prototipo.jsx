@@ -889,8 +889,30 @@ function OnboardingScreen({ userId, userEmail, onDone }) {
 function GenericTable({ rows }) {
   if (!rows || rows.length === 0) return <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Sin registros.</div>;
   const cols = Object.keys(rows[0]);
+  const isDateCol = (c) => /(_at|_date)$/i.test(c) || c === "scheduled" || c === "deadline";
+  const isMoneyCol = (c) => /(price|cost|amount|total|subtotal|itbis|rate|budget|balance)/i.test(c) && c !== "max_discount_pct";
+  const STATUS_COLOR_HINTS = {
+    pendiente: C.amber, abierto: C.amber, en_proceso: C.blue, asignada: C.blue, disponible: C.green,
+    completada: C.green, pagada: C.green, emitida: C.green, activo: C.green, aprobada: C.green, sent: C.green, verificado: C.green,
+    cancelada: C.red, vencida: C.red, rechazada: C.red, fallido: C.red, failed: C.red, baja: C.red, inactivo: C.red,
+  };
+  const renderCell = (col, val) => {
+    if (val === null || val === undefined) return <span style={{ color: C.muted }}>—</span>;
+    if (col === "role" && ROLE_CFG[val]) return <Pill label={ROLE_CFG[val].label} color={ROLE_CFG[val].color} />;
+    if (typeof val === "boolean") return <span style={{ color: val ? C.green : C.muted }}>{val ? "Sí" : "No"}</span>;
+    if (typeof val === "object") {
+      const json = JSON.stringify(val);
+      return <span title={json} className="font-mono" style={{ color: C.muted }}>{json.length > 40 ? json.slice(0, 40) + "…" : json}</span>;
+    }
+    if ((col === "status" || col.endsWith("_status")) && typeof val === "string") {
+      return <Pill label={val.replace(/_/g, " ")} color={STATUS_COLOR_HINTS[val] || C.muted} />;
+    }
+    if (isMoneyCol(col) && !isNaN(Number(val))) return <span className="font-mono">{fmtMoney(val)}</span>;
+    if (isDateCol(col) && typeof val === "string" && val.length >= 8) return fmtDate(val.slice(0, 10));
+    return String(val);
+  };
   return (
-    <div className="overflow-auto" style={{ maxHeight: 420, border: `1px solid ${C.border}` }}>
+    <div className="overflow-auto" style={{ maxHeight: 480, border: `1px solid ${C.border}` }}>
       <table className="w-full text-xs" style={{ borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: C.panelAlt }}>
@@ -902,9 +924,7 @@ function GenericTable({ rows }) {
             <tr key={r.id || i} style={{ borderBottom: `1px solid ${C.border}` }}>
               {cols.map((c) => (
                 <td key={c} className="px-2 py-1.5 whitespace-nowrap" style={{ color: C.text }}>
-                  {typeof r[c] === "boolean"
-                    ? (r[c] ? "true" : "false")
-                    : (r[c] !== null && typeof r[c] === "object" ? JSON.stringify(r[c]) : (r[c] ?? ""))}
+                  {renderCell(c, r[c])}
                 </td>
               ))}
             </tr>
@@ -916,20 +936,21 @@ function GenericTable({ rows }) {
 }
 
 const SUPPORT_TABS = [
-  { key: "profiles", label: "Usuarios" },
-  { key: "clients", label: "Clientes" },
-  { key: "products", label: "Catálogo" },
-  { key: "orders", label: "Órdenes de trabajo" },
-  { key: "quotes", label: "Cotizaciones" },
-  { key: "salesOrders", label: "Órdenes de Venta" },
-  { key: "invoices", label: "Facturas" },
-  { key: "purchases", label: "Compras" },
-  { key: "ncf", label: "Secuencias NCF" },
-  { key: "cashSessions", label: "Caja" },
+  { key: "profiles", label: "Usuarios", Icon: Users2 },
+  { key: "clients", label: "Clientes", Icon: Users },
+  { key: "products", label: "Catálogo", Icon: Boxes },
+  { key: "orders", label: "Órdenes de trabajo", Icon: ClipboardList },
+  { key: "quotes", label: "Cotizaciones", Icon: FileText },
+  { key: "salesOrders", label: "Órdenes de Venta", Icon: ShoppingCart },
+  { key: "invoices", label: "Facturas", Icon: Receipt },
+  { key: "purchases", label: "Compras", Icon: Truck },
+  { key: "ncf", label: "Secuencias NCF", Icon: Hash },
+  { key: "cashSessions", label: "Caja", Icon: Wallet },
 ];
 
 function SupportViewer({ onSignOut }) {
   const [companies, setCompanies] = useState([]);
+  const [companySearch, setCompanySearch] = useState("");
   const [selectedCompanyId, setSelectedCompanyId] = useState("");
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [loadingData, setLoadingData] = useState(false);
@@ -939,16 +960,20 @@ function SupportViewer({ onSignOut }) {
 
   useEffect(() => {
     (async () => {
-      const { data: comps, error: err } = await supabase.from("companies").select("id, name").order("name");
+      const { data: comps, error: err } = await supabase.from("companies").select("*").order("name");
       if (err) setError(err.message);
       setCompanies(comps || []);
       setLoadingCompanies(false);
     })();
   }, []);
 
+  const selectedCompany = companies.find((c) => c.id === selectedCompanyId) || null;
+  const companiesFiltered = companies.filter((c) => (c.name || "").toLowerCase().includes(companySearch.toLowerCase()));
+
   const loadCompanyData = async (companyId) => {
     setSelectedCompanyId(companyId);
     setData({});
+    setTab("profiles");
     if (!companyId) return;
     setLoadingData(true);
     const [profs, cli, prod, ord, qts, sord, inv, purch, ncf, cash] = await Promise.all([
@@ -971,47 +996,96 @@ function SupportViewer({ onSignOut }) {
     setLoadingData(false);
   };
 
-  return (
-    <div className="w-full min-h-[720px]" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-      <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
-        <div className="flex items-center gap-2">
-          <ShieldCheck size={18} color={C.amber} />
-          <div className="font-bold text-sm">Modo Soporte — solo lectura</div>
-        </div>
-        <button onClick={onSignOut} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}><LogOut size={13} /> Cerrar sesión</button>
-      </div>
-      <div className="p-6">
-        {error && <div className="text-sm mb-3" style={{ color: C.red }}>Error: {error}</div>}
-        <div className="mb-4">
-          <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>Empresa a inspeccionar</div>
-          <select
-            className="px-3 py-2 text-sm w-full max-w-md"
-            style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}
-            value={selectedCompanyId}
-            onChange={(e) => loadCompanyData(e.target.value)}
-            disabled={loadingCompanies}
-          >
-            <option value="">{loadingCompanies ? "Cargando empresas..." : "Selecciona una empresa"}</option>
-            {companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+  const totalFacturado = (data.invoices || []).reduce((s, inv) => s + (Number(inv.total) || 0), 0);
 
-        {selectedCompanyId && (
-          <>
-            <div className="flex flex-wrap gap-2 mb-3">
-              {SUPPORT_TABS.map((t) => (
-                <button
-                  key={t.key} onClick={() => setTab(t.key)}
-                  className="px-3 py-1.5 text-xs font-semibold"
-                  style={{ background: tab === t.key ? C.amber : C.panel, color: tab === t.key ? "#1A1500" : C.muted, border: `1px solid ${C.border}` }}
-                >
-                  {t.label}{data[t.key] ? ` (${data[t.key].length})` : ""}
-                </button>
-              ))}
-            </div>
-            {loadingData ? <div className="text-sm" style={{ color: C.muted }}>Cargando datos...</div> : <GenericTable rows={data[tab]} />}
-          </>
+  return (
+    <div className="w-full min-h-screen flex" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="w-64 flex-shrink-0 flex flex-col" style={{ background: C.panel, borderRight: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2 px-5 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
+          <ShieldCheck size={18} color={C.amber} />
+          <div>
+            <div className="font-bold text-sm leading-none">MantenPro</div>
+            <div className="text-[10px] uppercase tracking-wide mt-0.5" style={{ color: C.amber }}>Modo Soporte</div>
+          </div>
+        </div>
+        <div className="p-3">
+          <div className="flex items-center gap-2 px-3 py-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+            <Search size={14} style={{ color: C.muted }} />
+            <input value={companySearch} onChange={(e) => setCompanySearch(e.target.value)} placeholder="Buscar empresa..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+          </div>
+        </div>
+        <nav className="flex-1 overflow-y-auto">
+          {loadingCompanies ? (
+            <div className="px-5 py-4 text-sm" style={{ color: C.muted }}>Cargando empresas...</div>
+          ) : companiesFiltered.length === 0 ? (
+            <div className="px-5 py-4 text-sm" style={{ color: C.muted }}>Ninguna empresa coincide.</div>
+          ) : companiesFiltered.map((c) => (
+            <button
+              key={c.id} onClick={() => loadCompanyData(c.id)}
+              className="w-full flex items-center gap-3 px-5 py-2.5 text-sm text-left"
+              style={{ color: selectedCompanyId === c.id ? C.text : C.muted, background: selectedCompanyId === c.id ? C.panelAlt : "transparent", borderLeft: `2px solid ${selectedCompanyId === c.id ? C.amber : "transparent"}` }}
+            >
+              <Building2 size={16} />
+              <span className="truncate">{c.name}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.border}` }}>
+          <button onClick={onSignOut} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}>
+            <LogOut size={13} /> Cerrar sesión
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col min-w-0">
+        {error && (
+          <div className="px-4 py-2 text-xs" style={{ background: "#3A2020", color: C.red }}>Error: {error}</div>
         )}
+        <div className="flex-1 overflow-y-auto p-6">
+          {!selectedCompany ? (
+            <div className="w-full h-full flex items-center justify-center text-sm" style={{ color: C.muted }}>
+              Selecciona una empresa a la izquierda para inspeccionar sus datos.
+            </div>
+          ) : (
+            <>
+              <div className="mb-5">
+                <div className="text-xl font-bold">{selectedCompany.name}</div>
+                <div className="text-xs mt-1" style={{ color: C.muted }}>
+                  {selectedCompany.created_at && `Creada el ${fmtDate((selectedCompany.created_at || "").slice(0, 10))}`}
+                  {selectedCompany.rnc && ` · RNC ${selectedCompany.rnc}`}
+                  <span className="font-mono"> · {selectedCompany.id}</span>
+                </div>
+              </div>
+
+              {loadingData ? (
+                <div className="text-sm" style={{ color: C.muted }}>Cargando datos...</div>
+              ) : (
+                <>
+                  <div className="flex gap-3 flex-wrap mb-6">
+                    <KpiCard label="Usuarios" value={(data.profiles || []).length} accent={C.blue} />
+                    <KpiCard label="Clientes" value={(data.clients || []).length} accent={C.green} />
+                    <KpiCard label="Órdenes de trabajo" value={(data.orders || []).length} accent={C.amber} />
+                    <KpiCard label="Facturado" value={fmtMoney(totalFacturado)} accent={C.muted} sub={`${(data.invoices || []).length} factura${(data.invoices || []).length !== 1 ? "s" : ""}`} />
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {SUPPORT_TABS.map((t) => (
+                      <button
+                        key={t.key} onClick={() => setTab(t.key)}
+                        className="flex items-center gap-2 px-3 py-2 text-xs font-semibold"
+                        style={{ background: tab === t.key ? C.amber : C.panel, color: tab === t.key ? "#1A1500" : C.muted, border: `1px solid ${tab === t.key ? C.amber : C.border}` }}
+                      >
+                        <t.Icon size={13} />
+                        {t.label}{data[t.key] ? ` (${data[t.key].length})` : ""}
+                      </button>
+                    ))}
+                  </div>
+                  <GenericTable rows={data[tab]} />
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
