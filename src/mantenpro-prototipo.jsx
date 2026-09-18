@@ -902,7 +902,9 @@ function GenericTable({ rows }) {
             <tr key={r.id || i} style={{ borderBottom: `1px solid ${C.border}` }}>
               {cols.map((c) => (
                 <td key={c} className="px-2 py-1.5 whitespace-nowrap" style={{ color: C.text }}>
-                  {typeof r[c] === "boolean" ? (r[c] ? "true" : "false") : (r[c] ?? "")}
+                  {typeof r[c] === "boolean"
+                    ? (r[c] ? "true" : "false")
+                    : (r[c] !== null && typeof r[c] === "object" ? JSON.stringify(r[c]) : (r[c] ?? ""))}
                 </td>
               ))}
             </tr>
@@ -5872,6 +5874,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [toolTechnicianFilter, setToolTechnicianFilter] = useState("all");
   const [toolSearch, setToolSearch] = useState("");
   const [groupToolsByTechnician, setGroupToolsByTechnician] = useState(false);
+  const [selectedTools, setSelectedTools] = useState(new Set());
   const [toolViewMode, setToolViewMode] = useState("herramientas");
   const [showAddProject, setShowAddProject] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
@@ -7086,6 +7089,24 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const { error } = await supabase.from("tools").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); return; }
     setTools((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const bulkDeleteTools = async (ids) => {
+    if (ids.length === 0) return;
+    if (!window.confirm(`¿Eliminar ${ids.length} herramienta${ids.length !== 1 ? "s" : ""} seleccionada${ids.length !== 1 ? "s" : ""}? Esta acción no se puede deshacer.`)) return;
+    const { error } = await supabase.from("tools").delete().in("id", ids);
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => prev.filter((t) => !ids.includes(t.id)));
+    setSelectedTools(new Set());
+  };
+
+  const bulkRetireTools = async (ids) => {
+    if (ids.length === 0) return;
+    if (!window.confirm(`¿Dar de baja ${ids.length} herramienta${ids.length !== 1 ? "s" : ""} seleccionada${ids.length !== 1 ? "s" : ""}? Dejarán de aparecer como disponibles para asignar, pero no se borran.`)) return;
+    const { data, error } = await supabase.from("tools").update({ status: "baja" }).in("id", ids).select();
+    if (error) { setErrorMsg(error.message); return; }
+    setTools((prev) => prev.map((t) => (ids.includes(t.id) ? (data.find((d) => d.id === t.id) || t) : t)));
+    setSelectedTools(new Set());
   };
 
   // ---- Inventario: Listados de herramientas (kits asignables a un técnico) ----
@@ -8659,12 +8680,22 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   }, [view, JSON.stringify(effectivePermissions)]);
 
   const renderToolRow = (t) => (
-    <div key={t.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+    <div key={t.id} className="p-4" style={{ background: C.panel, border: `1px solid ${selectedTools.has(t.id) ? C.amber : C.border}` }}>
       <div className="flex items-start justify-between gap-2 mb-1">
-        <div className="min-w-0">
-          <div className="font-medium truncate">{t.name}</div>
-          {t.serial_number && <div className="text-xs" style={{ color: C.muted }}>S/N {t.serial_number}</div>}
-          {t.category && <div className="text-xs" style={{ color: C.muted }}>{t.category}</div>}
+        <div className="min-w-0 flex items-start gap-2">
+          {canDelete("tools") && (
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={selectedTools.has(t.id)}
+              onChange={() => setSelectedTools((prev) => { const next = new Set(prev); next.has(t.id) ? next.delete(t.id) : next.add(t.id); return next; })}
+            />
+          )}
+          <div className="min-w-0">
+            <div className="font-medium truncate">{t.name}</div>
+            {t.serial_number && <div className="text-xs" style={{ color: C.muted }}>S/N {t.serial_number}</div>}
+            {t.category && <div className="text-xs" style={{ color: C.muted }}>{t.category}</div>}
+          </div>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {canEdit("tools") && <button onClick={() => setEditingTool(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
@@ -9530,9 +9561,19 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               <>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <div className="text-sm" style={{ color: C.muted }}>
-                  {toolsFiltered.length} herramienta{toolsFiltered.length !== 1 ? "s" : ""}{isTecnico ? " asignada" + (toolsFiltered.length !== 1 ? "s" : "") + " a ti" : ""}
+                  {toolsFiltered.length} herramienta{toolsFiltered.length !== 1 ? "s" : ""}{isTecnico ? " asignada" + (toolsFiltered.length !== 1 ? "s" : "") + " a ti" : ""}{selectedTools.size > 0 ? ` · ${selectedTools.size} seleccionadas` : ""}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
+                  {canDelete("tools") && selectedTools.size > 0 && (
+                    <>
+                      <button onClick={() => bulkRetireTools(Array.from(selectedTools))} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.panelAlt, color: C.red, border: `1px solid ${C.red}40` }}>
+                        <Ban size={14} /> Dar de baja ({selectedTools.size})
+                      </button>
+                      <button onClick={() => bulkDeleteTools(Array.from(selectedTools))} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#fff" }}>
+                        <Trash2 size={14} /> Eliminar seleccionadas ({selectedTools.size})
+                      </button>
+                    </>
+                  )}
                   <div className="flex items-center gap-2 px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                     <Search size={14} style={{ color: C.muted }} />
                     <input value={toolSearch} onChange={(e) => setToolSearch(e.target.value)} placeholder="Buscar herramienta..." className="bg-transparent outline-none text-sm" style={{ color: C.text, width: 160 }} />
@@ -9555,6 +9596,20 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     <label className="flex items-center gap-1.5 text-sm px-3 py-2 cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.text }}>
                       <input type="checkbox" checked={groupToolsByTechnician} onChange={(e) => setGroupToolsByTechnician(e.target.checked)} />
                       Agrupar por técnico
+                    </label>
+                  )}
+                  {canDelete("tools") && toolsFiltered.length > 0 && (
+                    <label className="flex items-center gap-1.5 text-sm px-3 py-2 cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                      <input
+                        type="checkbox"
+                        checked={toolsFiltered.length > 0 && toolsFiltered.every((t) => selectedTools.has(t.id))}
+                        onChange={() => setSelectedTools((prev) => {
+                          const allSelected = toolsFiltered.every((t) => prev.has(t.id));
+                          if (allSelected) return new Set();
+                          return new Set(toolsFiltered.map((t) => t.id));
+                        })}
+                      />
+                      Seleccionar todas
                     </label>
                   )}
                   {canEdit("tools") && (
