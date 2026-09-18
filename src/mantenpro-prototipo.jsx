@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
   CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut,
-  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet, Package, UserCheck, MessageCircle, Bell, BellOff, Menu
+  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet, Package, UserCheck, MessageCircle, Bell, BellOff, Menu, FolderKanban, Link2, Unlink
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend
@@ -145,6 +145,7 @@ const ACTIVITY_TABLE_LABELS = {
   sales_orders: "Órdenes de venta",
   tools: "Herramientas",
   inventory_materials: "Materiales sobrantes",
+  projects: "Proyectos",
   branches: "Sucursales",
   checklist_templates: "Checklists",
   profiles: "Usuarios",
@@ -163,6 +164,13 @@ const TOOL_STATUS_CFG = {
   baja: { label: "Dada de baja", color: C.red },
 };
 
+const PROJECT_STATUS_CFG = {
+  activo: { label: "Activo", color: C.green },
+  pausado: { label: "Pausado", color: C.amber },
+  completado: { label: "Completado", color: C.blue },
+  cancelado: { label: "Cancelado", color: C.red },
+};
+
 const PRIORITY_CFG = {
   baja: { label: "Baja", color: C.muted },
   media: { label: "Media", color: C.amber },
@@ -177,9 +185,14 @@ const ROLE_CFG = {
   tecnico: { label: "Técnico", color: C.muted },
 };
 
+// Un técnico puede tener una sucursal principal (branch_id) y trabajar también
+// en sucursales adicionales (extra_branch_ids). Esta función centraliza esa
+// comprobación para no repetirla en cada pantalla.
+const techWorksAtBranch = (t, branchId) => t.branch_id === branchId || (t.extra_branch_ids || []).includes(branchId);
+
 const ROLE_DEFAULT_PERMISSIONS = {
   supervisor: {
-    ...Object.fromEntries(["dashboard", "agenda", "orders", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),
+    ...Object.fromEntries(["dashboard", "agenda", "orders", "projects", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),
     activityLog: "view",
   },
   vendedor: { dashboard: "edit", agenda: "edit", orders: "edit", quotes: "edit", invoices: "edit", caja: "edit" },
@@ -193,6 +206,7 @@ const PERMISSION_CATALOG = [
     { key: "orders", label: "Órdenes de trabajo" },
   ] },
   { section: "Departamento Técnico", items: [
+    { key: "projects", label: "Proyectos" },
     { key: "incidents", label: "Incidentes" },
     { key: "equipment", label: "Gestión de Equipos" },
     { key: "checklists", label: "Checklists" },
@@ -252,7 +266,7 @@ function PermissionChecklist({ value, onChange }) {
     else next[key] = level;
     onChange(next);
   };
-  const LEVELS = [["none", "Sin acceso"], ["view", "Ver"], ["edit", "Editar"]];
+  const LEVELS = [["none", "Sin acceso"], ["view", "Ver"], ["edit_no_delete", "Editar (sin eliminar)"], ["edit", "Editar y eliminar"]];
   return (
     <div className="space-y-4">
       {PERMISSION_CATALOG.map((group) => (
@@ -628,7 +642,7 @@ function Modal({ title, onClose, children, wide }) {
       <div className={`w-full ${wide ? "max-w-2xl" : "max-w-md"} max-h-[85vh] overflow-y-auto`} style={{ background: C.panel, border: `1px solid ${C.border}` }}>
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: `1px solid ${C.border}` }}>
           <h3 className="font-semibold text-base" style={{ color: C.text }}>{title}</h3>
-          <button onClick={onClose} className="p-1" style={{ color: C.muted }}><X size={18} /></button>
+          {onClose && <button onClick={onClose} className="p-1" style={{ color: C.muted }}><X size={18} /></button>}
         </div>
         <div className="p-5">{children}</div>
       </div>
@@ -658,6 +672,47 @@ function FullScreenLoader({ label }) {
 }
 
 // ---------------------------------------------------------------------------
+// Cambiar contraseña — reutilizado tanto para el cambio voluntario (desde el
+// menú lateral, con sesión normal) como para el enlace de "olvidé mi
+// contraseña" (con sesión de recuperación).
+// ---------------------------------------------------------------------------
+function ChangePasswordModal({ onClose, onDone, title }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    setError("");
+    if (password.length < 6) { setError("La contraseña debe tener al menos 6 caracteres."); return; }
+    if (password !== confirmPassword) { setError("Las contraseñas no coinciden."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    onDone();
+  };
+
+  return (
+    <Modal title={title || "Cambiar contraseña"} onClose={onClose}>
+      <Field label="Nueva contraseña">
+        <input className={inputClass} style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+      </Field>
+      <Field label="Confirmar nueva contraseña">
+        <input className={inputClass} style={inputStyle} type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" />
+      </Field>
+      {error && <div className="text-xs mb-3" style={{ color: C.red }}>{error}</div>}
+      <div className="flex justify-end gap-2 mt-4">
+        {onClose && <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>}
+        <button onClick={submit} disabled={loading} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {loading ? "Guardando..." : "Guardar contraseña"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Pantalla de acceso (login / crear cuenta)
 // ---------------------------------------------------------------------------
 function AuthScreen({ inviteInfo }) {
@@ -666,6 +721,7 @@ function AuthScreen({ inviteInfo }) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [resetSent, setResetSent] = useState(false);
 
   const submit = async () => {
     setError("");
@@ -678,6 +734,53 @@ function AuthScreen({ inviteInfo }) {
     setLoading(false);
     if (error) setError(error.message);
   };
+
+  const sendReset = async () => {
+    setError("");
+    if (!email.trim()) { setError("Escribe tu correo para poder enviarte el enlace."); return; }
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+    setLoading(false);
+    if (error) { setError(error.message); return; }
+    setResetSent(true);
+  };
+
+  if (mode === "forgot") {
+    return (
+      <div className="w-full min-h-[720px] flex items-center justify-center" style={{ background: C.bg, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        <div className="w-full max-w-sm p-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+          <div className="flex items-center gap-2 mb-6">
+            <div className="w-8 h-8 flex items-center justify-center" style={{ background: C.amber }}>
+              <Wrench size={18} color="#1A1500" />
+            </div>
+            <div>
+              <div className="font-bold text-base leading-none" style={{ color: C.text }}>MantenPro</div>
+              <div className="text-[10px] uppercase tracking-wide" style={{ color: C.muted }}>Recuperar contraseña</div>
+            </div>
+          </div>
+          {resetSent ? (
+            <div className="text-sm mb-4" style={{ color: C.text }}>
+              Si <b>{email}</b> tiene una cuenta con nosotros, te enviamos un correo con un enlace para poner una contraseña nueva. Revisa también la carpeta de spam.
+            </div>
+          ) : (
+            <>
+              <div className="text-xs mb-4" style={{ color: C.muted }}>Escribe tu correo y te enviamos un enlace para poner una contraseña nueva.</div>
+              <Field label="Correo electrónico">
+                <input className={inputClass} style={inputStyle} type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@empresa.com" />
+              </Field>
+              {error && <div className="text-xs mb-3" style={{ color: C.red }}>{error}</div>}
+              <button onClick={sendReset} disabled={loading} className="w-full px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+                {loading ? "Enviando..." : "Enviar enlace de recuperación"}
+              </button>
+            </>
+          )}
+          <button onClick={() => { setMode("login"); setError(""); setResetSent(false); }} className="w-full text-xs mt-4" style={{ color: C.muted }}>
+            ← Volver a iniciar sesión
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full min-h-[720px] flex items-center justify-center" style={{ background: C.bg, fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -714,6 +817,12 @@ function AuthScreen({ inviteInfo }) {
         <Field label="Contraseña">
           <input className={inputClass} style={inputStyle} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
         </Field>
+
+        {mode === "login" && (
+          <button onClick={() => { setMode("forgot"); setError(""); }} className="text-xs mb-3" style={{ color: C.amber }}>
+            ¿Olvidaste tu contraseña?
+          </button>
+        )}
 
         {error && <div className="text-xs mb-3" style={{ color: C.red }}>{error}</div>}
 
@@ -982,7 +1091,7 @@ function OrderFormModal({ branches, equipment, technicians, initial, initialExtr
   const [files, setFiles] = useState([]);
 
   const branchEquip = equipment.filter((e) => e.branch_id === branchId);
-  const branchTechs = technicians.filter((t) => t.branch_id === branchId);
+  const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === technicianId || extraTechIds.includes(t.id)));
   const isImage = (name) => /\.(png|jpe?g|gif|webp)$/i.test(name || "");
 
   const toggleExtraTech = (id) => setExtraTechIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
@@ -1102,8 +1211,11 @@ function TechFormModal({ branches, initial, onClose, onSave, saving }) {
   const [name, setName] = useState(initial?.name || "");
   const [specialty, setSpecialty] = useState(initial?.specialty || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
+  const [extraBranchIds, setExtraBranchIds] = useState(initial?.extra_branch_ids || []);
   const [canCreateIncidents, setCanCreateIncidents] = useState(initial?.can_create_incidents || false);
   const [hourlyRate, setHourlyRate] = useState(initial?.hourly_rate ?? "");
+  const toggleExtraBranch = (id) => setExtraBranchIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const otherBranches = branches.filter((b) => b.id !== branchId);
   return (
     <Modal title={initial ? "Editar técnico" : "Agregar técnico"} onClose={onClose}>
       <Field label="Nombre completo">
@@ -1117,11 +1229,24 @@ function TechFormModal({ branches, initial, onClose, onSave, saving }) {
           <input type="number" step="0.01" min="0" className={inputClass} style={inputStyle} value={hourlyRate} onChange={(e) => setHourlyRate(e.target.value)} placeholder="Ej. 350" />
         </Field>
       </div>
-      <Field label="Sucursal">
-        <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+      <Field label="Sucursal principal">
+        <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => { setBranchId(e.target.value); setExtraBranchIds((prev) => prev.filter((id) => id !== e.target.value)); }}>
           {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </Field>
+      {otherBranches.length > 0 && (
+        <Field label="Sucursales adicionales (opcional)">
+          <div className="flex flex-wrap gap-2">
+            {otherBranches.map((b) => (
+              <label key={b.id} className="flex items-center gap-1.5 text-sm px-3 py-1.5 cursor-pointer" style={{ border: `1px solid ${C.border}`, background: extraBranchIds.includes(b.id) ? C.panelAlt : "transparent", color: C.text }}>
+                <input type="checkbox" checked={extraBranchIds.includes(b.id)} onChange={() => toggleExtraBranch(b.id)} />
+                {b.name}
+              </label>
+            ))}
+          </div>
+          <div className="text-xs mt-1" style={{ color: C.muted }}>Podrá ser asignado a órdenes, equipos y herramientas también en estas sucursales, además de la principal.</div>
+        </Field>
+      )}
       <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
         <input type="checkbox" checked={canCreateIncidents} onChange={(e) => setCanCreateIncidents(e.target.checked)} />
         Puede reportar incidentes desde la app
@@ -1129,7 +1254,7 @@ function TechFormModal({ branches, initial, onClose, onSave, saving }) {
       {initial && <ActivityHistorySection tableName="technicians" recordId={initial.id} title="Historial de este técnico" resolvers={{ branch_id: (id) => branches.find((b) => b.id === id)?.name }} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
-        <button onClick={() => name.trim() && branchId && onSave(name.trim(), specialty.trim(), branchId, canCreateIncidents, hourlyRate === "" ? null : Number(hourlyRate))} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+        <button onClick={() => name.trim() && branchId && onSave(name.trim(), specialty.trim(), branchId, canCreateIncidents, hourlyRate === "" ? null : Number(hourlyRate), extraBranchIds)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
           {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar"}
         </button>
       </div>
@@ -1154,7 +1279,7 @@ function EquipmentFormModal({ branches, locations, technicians, initial, onClose
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
 
   const branchLocations = locations.filter((l) => l.branch_id === branchId);
-  const branchTechs = technicians.filter((t) => t.branch_id === branchId);
+  const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === defaultTechId));
 
   const submit = () => {
     if (!name.trim() || !branchId) return;
@@ -1673,7 +1798,7 @@ function ClientAssetFormModal({ clients, branches, technicians, initial, onClose
   const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
 
-  const branchTechs = technicians.filter((t) => t.branch_id === branchId);
+  const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === defaultTechId));
 
   const submit = () => {
     if (!clientId || !name.trim() || !installDate) return;
@@ -1783,7 +1908,7 @@ function ClientAssetFormModal({ clients, branches, technicians, initial, onClose
   );
 }
 
-function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, branches, restrictToBranchId, onClose, onSave, saving }) {
+function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, branches, restrictToBranchIds, onClose, onSave, saving }) {
   const [itemType, setItemType] = useState(initial?.item_type || defaultItemType || "producto");
   const [sku, setSku] = useState(initial?.sku || "");
   const [skuManual, setSkuManual] = useState(!!initial?.sku);
@@ -1798,7 +1923,7 @@ function ProductFormModal({ initial, existingProducts, allProducts, initialCompo
     return c > 0 ? (((u - c) / c) * 100).toFixed(2) : "";
   });
   const [stockQty, setStockQty] = useState(initial?.stock_qty ?? "");
-  const [branchId, setBranchId] = useState(initial?.branch_id || restrictToBranchId || "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || (restrictToBranchIds && restrictToBranchIds[0]) || "");
   const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
   const [isComposite, setIsComposite] = useState(initial?.is_composite ?? false);
   const [components, setComponents] = useState(() => (initialComponents || []).map((c) => ({ component_product_id: c.component_product_id, quantity: c.quantity })));
@@ -1936,14 +2061,18 @@ function ProductFormModal({ initial, existingProducts, allProducts, initialCompo
         )}
       </div>
       {!isService && (
-        <Field label={restrictToBranchId ? "Sucursal / dónde está guardado" : "Sucursal / dónde está guardado (opcional)"}>
-          {restrictToBranchId ? (
+        <Field label={restrictToBranchIds ? "Sucursal / dónde está guardado" : "Sucursal / dónde está guardado (opcional)"}>
+          {restrictToBranchIds && restrictToBranchIds.length === 1 ? (
             <div className={inputClass} style={{ ...inputStyle, color: C.muted, cursor: "not-allowed" }}>
               {(branches || []).find((b) => b.id === branchId)?.name || "Tu sucursal"}
-              {initial && initial.branch_id && initial.branch_id !== restrictToBranchId && (
+              {initial && initial.branch_id && !restrictToBranchIds.includes(initial.branch_id) && (
                 <span style={{ color: C.amber }}> (asignado por un administrador — no lo puedes cambiar)</span>
               )}
             </div>
+          ) : restrictToBranchIds ? (
+            <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              {(branches || []).filter((b) => restrictToBranchIds.includes(b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
           ) : (
             <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
               <option value="">Sin especificar</option>
@@ -2116,35 +2245,82 @@ function CashCloseModal({ session, branchName, expected, onClose, onSave, saving
   );
 }
 
-function UserPermissionsModal({ user, branches, onClose, onSave, onUpdateBranch, onToggleActive, saving }) {
+function UserPermissionsModal({ user, branches, onClose, onSave, onUpdateBranch, onUpdateRole, onToggleActive, saving }) {
+  const [role, setRole] = useState(user.role);
   const [permissions, setPermissions] = useState((user.permissions && typeof user.permissions === "object" && !Array.isArray(user.permissions)) ? user.permissions : (ROLE_DEFAULT_PERMISSIONS[user.role] || {}));
   const [branchId, setBranchId] = useState(user.branch_id || "");
+  const [extraBranchIds, setExtraBranchIds] = useState(user.extra_branch_ids || []);
   const [localError, setLocalError] = useState("");
   const isActive = user.is_active ?? true;
+  const toggleExtraBranch = (id) => setExtraBranchIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  const otherBranches = (branches || []).filter((b) => b.id !== branchId);
+  const handleRoleChange = (newRole) => {
+    setRole(newRole);
+    setPermissions(ROLE_DEFAULT_PERMISSIONS[newRole] || {});
+  };
   const handleSave = async () => {
     setLocalError("");
-    if (branchId !== (user.branch_id || "")) await onUpdateBranch(user.id, branchId);
+    if (role !== user.role) {
+      const roleResult = await onUpdateRole(user.id, role);
+      if (roleResult !== true) { setLocalError(`No se pudo cambiar el rol. Error de Supabase: ${roleResult}`); return; }
+    }
+    const nextExtra = branchId ? extraBranchIds : [];
+    if (branchId !== (user.branch_id || "") || JSON.stringify(nextExtra) !== JSON.stringify(user.extra_branch_ids || [])) {
+      await onUpdateBranch(user.id, branchId, nextExtra);
+    }
     const result = await onSave(user.id, permissions);
     if (result === true) onClose();
     else setLocalError(`No se pudieron guardar los permisos. Error de Supabase: ${result}`);
   };
   return (
     <Modal title={`Gestionar a ${user.full_name || user.email}`} onClose={onClose} wide>
-      <div className="text-xs mb-3" style={{ color: C.muted }}>Rol: <span style={{ color: ROLE_CFG[user.role]?.color }}>{ROLE_CFG[user.role]?.label || user.role}</span></div>
       {!isActive && (
         <div className="text-xs mb-3 px-3 py-2" style={{ background: C.red + "15", border: `1px solid ${C.red}40`, color: C.red }}>
           Este usuario está desactivado — no puede entrar al sistema hasta que lo reactives.
         </div>
       )}
+      <Field label="Rol">
+        <select className={inputClass} style={inputStyle} value={role} onChange={(e) => handleRoleChange(e.target.value)}>
+          <option value="tecnico">Técnico (solo ve y actualiza sus propias órdenes)</option>
+          <option value="vendedor">Vendedor (cotiza/factura y controla la caja de su sucursal)</option>
+          <option value="supervisor">Supervisor (puede crear y editar todo, menos invitar usuarios)</option>
+          <option value="admin">Admin (control total)</option>
+        </select>
+      </Field>
+      {role !== user.role && (
+        <div className="text-xs mb-3 px-3 py-2" style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, color: C.amber }}>
+          Vas a cambiar el rol de {ROLE_CFG[user.role]?.label || user.role} a {ROLE_CFG[role]?.label || role}. Sus permisos se van a reiniciar a los que trae ese rol por defecto{role !== "admin" ? " (los puedes ajustar abajo antes de guardar)" : ""}. Este cambio se aplica al hacer clic en "Guardar cambios".
+        </div>
+      )}
       <Field label="Sucursal fija (opcional)">
-        <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
-          <option value="">Sin sucursal fija (ve/opera en varias)</option>
+        <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => { setBranchId(e.target.value); if (!e.target.value) setExtraBranchIds([]); }}>
+          <option value="">Sin sucursal fija (ve/opera en todas)</option>
           {(branches || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
       </Field>
-      <div className="text-xs mb-3" style={{ color: C.muted }}>Si le pones una sucursal fija, este usuario solo podrá asignar productos (y otras cosas restringidas por sucursal) a esa sucursal.</div>
-      <div className="text-xs mb-2" style={{ color: C.muted }}>Estas casillas controlan exactamente qué secciones puede ver y usar.</div>
-      <PermissionChecklist value={permissions} onChange={setPermissions} />
+      {branchId && otherBranches.length > 0 && (
+        <Field label="Sucursales adicionales (opcional)">
+          <div className="flex flex-wrap gap-2">
+            {otherBranches.map((b) => (
+              <label key={b.id} className="flex items-center gap-1.5 text-sm px-3 py-1.5 cursor-pointer" style={{ border: `1px solid ${C.border}`, background: extraBranchIds.includes(b.id) ? C.panelAlt : "transparent", color: C.text }}>
+                <input type="checkbox" checked={extraBranchIds.includes(b.id)} onChange={() => toggleExtraBranch(b.id)} />
+                {b.name}
+              </label>
+            ))}
+          </div>
+        </Field>
+      )}
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Si le pones una sucursal fija, este usuario solo podrá operar (asignar productos y otras cosas restringidas por sucursal) en esa sucursal y en las adicionales que marques. Sin ninguna sucursal fija, opera en todas sin restricción.</div>
+      {role === "admin" ? (
+        <div className="text-xs mb-3 px-3 py-2" style={{ background: C.panelAlt, color: C.muted }}>
+          Los administradores tienen acceso total a todas las secciones — no necesitan permisos individuales.
+        </div>
+      ) : (
+        <>
+          <div className="text-xs mb-2" style={{ color: C.muted }}>Estas casillas controlan exactamente qué secciones puede ver y usar.</div>
+          <PermissionChecklist value={permissions} onChange={setPermissions} />
+        </>
+      )}
       {localError && <div className="text-xs mt-3" style={{ color: C.red }}>{localError}</div>}
       <div className="flex justify-between items-center gap-2 mt-4">
         <button onClick={async () => { await onToggleActive(user); onClose(); }} className="px-4 py-2 text-sm font-semibold" style={{ background: isActive ? C.red + "15" : C.green + "15", color: isActive ? C.red : C.green, border: `1px solid ${isActive ? C.red : C.green}40` }}>
@@ -2278,7 +2454,7 @@ function ToolFormModal({ branches, technicians, initial, onClose, onSave, saving
       <Field label="Asignar a técnico (opcional)">
         <select className={inputClass} style={inputStyle} value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
           <option value="">Sin asignar</option>
-          {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {technicians.filter((t) => t.is_active !== false || t.id === technicianId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       </Field>
       <Field label="Notas (opcional)">
@@ -2359,7 +2535,7 @@ function ToolListFormModal({ tools, technicians, initial, onClose, onSave, savin
   );
 }
 
-function ToolListCard({ list, tools, technicians, canEdit, onEdit, onDelete, onAssign, onReturn }) {
+function ToolListCard({ list, tools, technicians, canEdit, canDelete, onEdit, onDelete, onAssign, onReturn }) {
   const groups = useMemo(() => {
     const map = {};
     tools.forEach((t) => {
@@ -2380,7 +2556,7 @@ function ToolListCard({ list, tools, technicians, canEdit, onEdit, onDelete, onA
         <div className="font-semibold">{list.name}</div>
         <div className="flex items-center gap-1">
           {canEdit && <button onClick={onEdit} style={iconBtnStyle}><Pencil size={13} /></button>}
-          {canEdit && <button onClick={onDelete} style={iconBtnStyle}><Trash2 size={13} /></button>}
+          {canDelete && <button onClick={onDelete} style={iconBtnStyle}><Trash2 size={13} /></button>}
         </div>
       </div>
       <div className="text-xs mb-3" style={{ color: C.muted }}>{tools.length} herramienta{tools.length !== 1 ? "s" : ""}</div>
@@ -2404,7 +2580,7 @@ function ToolListCard({ list, tools, technicians, canEdit, onEdit, onDelete, onA
                   <input type="text" inputMode="numeric" value={input.qty} onChange={(e) => setInput(g.name, { qty: e.target.value.replace(/[^0-9]/g, "") })} className="w-12 px-2 py-1 text-xs" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
                   <select value={input.techId} onChange={(e) => setInput(g.name, { techId: e.target.value })} className="flex-1 px-2 py-1 text-xs" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
                     <option value="">Elegir técnico...</option>
-                    {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {technicians.filter((t) => t.is_active !== false).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                   <button
                     onClick={() => {
@@ -2435,7 +2611,7 @@ function TechnicianToolRow({ tool, technicians, myTechnicianId, activeLoan, onCo
   const isMine = tool.technician_id === myTechnicianId;
   const isLoanedToMe = activeLoan && activeLoan.to_technician_id === myTechnicianId;
   const lenderName = isLoanedToMe ? (technicians.find((t) => t.id === activeLoan.from_technician_id)?.name || "otro técnico") : null;
-  const otherTechnicians = technicians.filter((t) => t.id !== myTechnicianId);
+  const otherTechnicians = technicians.filter((t) => t.id !== myTechnicianId && t.is_active !== false);
 
   return (
     <div className="px-4 py-3 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -2532,7 +2708,7 @@ function BulkToolFormModal({ branches, technicians, onClose, onSave, saving }) {
         <Field label="Asignar todas a este técnico (opcional)">
           <select className={inputClass} style={inputStyle} value={commonTechnicianId} onChange={(e) => setCommonTechnicianId(e.target.value)}>
             <option value="">Sin asignar</option>
-            {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {technicians.filter((t) => t.is_active !== false).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
       </div>
@@ -2569,7 +2745,7 @@ function BulkToolFormModal({ branches, technicians, onClose, onSave, saving }) {
                 </select>
                 <select className={`${inputClass} col-span-2`} style={inputStyle} value={r.technician_id} onChange={(e) => updateRow(r.tempId, { technician_id: e.target.value })}>
                   <option value="">Sin asignar</option>
-                  {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  {technicians.filter((t) => t.is_active !== false || t.id === r.technician_id).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
                 <button onClick={() => removeRow(r.tempId)} className="col-span-1 flex justify-center" style={iconBtnStyle}><Trash2 size={14} /></button>
               </div>
@@ -2629,6 +2805,220 @@ function MaterialFormModal({ branches, initial, onClose, onSave, saving }) {
         <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
           {saving ? "Guardando..." : initial ? "Guardar cambios" : "Agregar"}
         </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ProjectFormModal({ branches, clients, technicians, initial, onClose, onSave, saving }) {
+  const [name, setName] = useState(initial?.name || "");
+  const [clientId, setClientId] = useState(initial?.client_id || "");
+  const [branchId, setBranchId] = useState(initial?.branch_id || "");
+  const [leadTechnicianId, setLeadTechnicianId] = useState(initial?.lead_technician_id || "");
+  const [status, setStatus] = useState(initial?.status || "activo");
+  const [budget, setBudget] = useState(initial?.budget ?? "");
+  const [startDate, setStartDate] = useState(initial?.start_date || "");
+  const [endDate, setEndDate] = useState(initial?.end_date || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const submit = () => {
+    if (!name.trim()) return;
+    onSave({
+      name: name.trim(),
+      client_id: clientId || null,
+      branch_id: branchId || null,
+      lead_technician_id: leadTechnicianId || null,
+      status,
+      budget: budget === "" ? null : Number(budget),
+      start_date: startDate || null,
+      end_date: endDate || null,
+      description: description.trim() || null,
+    });
+  };
+  return (
+    <Modal title={initial ? "Editar proyecto" : "Nuevo proyecto"} onClose={onClose} wide>
+      <Field label="Nombre del proyecto">
+        <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Remodelación planta eléctrica — Hotel Faro" />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Cliente (opcional)">
+          <SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} />
+        </Field>
+        <Field label="Sucursal">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Técnico responsable (opcional)">
+          <select className={inputClass} style={inputStyle} value={leadTechnicianId} onChange={(e) => setLeadTechnicianId(e.target.value)}>
+            <option value="">Sin asignar</option>
+            {technicians.filter((t) => t.is_active !== false || t.id === leadTechnicianId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </Field>
+        {initial && (
+          <Field label="Estado">
+            <select className={inputClass} style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)}>
+              {Object.entries(PROJECT_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </Field>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Presupuesto (opcional)">
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="0.00" />
+        </Field>
+        <Field label="Fecha de inicio">
+          <input type="date" className={inputClass} style={inputStyle} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        </Field>
+        <Field label="Fecha estimada de fin">
+          <input type="date" className={inputClass} style={inputStyle} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        </Field>
+      </div>
+      <Field label="Descripción / notas (opcional)">
+        <textarea className={inputClass} style={{ ...inputStyle, minHeight: 80 }} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Alcance del proyecto, detalles relevantes..." />
+      </Field>
+      {initial && <ActivityHistorySection tableName="projects" recordId={initial.id} title="Historial de este proyecto" resolvers={{ client_id: (id) => clients.find((c) => c.id === id)?.name, branch_id: (id) => branches.find((b) => b.id === id)?.name, lead_technician_id: (id) => technicians.find((t) => t.id === id)?.name }} />}
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : initial ? "Guardar cambios" : "Crear proyecto"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function ProjectDetailModal({
+  project, clients, branches, technicians, orders, salesOrders, materials, projectMaterials,
+  canEditProjects, canDeleteProjects, onClose, onEdit, onDelete, onSetStatus,
+  onLinkOrder, onUnlinkOrder, onLinkSalesOrder, onUnlinkSalesOrder, onAddMaterial, onRemoveMaterial, saving,
+}) {
+  const [pickOrderId, setPickOrderId] = useState("");
+  const [pickSalesOrderId, setPickSalesOrderId] = useState("");
+  const [pickMaterialId, setPickMaterialId] = useState("");
+  const [pickMaterialQty, setPickMaterialQty] = useState("");
+  const [pickMaterialNotes, setPickMaterialNotes] = useState("");
+
+  const linkedOrders = orders.filter((o) => o.project_id === project.id);
+  const availableOrders = orders.filter((o) => !o.project_id);
+  const linkedSalesOrders = salesOrders.filter((o) => o.project_id === project.id);
+  const availableSalesOrders = salesOrders.filter((o) => !o.project_id);
+  const linkedMaterials = projectMaterials.filter((pm) => pm.project_id === project.id);
+  const availableMaterials = materials.filter((m) => Number(m.quantity || 0) > 0);
+
+  const clientName = clients.find((c) => c.id === project.client_id)?.name || "—";
+  const branchNameStr = branches.find((b) => b.id === project.branch_id)?.name || "—";
+  const leadTechName = technicians.find((t) => t.id === project.lead_technician_id)?.name || "Sin asignar";
+
+  return (
+    <Modal title={project.name} onClose={onClose} wide>
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Pill label={PROJECT_STATUS_CFG[project.status]?.label || "Activo"} color={PROJECT_STATUS_CFG[project.status]?.color || C.green} />
+          {canEditProjects && (
+            <select value={project.status} onChange={(e) => onSetStatus(project, e.target.value)} className="px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+              {Object.entries(PROJECT_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          )}
+        </div>
+        {(canEditProjects || canDeleteProjects) && (
+          <div className="flex items-center gap-2">
+            {canEditProjects && <button onClick={() => onEdit(project)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold" style={{ border: `1px solid ${C.border}`, color: C.text }}><Pencil size={12} /> Editar</button>}
+            {canDeleteProjects && <button onClick={() => onDelete(project)} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold" style={{ background: C.red, color: "#fff" }}><Trash2 size={12} /> Eliminar</button>}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-4">
+        <div><div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Cliente</div><div>{clientName}</div></div>
+        <div><div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Sucursal</div><div>{branchNameStr}</div></div>
+        <div><div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Responsable</div><div>{leadTechName}</div></div>
+        <div><div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Presupuesto</div><div>{project.budget != null ? Number(project.budget).toLocaleString("es-DO", { style: "currency", currency: "DOP" }) : "—"}</div></div>
+        <div><div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Inicio</div><div>{project.start_date ? fmtDate(project.start_date) : "—"}</div></div>
+        <div><div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Fin estimado</div><div>{project.end_date ? fmtDate(project.end_date) : "—"}</div></div>
+      </div>
+      {project.description && <div className="text-sm mb-4 p-3" style={{ background: C.panelAlt, color: C.muted }}>{project.description}</div>}
+
+      {/* Órdenes de trabajo */}
+      <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-sm font-semibold mb-2">Órdenes de trabajo vinculadas ({linkedOrders.length})</div>
+        <div className="space-y-2 mb-3">
+          {linkedOrders.map((o) => (
+            <div key={o.id} className="flex items-center justify-between px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+              <div>
+                <span className="font-mono text-xs mr-2" style={{ color: C.muted }}>{o.code}</span>
+                {o.title}
+                <span className="ml-2 text-xs" style={{ color: C.muted }}>{STATUS_CFG[o.status]?.label}</span>
+              </div>
+              {canEditProjects && <button onClick={() => onUnlinkOrder(o.id)} style={iconBtnStyle} title="Quitar del proyecto"><Unlink size={14} /></button>}
+            </div>
+          ))}
+          {linkedOrders.length === 0 && <div className="text-xs" style={{ color: C.muted }}>Todavía no hay órdenes de trabajo vinculadas.</div>}
+        </div>
+        {canEditProjects && (
+          <div className="flex gap-2">
+            <div className="flex-1"><SearchSelect items={availableOrders} value={pickOrderId} onChange={setPickOrderId} placeholder="Buscar orden de trabajo sin proyecto..." getLabel={(o) => `${o.code} — ${o.title}`} /></div>
+            <button onClick={() => { if (pickOrderId) { onLinkOrder(project.id, pickOrderId); setPickOrderId(""); } }} disabled={!pickOrderId} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}><Link2 size={12} /> Vincular</button>
+          </div>
+        )}
+      </div>
+
+      {/* Materiales */}
+      <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-sm font-semibold mb-2">Materiales asignados ({linkedMaterials.length})</div>
+        <div className="space-y-2 mb-3">
+          {linkedMaterials.map((pm) => {
+            const mat = materials.find((m) => m.id === pm.material_id);
+            return (
+              <div key={pm.id} className="flex items-center justify-between px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+                <div>
+                  {mat?.name || "Material eliminado"} <span className="text-xs" style={{ color: C.muted }}>× {Number(pm.quantity).toLocaleString("es-DO")} {mat?.unit || ""}</span>
+                  {pm.notes && <div className="text-xs" style={{ color: C.muted }}>{pm.notes}</div>}
+                </div>
+                {canDeleteProjects && <button onClick={() => onRemoveMaterial(pm)} style={iconBtnStyle} title="Quitar y devolver al inventario"><Trash2 size={14} /></button>}
+              </div>
+            );
+          })}
+          {linkedMaterials.length === 0 && <div className="text-xs" style={{ color: C.muted }}>Todavía no hay materiales asignados a este proyecto.</div>}
+        </div>
+        {canEditProjects && (
+          <div className="flex flex-wrap gap-2">
+            <div className="flex-1 min-w-[160px]"><SearchSelect items={availableMaterials} value={pickMaterialId} onChange={setPickMaterialId} placeholder="Buscar material sobrante..." getLabel={(m) => `${m.name} (disp. ${Number(m.quantity).toLocaleString("es-DO")} ${m.unit || ""})`} /></div>
+            <input type="text" inputMode="decimal" className="px-3 py-2 text-sm w-24" style={inputStyle} value={pickMaterialQty} onChange={(e) => setPickMaterialQty(e.target.value)} placeholder="Cant." />
+            <input type="text" className="px-3 py-2 text-sm flex-1 min-w-[120px]" style={inputStyle} value={pickMaterialNotes} onChange={(e) => setPickMaterialNotes(e.target.value)} placeholder="Notas (opcional)" />
+            <button
+              onClick={() => { if (pickMaterialId && pickMaterialQty) { onAddMaterial(project.id, pickMaterialId, pickMaterialQty, pickMaterialNotes); setPickMaterialId(""); setPickMaterialQty(""); setPickMaterialNotes(""); } }}
+              disabled={!pickMaterialId || !pickMaterialQty || saving}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}
+            ><Plus size={12} /> Descontar y asignar</button>
+          </div>
+        )}
+      </div>
+
+      {/* Órdenes de venta */}
+      <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-sm font-semibold mb-2">Órdenes de venta vinculadas ({linkedSalesOrders.length})</div>
+        <div className="space-y-2 mb-3">
+          {linkedSalesOrders.map((o) => (
+            <div key={o.id} className="flex items-center justify-between px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+              <div>
+                <span className="font-mono text-xs mr-2" style={{ color: C.muted }}>{o.order_number}</span>
+                {o.title}
+                <span className="ml-2 text-xs" style={{ color: C.muted }}>{Number(o.total || 0).toLocaleString("es-DO", { style: "currency", currency: "DOP" })}</span>
+              </div>
+              {canEditProjects && <button onClick={() => onUnlinkSalesOrder(o.id)} style={iconBtnStyle} title="Quitar del proyecto"><Unlink size={14} /></button>}
+            </div>
+          ))}
+          {linkedSalesOrders.length === 0 && <div className="text-xs" style={{ color: C.muted }}>Todavía no hay órdenes de venta vinculadas.</div>}
+        </div>
+        {canEditProjects && (
+          <div className="flex gap-2">
+            <div className="flex-1"><SearchSelect items={availableSalesOrders} value={pickSalesOrderId} onChange={setPickSalesOrderId} placeholder="Buscar orden de venta sin proyecto..." getLabel={(o) => `${o.order_number} — ${o.title}`} /></div>
+            <button onClick={() => { if (pickSalesOrderId) { onLinkSalesOrder(project.id, pickSalesOrderId); setPickSalesOrderId(""); } }} disabled={!pickSalesOrderId} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}><Link2 size={12} /> Vincular</button>
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -2943,7 +3333,7 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   );
 }
 
-function PurchaseDetailModal({ purchase, items, payments, supplierName, supplierRnc, companyName, company, canEdit, onClose, onRegisterPayment, onDeletePayment }) {
+function PurchaseDetailModal({ purchase, items, payments, supplierName, supplierRnc, companyName, company, canEdit, canDelete, onClose, onRegisterPayment, onDeletePayment }) {
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const balance = Number(purchase.total) - Number(purchase.amount_paid || 0);
@@ -3028,7 +3418,7 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, supplier
                 <div>{fmtDate(p.payment_date)} {p.method && <span style={{ color: C.muted }}>· {p.method}</span>}{p.notes && <div className="text-xs" style={{ color: C.muted }}>{p.notes}</div>}</div>
                 <div className="flex items-center gap-3">
                   <span className="font-mono" style={{ color: C.green }}>{fmtMoney(p.amount)}</span>
-                  {canEdit && <button onClick={() => onDeletePayment(p, purchase)} style={iconBtnStyle}><Trash2 size={13} /></button>}
+                  {canDelete && <button onClick={() => onDeletePayment(p, purchase)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                 </div>
               </div>
             ))}
@@ -3406,7 +3796,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccou
   );
 }
 
-function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, canEdit, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
+function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, canEdit, canDelete, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
   const statusColor = invoice.status === "anulada" ? C.red : C.green;
   const payCfg = PAYMENT_STATUS_CFG[invoice.payment_status] || PAYMENT_STATUS_CFG.pendiente;
   const balance = Number(invoice.total) - Number(invoice.amount_paid || 0) - Number(invoice.credit_applied || 0);
@@ -3517,7 +3907,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
                   <div>{fmtDate(p.payment_date)} {p.method && <span style={{ color: C.muted }}>· {p.method}</span>}</div>
                   <div className="flex items-center gap-3">
                     <span className="font-mono" style={{ color: C.green }}>{fmtMoney(p.amount)}</span>
-                    {canEdit && <button onClick={() => onDeletePayment(p, invoice)} style={iconBtnStyle}><Trash2 size={13} /></button>}
+                    {canDelete && <button onClick={() => onDeletePayment(p, invoice)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                   </div>
                 </div>
                 {p.notes && <div className="text-xs mt-1" style={{ color: C.muted }}>{p.notes}</div>}
@@ -3527,7 +3917,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
                       <div key={a.id} className="flex items-center gap-1 px-2 py-1 text-xs" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                         {isImage(a.file_name) ? <ImageIcon size={12} color={C.amber} /> : <FileText size={12} color={C.amber} />}
                         <a href={a.file_url} target="_blank" rel="noreferrer" className="truncate max-w-[140px]" style={{ color: C.amber }}>{a.file_name || "Comprobante"}</a>
-                        {canEdit && <button type="button" onClick={() => onDeletePaymentAttachment(a, p)} style={iconBtnStyle}><X size={12} /></button>}
+                        {canDelete && <button type="button" onClick={() => onDeletePaymentAttachment(a, p)} style={iconBtnStyle}><X size={12} /></button>}
                       </div>
                     ))}
                   </div>
@@ -4073,7 +4463,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
   );
 }
 
-function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, orderInfo, canEdit, onClose, onMarkStatus, onConvertToOrder, onEdit, onDuplicate, onDelete }) {
+function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, orderInfo, canEdit, canDelete, onClose, onMarkStatus, onConvertToOrder, onEdit, onDuplicate, onDelete }) {
   const defaultBankAccount = (bankAccounts || []).find((a) => a.is_default) || null;
   const s = QUOTE_STATUS_CFG[quote.status] || QUOTE_STATUS_CFG.pendiente;
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
@@ -4175,7 +4565,7 @@ function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAddress, 
           <button onClick={() => onEdit(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}><Pencil size={14} /> Editar</button>
         )}
         {canEdit && <button onClick={() => onDuplicate(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}><Copy size={14} /> Duplicar</button>}
-        {canEdit && quote.status !== "convertida" && quote.status !== "en_orden" && quote.status !== "parcial" && (
+        {canEdit && quote.status !== "convertida" && quote.status !== "en_orden" && quote.status !== "parcial" && canDelete && (
           <button onClick={() => onDelete(quote)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}><Trash2 size={14} /> Eliminar</button>
         )}
         <button onClick={doPrintProforma} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.blue, border: `1px solid ${C.border}` }}><Receipt size={14} /> Imprimir Pro-Forma</button>
@@ -4186,7 +4576,7 @@ function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAddress, 
   );
 }
 
-function SalesOrderDetailModal({ order, items, clientName, clientRnc, companyName, company, workOrderInfo, canEdit, onClose, onGenerateInvoice, onGenerateWorkOrder, onCancel, onDelete, onUpdateNotes }) {
+function SalesOrderDetailModal({ order, items, clientName, clientRnc, companyName, company, workOrderInfo, canEdit, canDelete, onClose, onGenerateInvoice, onGenerateWorkOrder, onCancel, onDelete, onUpdateNotes }) {
   const s = SALES_ORDER_STATUS_CFG[order.status] || SALES_ORDER_STATUS_CFG.en_proceso;
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
@@ -4267,7 +4657,7 @@ function SalesOrderDetailModal({ order, items, clientName, clientRnc, companyNam
             <button onClick={() => onGenerateInvoice(order, items)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Generar factura</button>
           </>
         )}
-        {canEdit && order.status === "cancelada" && (
+        {canDelete && order.status === "cancelada" && (
           <button onClick={() => onDelete(order)} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}40` }}><Trash2 size={14} /> Eliminar orden</button>
         )}
         <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
@@ -4327,7 +4717,7 @@ function IncidentFormModal({ branches, equipment, clients, technicians, initial,
       <Field label="Asignar a técnico (opcional)">
         <select className={inputClass} style={inputStyle} value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
           <option value="">Sin asignar</option>
-          {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {technicians.filter((t) => t.is_active !== false || t.id === technicianId).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       </Field>
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Vincular a (opcional)</div>
@@ -4361,7 +4751,7 @@ function IncidentFormModal({ branches, equipment, clients, technicians, initial,
   );
 }
 
-function IncidentDetailModal({ incident, branchName, equipName, clientName, techName, technicians, orders, quotes, canEdit, isTecnico, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete, onSaveProgress, onComplete, onEdit, onAssignTechnician, onReopen }) {
+function IncidentDetailModal({ incident, branchName, equipName, clientName, techName, technicians, orders, quotes, canEdit, canDelete, isTecnico, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete, onSaveProgress, onComplete, onEdit, onAssignTechnician, onReopen }) {
   const s = INCIDENT_STATUS_CFG[incident.status] || INCIDENT_STATUS_CFG.abierto;
   const p = PRIORITY_CFG[incident.priority] || PRIORITY_CFG.media;
   const linkedOrder = incident.work_order_id ? orders.find((o) => o.id === incident.work_order_id) : null;
@@ -4370,7 +4760,8 @@ function IncidentDetailModal({ incident, branchName, equipName, clientName, tech
   // El rol técnico solo puede llenar "Lo encontrado" mientras el incidente no esté completado ni descartado —
   // no puede crear, borrar, convertir, completar ni editar la solución, sin importar el permiso configurado.
   // Admin/Supervisor siempre pueden editar hallazgos y solución, en cualquier estado, incluido "Convertido".
-  const canManage = canEdit && !isTecnico; // eliminar / descartar / convertir
+  const canManage = canEdit && !isTecnico; // descartar / reabrir / convertir
+  const canManageDelete = canDelete && !isTecnico; // eliminar
   const canEditBasics = canEdit && !isTecnico; // editar título, descripción, etc.
   const canEditFull = canEdit && !isTecnico; // hallazgos + solución + marcar completado (admin/supervisor)
   const techCanEditFindings = isTecnico && incident.status !== "resuelto" && incident.status !== "descartado";
@@ -4413,7 +4804,7 @@ function IncidentDetailModal({ incident, branchName, equipName, clientName, tech
           {canManage ? (
             <select value={incident.technician_id || ""} onChange={(e) => onAssignTechnician(incident.id, e.target.value)} className="mt-1 px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
               <option value="">Sin asignar</option>
-              {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {technicians.filter((t) => t.is_active !== false || t.id === incident.technician_id).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           ) : (
             <span style={{ color: C.text }}>{techName(incident.technician_id)}</span>
@@ -4477,7 +4868,7 @@ function IncidentDetailModal({ incident, branchName, equipName, clientName, tech
           <button onClick={() => onConvertQuote(incident)} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Convertir en cotización</button>
         )}
         {canEditBasics && <button onClick={() => onEdit(incident)} className="px-4 py-2 text-sm" style={{ color: C.text, border: `1px solid ${C.border}` }}>Editar datos</button>}
-        {canManage && <button onClick={() => onDelete(incident.id)} style={iconBtnStyle}><Trash2 size={16} /></button>}
+        {canManageDelete && <button onClick={() => onDelete(incident.id)} style={iconBtnStyle}><Trash2 size={16} /></button>}
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cerrar</button>
       </div>
     </Modal>
@@ -4613,7 +5004,7 @@ function InviteFormModal({ technicians, branches, saving, generatedLink, onClose
         <Field label="Vincular a un técnico existente (opcional)">
           <select className={inputClass} style={inputStyle} value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
             <option value="">Sin vincular</option>
-            {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {technicians.filter((t) => t.is_active !== false).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </Field>
       )}
@@ -4767,7 +5158,7 @@ function BulkOrderFormModal({ branches, equipment, technicians, onClose, onSave,
   const [pool, setPool] = useState([]);
 
   const branchEquip = equipment.filter((e) => e.branch_id === branchId);
-  const branchTechs = technicians.filter((t) => t.branch_id === branchId);
+  const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === commonTechnicianId || pool.some((p) => p.technician_id === t.id)));
   const dayLabels = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
   const weekDates = useMemo(() => {
@@ -5327,6 +5718,8 @@ function HistoryModal({ title, orders, branchName, equipName, techName, onClose 
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const companyName = company?.name || "Tu empresa";
   const companyId = profile.company_id;
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [passwordChanged, setPasswordChanged] = useState(false);
   const canManage = profile.role === "admin" || profile.role === "supervisor";
   const isAdmin = profile.role === "admin";
   const isTecnico = profile.role === "tecnico";
@@ -5334,7 +5727,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const canUseCaja = isAdmin || profile.role === "supervisor" || isVendedor;
   const effectivePermissions = (profile.permissions && typeof profile.permissions === "object" && !Array.isArray(profile.permissions)) ? profile.permissions : (ROLE_DEFAULT_PERMISSIONS[profile.role] || {});
   const hasPerm = (key) => isAdmin || !!effectivePermissions[key];
-  const canEdit = (key) => isAdmin || effectivePermissions[key] === "edit";
+  const canEdit = (key) => isAdmin || effectivePermissions[key] === "edit" || effectivePermissions[key] === "edit_no_delete";
+  const canDelete = (key) => isAdmin || effectivePermissions[key] === "edit";
   const maxDiscountPct = isAdmin ? 100 : Number(profile.max_discount_pct) || 0;
 
   const [loadingScope, setLoadingScope] = useState(true);
@@ -5377,6 +5771,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [toolLists, setToolLists] = useState([]);
   const [toolLoans, setToolLoans] = useState([]);
   const [materials, setMaterials] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [projectMaterials, setProjectMaterials] = useState([]);
   const [chartOfAccounts, setChartOfAccounts] = useState([]);
   const [taxRates, setTaxRates] = useState([]);
   const [cashSessions, setCashSessions] = useState([]);
@@ -5477,6 +5873,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [toolSearch, setToolSearch] = useState("");
   const [groupToolsByTechnician, setGroupToolsByTechnician] = useState(false);
   const [toolViewMode, setToolViewMode] = useState("herramientas");
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [editingProject, setEditingProject] = useState(null);
+  const [projectDetail, setProjectDetail] = useState(null);
+  const [projectStatusFilter, setProjectStatusFilter] = useState("all");
+  const [projectSearch, setProjectSearch] = useState("");
   const [showAddToolList, setShowAddToolList] = useState(false);
   const [editingToolList, setEditingToolList] = useState(null);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
@@ -5528,7 +5929,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, tloans, mats, wot, rcon, banktx, cba] = await Promise.all([
+    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, tloans, mats, wot, rcon, banktx, cba, projs, projmats] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
@@ -5563,6 +5964,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       supabase.from("recurring_contracts").select("*").eq("company_id", companyId).order("next_invoice_date"),
       supabase.from("bank_transactions").select("*").eq("company_id", companyId).order("transaction_date", { ascending: false }),
       supabase.from("company_bank_accounts").select("*").eq("company_id", companyId).order("created_at"),
+      supabase.from("projects").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
+      supabase.from("project_materials").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -5598,6 +6001,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setRecurringContracts(rcon.data || []);
     setBankTransactions(banktx.data || []);
     setCompanyBankAccounts(cba.data || []);
+    setProjects(projs.data || []);
+    setProjectMaterials(projmats.data || []);
     setLoadingScope(false);
   };
 
@@ -5887,6 +6292,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }
     return true;
   }), [visibleTools, toolStatusFilter, toolTechnicianFilter, toolSearch]);
+
+  const projectsFiltered = useMemo(() => projects.filter((p) => {
+    if (projectStatusFilter !== "all" && p.status !== projectStatusFilter) return false;
+    if (projectSearch.trim()) {
+      const q = projectSearch.toLowerCase();
+      const clientNameStr = (clients.find((c) => c.id === p.client_id)?.name || "").toLowerCase();
+      if (!((p.name || "").toLowerCase().includes(q) || clientNameStr.includes(q))) return false;
+    }
+    return true;
+  }), [projects, projectStatusFilter, projectSearch, clients]);
   const toolGroups = useMemo(() => {
     if (!groupToolsByTechnician) return null;
     const map = new Map();
@@ -6813,6 +7228,87 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const { data, error } = await supabase.from("inventory_materials").update({ quantity: newQty }).eq("id", materialId).select().single();
     if (error) { setErrorMsg(error.message); return; }
     setMaterials((prev) => prev.map((m) => (m.id === data.id ? data : m)));
+  };
+
+  // ---- Proyectos ----
+  const saveProject = async (payload) => {
+    setSaving(true);
+    if (editingProject) {
+      const { data, error } = await supabase.from("projects").update(payload).eq("id", editingProject.id).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setProjects((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+      setEditingProject(null);
+      setProjectDetail((prev) => (prev && prev.id === data.id ? data : prev));
+    } else {
+      const { status, ...rest } = payload;
+      const { data, error } = await supabase.from("projects").insert({ ...rest, company_id: companyId, status: "activo" }).select().single();
+      setSaving(false);
+      if (error) { setErrorMsg(error.message); return; }
+      setProjects((prev) => [data, ...prev]);
+      setShowAddProject(false);
+    }
+  };
+  const deleteProject = async (project) => {
+    if (!window.confirm(`¿Eliminar el proyecto "${project.name}"? Las órdenes, materiales y órdenes de venta vinculados quedarán sin proyecto asignado.`)) return;
+    const { error } = await supabase.from("projects").delete().eq("id", project.id);
+    if (error) { setErrorMsg(error.message); return; }
+    setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    setProjectMaterials((prev) => prev.filter((pm) => pm.project_id !== project.id));
+    setOrders((prev) => prev.map((o) => (o.project_id === project.id ? { ...o, project_id: null } : o)));
+    setSalesOrders((prev) => prev.map((o) => (o.project_id === project.id ? { ...o, project_id: null } : o)));
+    setProjectDetail(null);
+  };
+  const setProjectStatus = async (project, status) => {
+    const { data, error } = await supabase.from("projects").update({ status }).eq("id", project.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setProjects((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+    setProjectDetail((prev) => (prev && prev.id === data.id ? data : prev));
+  };
+  const linkOrderToProject = async (projectId, orderId) => {
+    const { data, error } = await supabase.from("work_orders").update({ project_id: projectId }).eq("id", orderId).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+  };
+  const unlinkOrderFromProject = async (orderId) => {
+    const { data, error } = await supabase.from("work_orders").update({ project_id: null }).eq("id", orderId).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+  };
+  const linkSalesOrderToProject = async (projectId, salesOrderId) => {
+    const { data, error } = await supabase.from("sales_orders").update({ project_id: projectId }).eq("id", salesOrderId).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setSalesOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+  };
+  const unlinkSalesOrderFromProject = async (salesOrderId) => {
+    const { data, error } = await supabase.from("sales_orders").update({ project_id: null }).eq("id", salesOrderId).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setSalesOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
+  };
+  const addProjectMaterial = async (projectId, materialId, quantity, notes) => {
+    const mat = materials.find((m) => m.id === materialId);
+    if (!mat) return;
+    const qty = Number(quantity || 0);
+    if (!qty || qty <= 0) { setErrorMsg("La cantidad debe ser mayor a cero."); return; }
+    if (qty > Number(mat.quantity || 0)) { setErrorMsg("No hay suficiente cantidad disponible en materiales sobrantes."); return; }
+    setSaving(true);
+    const { data, error } = await supabase.from("project_materials").insert({ company_id: companyId, project_id: projectId, material_id: materialId, quantity: qty, notes: (notes || "").trim() || null }).select().single();
+    if (error) { setSaving(false); setErrorMsg(error.message); return; }
+    await consumeMaterialStock(materialId, qty);
+    setSaving(false);
+    setProjectMaterials((prev) => [data, ...prev]);
+  };
+  const removeProjectMaterial = async (pm) => {
+    if (!window.confirm("¿Quitar este material del proyecto? La cantidad regresará al inventario de materiales sobrantes.")) return;
+    const { error } = await supabase.from("project_materials").delete().eq("id", pm.id);
+    if (error) { setErrorMsg(error.message); return; }
+    const mat = materials.find((m) => m.id === pm.material_id);
+    if (mat) {
+      const newQty = Number(mat.quantity || 0) + Number(pm.quantity || 0);
+      const { data, error: matError } = await supabase.from("inventory_materials").update({ quantity: newQty }).eq("id", mat.id).select().single();
+      if (!matError && data) setMaterials((prev) => prev.map((m) => (m.id === data.id ? data : m)));
+    }
+    setProjectMaterials((prev) => prev.filter((p) => p.id !== pm.id));
   };
 
   // ---- Catálogo de cuentas ----
@@ -7884,16 +8380,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   // ---- Técnicos ----
-  const saveTech = async (name, specialty, branchId, canCreateIncidents, hourlyRate) => {
+  const saveTech = async (name, specialty, branchId, canCreateIncidents, hourlyRate, extraBranchIds) => {
     setSaving(true);
     if (editingTech) {
-      const { data, error } = await supabase.from("technicians").update({ name, specialty, branch_id: branchId, can_create_incidents: canCreateIncidents, hourly_rate: hourlyRate }).eq("id", editingTech.id).select().single();
+      const { data, error } = await supabase.from("technicians").update({ name, specialty, branch_id: branchId, can_create_incidents: canCreateIncidents, hourly_rate: hourlyRate, extra_branch_ids: extraBranchIds || [] }).eq("id", editingTech.id).select().single();
       setSaving(false);
       if (error) { setErrorMsg(error.message); return; }
       setTechnicians((prev) => prev.map((t) => (t.id === data.id ? data : t)));
       setEditingTech(null);
     } else {
-      const { data, error } = await supabase.from("technicians").insert({ company_id: companyId, branch_id: branchId, name, specialty, can_create_incidents: canCreateIncidents, hourly_rate: hourlyRate }).select().single();
+      const { data, error } = await supabase.from("technicians").insert({ company_id: companyId, branch_id: branchId, name, specialty, can_create_incidents: canCreateIncidents, hourly_rate: hourlyRate, extra_branch_ids: extraBranchIds || [] }).select().single();
       setSaving(false);
       if (error) { setErrorMsg(error.message); return; }
       setTechnicians((prev) => [...prev, data]);
@@ -7902,7 +8398,38 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   const deleteTech = async (id) => {
-    if (!window.confirm("¿Eliminar este técnico?")) return;
+    const tech = technicians.find((t) => t.id === id);
+
+    // Ya está dado de baja: este mismo botón lo reactiva.
+    if (tech?.is_active === false) {
+      const { data, error } = await supabase.from("technicians").update({ is_active: true }).eq("id", id).select().single();
+      if (error) { setErrorMsg(error.message); return; }
+      setTechnicians((prev) => prev.map((t) => (t.id === id ? data : t)));
+      return;
+    }
+
+    // ¿Tiene historial que se perdería con un borrado real?
+    const hasHistory =
+      orders.some((o) => o.technician_id === id) ||
+      orderTechnicians.some((wt) => wt.technician_id === id) ||
+      incidents.some((i) => i.technician_id === id) ||
+      tools.some((t) => t.technician_id === id) ||
+      equipment.some((e) => e.default_technician_id === id) ||
+      clientAssets.some((a) => a.default_technician_id === id) ||
+      projects.some((p) => p.lead_technician_id === id);
+
+    if (hasHistory) {
+      if (!window.confirm(
+        "Este técnico tiene órdenes, incidentes, herramientas, equipos o proyectos asociados — eliminarlo por completo borraría o dañaría ese historial (incluyendo costos ya facturados).\n\n¿Darlo de baja en su lugar? Dejará de aparecer para asignar trabajo nuevo, pero su nombre se conserva en el historial, órdenes y facturas ya existentes. Podrás reactivarlo después si vuelve a trabajar contigo."
+      )) return;
+      const { data, error } = await supabase.from("technicians").update({ is_active: false }).eq("id", id).select().single();
+      if (error) { setErrorMsg(error.message); return; }
+      setTechnicians((prev) => prev.map((t) => (t.id === id ? data : t)));
+      return;
+    }
+
+    // Sin ningún historial asociado: se puede eliminar de verdad, sin dejar nada huérfano.
+    if (!window.confirm("¿Eliminar este técnico? No tiene órdenes, incidentes ni otro historial asociado, así que se borrará por completo.")) return;
     const { error } = await supabase.from("technicians").delete().eq("id", id);
     if (error) { setErrorMsg(error.message); return; }
     setTechnicians((prev) => prev.filter((t) => t.id !== id));
@@ -7959,9 +8486,17 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
   };
 
-  const updateUserBranch = async (userId, branchId) => {
-    const { data, error } = await supabase.from("profiles").update({ branch_id: branchId || null }).eq("id", userId).select().single();
+  const updateUserBranch = async (userId, branchId, extraBranchIds) => {
+    const { data, error } = await supabase.from("profiles").update({ branch_id: branchId || null, extra_branch_ids: extraBranchIds || [] }).eq("id", userId).select().single();
     if (error) { setErrorMsg(error.message); return false; }
+    setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+    return true;
+  };
+
+  const updateUserRole = async (userId, role) => {
+    const { data, error } = await supabase.from("profiles").update({ role }).eq("id", userId).select().single();
+    if (error) return `${error.message}${error.code ? ` (código ${error.code})` : ""}`;
+    if (!data) return "la actualización no devolvió ninguna fila (probablemente RLS bloqueó el UPDATE en silencio).";
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
     return true;
   };
@@ -8034,6 +8569,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     { key: "incidents", label: "Incidentes", Icon: AlertTriangle },
     { key: "agenda", label: "Agenda", Icon: CalendarDays },
     { key: "orders", label: "Órdenes de trabajo", Icon: ClipboardList },
+    { key: "projects", label: "Proyectos", Icon: FolderKanban },
     { key: "equipment", label: "Gestión de Equipos", Icon: Settings2 },
     { key: "checklists", label: "Checklists", Icon: ClipboardCheck },
     { key: "technicians", label: "Técnicos", Icon: Users },
@@ -8132,7 +8668,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
           {canEdit("tools") && <button onClick={() => setEditingTool(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
-          {canEdit("tools") && <button onClick={() => deleteTool(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+          {canDelete("tools") && <button onClick={() => deleteTool(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
         </div>
       </div>
       <div className="text-xs mb-2" style={{ color: C.muted }}>{branchName(t.branch_id)}</div>
@@ -8141,7 +8677,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         {canEdit("tools") ? (
           <select value={t.technician_id || ""} onChange={(e) => assignTool(t.id, e.target.value)} className="px-2 py-1.5 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
             <option value="">Sin asignar</option>
-            {technicians.map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
+            {technicians.filter((tech) => tech.is_active !== false || tech.id === t.technician_id).map((tech) => <option key={tech.id} value={tech.id}>{tech.name}</option>)}
           </select>
         ) : (
           <span style={{ color: C.muted }}>{techName(t.technician_id)}</span>
@@ -8243,11 +8779,22 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.border}` }}>
           <div className="text-xs truncate" style={{ color: C.muted }}>{session.user.email}</div>
           <div className="text-[10px] mt-1 mb-2" style={{ color: ROLE_CFG[profile.role]?.color }}>{ROLE_CFG[profile.role]?.label}</div>
+          {passwordChanged && <div className="text-[10px] mb-2" style={{ color: C.green }}>Contraseña actualizada.</div>}
+          <button onClick={() => { setShowChangePassword(true); setPasswordChanged(false); }} className="flex items-center gap-2 text-xs mb-2" style={{ color: C.muted }}>
+            <ShieldCheck size={13} /> Cambiar contraseña
+          </button>
           <button onClick={onSignOut} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}>
             <LogOut size={13} /> Cerrar sesión
           </button>
         </div>
       </div>
+
+      {showChangePassword && (
+        <ChangePasswordModal
+          onClose={() => setShowChangePassword(false)}
+          onDone={() => { setShowChangePassword(false); setPasswordChanged(true); }}
+        />
+      )}
 
       <div className="flex-1 flex flex-col min-w-0">
         {errorMsg && (
@@ -8608,7 +9155,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                           {canManage && (
                             <>
                               {canEdit("orders") && <button onClick={() => openEditOrder(o)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                              {canEdit("orders") && <button onClick={() => deleteOrder(o.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                              {canDelete("orders") && <button onClick={() => deleteOrder(o.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                             </>
                           )}
                         </div>
@@ -8715,12 +9262,66 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             </div>
           )}
 
+          {!loadingScope && hasPerm("projects") && view === "projects" && (
+            <div>
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>{projectsFiltered.length} proyecto{projectsFiltered.length !== 1 ? "s" : ""}</div>
+                {canEdit("projects") && (
+                  <button onClick={() => setShowAddProject(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                    <Plus size={14} /> Nuevo proyecto
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[200px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                  <Search size={14} style={{ color: C.muted }} />
+                  <input value={projectSearch} onChange={(e) => setProjectSearch(e.target.value)} placeholder="Buscar por nombre o cliente..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                </div>
+                <select value={projectStatusFilter} onChange={(e) => setProjectStatusFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                  <option value="all">Todos los estados</option>
+                  {Object.entries(PROJECT_STATUS_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {projectsFiltered.map((p) => {
+                  const s = PROJECT_STATUS_CFG[p.status] || PROJECT_STATUS_CFG.activo;
+                  const ordersCount = orders.filter((o) => o.project_id === p.id).length;
+                  const salesCount = salesOrders.filter((o) => o.project_id === p.id).length;
+                  const materialsCount = projectMaterials.filter((pm) => pm.project_id === p.id).length;
+                  return (
+                    <div key={p.id} onClick={() => setProjectDetail(p)} className="p-4 cursor-pointer" style={{ background: C.panel, border: `1px solid ${C.border}`, borderLeft: `3px solid ${s.color}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="font-semibold truncate">{p.name}</div>
+                        <Pill label={s.label} color={s.color} />
+                      </div>
+                      <div className="text-xs mb-2" style={{ color: C.muted }}>
+                        {p.client_id ? (clients.find((c) => c.id === p.client_id)?.name || "—") : "Sin cliente"}
+                        {p.branch_id ? ` · ${branchName(p.branch_id)}` : ""}
+                      </div>
+                      {(p.start_date || p.end_date) && (
+                        <div className="text-xs mb-2" style={{ color: C.muted }}>
+                          {p.start_date ? fmtDate(p.start_date) : "—"} → {p.end_date ? fmtDate(p.end_date) : "—"}
+                        </div>
+                      )}
+                      <div className="flex items-center gap-3 text-xs pt-2 mt-1" style={{ borderTop: `1px solid ${C.border}`, color: C.muted }}>
+                        <span className="flex items-center gap-1"><ClipboardList size={12} /> {ordersCount}</span>
+                        <span className="flex items-center gap-1"><Boxes size={12} /> {materialsCount}</span>
+                        <span className="flex items-center gap-1"><Layers size={12} /> {salesCount}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {projectsFiltered.length === 0 && <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>Todavía no hay proyectos registrados.</div>}
+              </div>
+            </div>
+          )}
+
           {!loadingScope && hasPerm("equipment") && view === "equipment" && (
             <div>
               <div className="flex justify-between items-center mb-4">
                 <div className="text-sm" style={{ color: C.muted }}>{equipmentFiltered.length}{equipmentFiltered.length !== equipment.length ? ` de ${equipment.length}` : ""} equipos{selectedEquipment.size > 0 ? ` · ${selectedEquipment.size} seleccionados` : ""}</div>
                 <div className="flex gap-2">
-                  {canEdit("equipment") && selectedEquipment.size > 0 && (
+                  {canDelete("equipment") && selectedEquipment.size > 0 && (
                     <button onClick={() => bulkDeleteEquipment(Array.from(selectedEquipment))} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#fff" }}>
                       <Trash2 size={14} /> Eliminar seleccionados ({selectedEquipment.size})
                     </button>
@@ -8752,7 +9353,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   {equipmentTypes.map((t) => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-              {canEdit("equipment") && equipmentFiltered.length > 0 && (
+              {canDelete("equipment") && equipmentFiltered.length > 0 && (
                 <label className="flex items-center gap-2 text-xs mb-3 cursor-pointer" style={{ color: C.muted }}>
                   <input
                     type="checkbox"
@@ -8773,7 +9374,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     <div key={eq.id} className="p-4" style={{ background: C.panel, border: `1px solid ${selectedEquipment.has(eq.id) ? C.amber : C.border}` }}>
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2 min-w-0">
-                          {canEdit("equipment") && (
+                          {canDelete("equipment") && (
                             <input type="checkbox" checked={selectedEquipment.has(eq.id)} onChange={() => setSelectedEquipment((prev) => { const next = new Set(prev); next.has(eq.id) ? next.delete(eq.id) : next.add(eq.id); return next; })} />
                           )}
                           <div className="font-semibold truncate">{eq.name}</div>
@@ -8781,7 +9382,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         <div className="flex items-center gap-2 flex-shrink-0">
                           {openOrders > 0 && <Pill label={`${openOrders} abierta${openOrders !== 1 ? "s" : ""}`} color={C.amber} />}
                           <button onClick={() => setEditingEquipment(eq)} style={iconBtnStyle}><Pencil size={13} /></button>
-                          {canEdit("equipment") && <button onClick={() => deleteEquipment(eq.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
+                          {canDelete("equipment") && <button onClick={() => deleteEquipment(eq.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                         </div>
                       </div>
                       {eq.type && <div className="text-xs mt-0.5" style={{ color: C.muted }}>{eq.type}</div>}
@@ -8813,23 +9414,41 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {technicians.filter((t) => branchFilter === "all" || t.branch_id === branchFilter).map((t) => {
+                {technicians.filter((t) => branchFilter === "all" || techWorksAtBranch(t, branchFilter)).map((t) => {
                   const active = orders.filter((o) => o.technician_id === t.id && o.status !== "completada").length;
+                  const isInactive = t.is_active === false;
                   return (
-                    <div key={t.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div key={t.id} className="p-4" style={{ background: C.panel, border: `1px solid ${isInactive ? C.red + "40" : C.border}`, opacity: isInactive ? 0.7 : 1 }}>
                       <div className="flex items-center justify-between">
                         <div className="font-semibold">{t.name}</div>
                         <div className="flex items-center gap-2">
                           <button onClick={() => setEditingTech(t)} style={iconBtnStyle}><Pencil size={13} /></button>
-                          {canEdit("technicians") && <button onClick={() => deleteTech(t.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
+                          {canDelete("technicians") && (
+                            <button
+                              onClick={() => deleteTech(t.id)}
+                              title={isInactive ? "Reactivar técnico" : "Eliminar / dar de baja"}
+                              style={{ ...iconBtnStyle, color: isInactive ? C.green : iconBtnStyle.color }}
+                            >
+                              {isInactive ? <RotateCcw size={13} /> : <Trash2 size={13} />}
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="text-sm mt-0.5" style={{ color: C.muted }}>{t.specialty}</div>
-                      <div className="flex items-center gap-1 text-xs mt-3" style={{ color: C.muted }}><MapPin size={12} /> {branchName(t.branch_id)}</div>
+                      <div className="flex items-center gap-1 text-xs mt-3" style={{ color: C.muted }}>
+                        <MapPin size={12} /> {branchName(t.branch_id)}
+                        {t.extra_branch_ids?.length > 0 && ` · también en ${t.extra_branch_ids.map((id) => branchName(id)).join(", ")}`}
+                      </div>
                       <div className="flex items-center gap-2 mt-2 flex-wrap">
-                        <div className="text-xs px-2 py-1 inline-block" style={{ background: C.panelAlt, color: active > 0 ? C.amber : C.muted }}>
-                          {active} orden{active !== 1 ? "es" : ""} activa{active !== 1 ? "s" : ""}
-                        </div>
+                        {isInactive ? (
+                          <div className="text-xs px-2 py-1 inline-block" style={{ background: C.red + "15", color: C.red }}>
+                            Dado de baja — no se puede asignar
+                          </div>
+                        ) : (
+                          <div className="text-xs px-2 py-1 inline-block" style={{ background: C.panelAlt, color: active > 0 ? C.amber : C.muted }}>
+                            {active} orden{active !== 1 ? "es" : ""} activa{active !== 1 ? "s" : ""}
+                          </div>
+                        )}
                         {t.can_create_incidents && (
                           <div className="text-xs px-2 py-1 inline-block" style={{ background: C.blue + "1A", color: C.blue }}>
                             Puede reportar incidentes
@@ -8897,6 +9516,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         tools={tools.filter((t) => (list.tool_ids || []).includes(t.id))}
                         technicians={technicians}
                         canEdit={canEdit("tools")}
+                        canDelete={canDelete("tools")}
                         onEdit={() => setEditingToolList(list)}
                         onDelete={() => deleteToolList(list.id)}
                         onAssign={assignToolsByQuantity}
@@ -9006,7 +9626,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     <div className="col-span-2" style={{ color: C.muted }}>{m.unit || "—"}</div>
                     <div className="col-span-2 flex items-center justify-end gap-2">
                       {canEdit("materials") && <button onClick={() => setEditingMaterial(m)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                      {canEdit("materials") && <button onClick={() => deleteMaterial(m.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      {canDelete("materials") && <button onClick={() => deleteMaterial(m.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                     </div>
                   </div>
                 ))}
@@ -9130,7 +9750,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         <div className="flex items-center gap-2 font-semibold"><Building2 size={16} color={C.amber} /> {b.name}</div>
                         <div className="flex items-center gap-2">
                           <button onClick={() => setEditingBranch(b)} style={iconBtnStyle}><Pencil size={13} /></button>
-                          {canEdit("branches") && <button onClick={() => deleteBranch(b.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
+                          {canDelete("branches") && <button onClick={() => deleteBranch(b.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                         </div>
                       </div>
                       <div className="text-sm mt-0.5" style={{ color: C.muted }}>{b.city}</div>
@@ -9167,7 +9787,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {canEdit("warranty") && <button onClick={() => setEditingAsset(a)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit("warranty") && <button onClick={() => deleteClientAsset(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete("warranty") && <button onClick={() => deleteClientAsset(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                     <div className="text-sm truncate">{clients.find((c) => c.id === a.client_id)?.name || "—"}</div>
@@ -9251,7 +9871,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       </div>
                       <div className="flex items-center gap-2">
                         {canEdit("checklists") && <button onClick={() => setEditingChecklist(t)} style={iconBtnStyle}><Pencil size={13} /></button>}
-                        {canEdit("checklists") && <button onClick={() => deleteChecklistTemplate(t.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
+                        {canDelete("checklists") && <button onClick={() => deleteChecklistTemplate(t.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                       </div>
                     </div>
                     <div className="text-xs mt-2" style={{ color: C.muted }}>{t.items.length} punto{t.items.length !== 1 ? "s" : ""} a revisar</div>
@@ -9441,7 +10061,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {canEdit("clients") && <button onClick={() => setEditingClient(c)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit("clients") && <button onClick={() => deleteClient(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete("clients") && <button onClick={() => deleteClient(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                     <div className="text-xs mt-2 space-y-1" style={{ color: C.muted }}>
@@ -9527,7 +10147,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
                         {canEdit(isServicesView ? "services" : "products") && <button onClick={() => setEditingProduct(p)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit(isServicesView ? "services" : "products") && <button onClick={() => deleteProduct(p.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete(isServicesView ? "services" : "products") && <button onClick={() => deleteProduct(p.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                     <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
@@ -9590,7 +10210,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       </div>
                       <div className="flex items-center gap-2">
                         <button onClick={() => setEditingSupplier(s)} style={iconBtnStyle}><Pencil size={13} /></button>
-                        {canEdit("suppliers") && <button onClick={() => deleteSupplier(s.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
+                        {canDelete("suppliers") && <button onClick={() => deleteSupplier(s.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                       </div>
                     </div>
                     <div className="text-xs mt-2 space-y-1" style={{ color: C.muted }}>
@@ -9649,7 +10269,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       </div>
                       <div className="flex items-center justify-end gap-3 mt-2">
                         <button onClick={() => openPurchaseDetail(pu)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
-                        {canEdit("purchases") && <button onClick={() => deletePurchase(pu)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete("purchases") && <button onClick={() => deletePurchase(pu)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                   );
@@ -9687,7 +10307,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="text-xs" style={{ color: C.muted }}>{fmtDate(ex.expense_date)}</div>
                       <div className="flex items-center gap-1">
                         {canEdit("otherExpenses") && <button onClick={() => setEditingExpense(ex)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit("otherExpenses") && <button onClick={() => deleteExpense(ex.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete("otherExpenses") && <button onClick={() => deleteExpense(ex.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                     <div className="text-sm">{ex.description}</div>
@@ -9718,7 +10338,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       </div>
                       <div className="flex items-center gap-1">
                         {canEdit("chartOfAccounts") && <button onClick={() => setEditingAccount(a)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit("chartOfAccounts") && <button onClick={() => deleteAccount(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete("chartOfAccounts") && <button onClick={() => deleteAccount(a.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                     <div className="flex items-center justify-between pt-2 mt-2 text-xs" style={{ borderTop: `1px solid ${C.border}`, color: C.muted }}>
@@ -9748,7 +10368,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="font-semibold truncate">{t.name}</div>
                       <div className="flex items-center gap-1">
                         {canEdit("taxRates") && <button onClick={() => setEditingTaxRate(t)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit("taxRates") && <button onClick={() => deleteTaxRate(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete("taxRates") && <button onClick={() => deleteTaxRate(t.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                     <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
@@ -10110,7 +10730,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                                   Deshacer
                                 </button>
                               )}
-                              {canEdit("bankReconciliation") && <button onClick={() => deleteBankTransaction(tx.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                              {canDelete("bankReconciliation") && <button onClick={() => deleteBankTransaction(tx.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                             </div>
                           </div>
                         );
@@ -10317,7 +10937,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                             <Pill label={s.active ? "Activa" : "Inactiva"} color={s.active ? C.green : C.muted} />
                           </button>
                           {canEdit("ncf") && <button onClick={() => setEditingNcf(s)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                          {canEdit("ncf") && <button onClick={() => deleteNcfSequence(s.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                          {canDelete("ncf") && <button onClick={() => deleteNcfSequence(s.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                         </div>
                       </div>
                       <div className="text-xs font-mono mb-2" style={{ color: C.muted }}>{s.range_start} – {s.range_end}</div>
@@ -10450,7 +11070,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             <div>
               <div className="flex justify-between items-center mb-4">
                 <div className="text-sm" style={{ color: C.muted }}>{salesOrders.length} órdenes de venta{selectedSalesOrders.size > 0 ? ` · ${selectedSalesOrders.size} seleccionadas` : ""}</div>
-                {selectedSalesOrders.size > 0 && canEdit("salesOrders") && (
+                {selectedSalesOrders.size > 0 && canDelete("salesOrders") && (
                   <button onClick={() => deleteSalesOrdersBulk([...selectedSalesOrders])} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#2A0A08" }}>
                     <Trash2 size={14} /> Eliminar seleccionadas ({selectedSalesOrders.size})
                   </button>
@@ -10489,7 +11109,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         <span style={{ color: C.muted }}>{fmtDate(o.order_date)}</span>
                         <div className="flex items-center gap-2">
                           <span className="font-mono font-semibold">{fmtMoney(o.total)}</span>
-                          {isCancelled && canEdit("salesOrders") && (
+                          {isCancelled && canDelete("salesOrders") && (
                             <button onClick={(e) => { e.stopPropagation(); deleteSalesOrder(o); }} style={iconBtnStyle}><Trash2 size={14} /></button>
                           )}
                         </div>
@@ -10750,7 +11370,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                           </button>
                         )}
                         {canEdit("recurringContracts") && <button onClick={() => setEditingContract(c)} style={iconBtnStyle}><Pencil size={14} /></button>}
-                        {canEdit("recurringContracts") && <button onClick={() => deleteRecurringContract(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                        {canDelete("recurringContracts") && <button onClick={() => deleteRecurringContract(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>
                     </div>
                   );
@@ -10783,7 +11403,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         {!(p.is_active ?? true) && <Pill label="Inactivo" color={C.red} />}
                       </div>
                     </div>
-                    <div className="text-xs mb-2" style={{ color: C.muted }}>Sucursal: <span style={{ color: C.text }}>{branches.find((b) => b.id === p.branch_id)?.name || "Sin fijar (varias)"}</span></div>
+                    <div className="text-xs mb-2" style={{ color: C.muted }}>
+                      Sucursal: <span style={{ color: C.text }}>{branches.find((b) => b.id === p.branch_id)?.name || "Sin fijar (varias)"}</span>
+                      {p.extra_branch_ids?.length > 0 && <span> · también en {p.extra_branch_ids.map((id) => branches.find((b) => b.id === id)?.name).filter(Boolean).join(", ")}</span>}
+                    </div>
                     <div className="flex items-center justify-between pt-2 mt-1" style={{ borderTop: `1px solid ${C.border}` }}>
                       {p.role === "supervisor" ? (
                         <label className="flex items-center gap-1 text-xs" style={{ color: C.muted }}>
@@ -10796,7 +11419,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         </label>
                       ) : <span />}
                       {p.role !== "admin" && (
-                        <button onClick={() => setEditingPermissionsFor(p)} className="text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Gestionar</button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => toggleUserActive(p)}
+                            className="flex items-center gap-1 text-xs px-2 py-1"
+                            style={{ border: `1px solid ${(p.is_active ?? true) ? C.red + "40" : C.green + "40"}`, color: (p.is_active ?? true) ? C.red : C.green }}
+                          >
+                            {(p.is_active ?? true) ? <><Ban size={12} /> Desactivar</> : <><RotateCcw size={12} /> Reactivar</>}
+                          </button>
+                          <button onClick={() => setEditingPermissionsFor(p)} className="text-xs px-2 py-1" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Gestionar</button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -10813,7 +11445,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
                     <div className="flex items-center gap-3">
                       <Pill label={ROLE_CFG[i.role]?.label || i.role} color={ROLE_CFG[i.role]?.color || C.muted} />
-                      {canEdit("users") && <button onClick={() => cancelInvite(i.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      {canDelete("users") && <button onClick={() => cancelInvite(i.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                     </div>
                   </div>
                 ))}
@@ -11006,7 +11638,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           existingProducts={products.filter((p) => (p.item_type || "producto") === (view === "services" ? "servicio" : "producto"))}
           allProducts={products}
           branches={branches}
-          restrictToBranchId={!isAdmin && profile.branch_id ? profile.branch_id : null}
+          restrictToBranchIds={!isAdmin && profile.branch_id ? [profile.branch_id, ...(profile.extra_branch_ids || [])] : null}
           defaultItemType={view === "services" ? "servicio" : "producto"}
           onClose={() => setShowAddProduct(false)}
           onSave={saveProduct}
@@ -11020,7 +11652,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           existingProducts={products.filter((p) => (p.item_type || "producto") === (editingProduct.item_type || "producto"))}
           allProducts={products}
           branches={branches}
-          restrictToBranchId={!isAdmin && profile.branch_id ? profile.branch_id : null}
+          restrictToBranchIds={!isAdmin && profile.branch_id ? [profile.branch_id, ...(profile.extra_branch_ids || [])] : null}
           onClose={() => setEditingProduct(null)}
           onSave={saveProduct}
           saving={saving}
@@ -11037,11 +11669,35 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {showBulkTools && <BulkToolFormModal branches={branches} technicians={technicians} onClose={() => setShowBulkTools(false)} onSave={createBulkTools} saving={saving} />}
       {showAddMaterial && <MaterialFormModal branches={branches} onClose={() => setShowAddMaterial(false)} onSave={saveMaterial} saving={saving} />}
       {editingMaterial && <MaterialFormModal branches={branches} initial={editingMaterial} onClose={() => setEditingMaterial(null)} onSave={saveMaterial} saving={saving} />}
+      {showAddProject && <ProjectFormModal branches={branches} clients={clients} technicians={technicians} onClose={() => setShowAddProject(false)} onSave={saveProject} saving={saving} />}
+      {editingProject && (
+        <ProjectFormModal
+          branches={branches} clients={clients} technicians={technicians} initial={editingProject}
+          onClose={() => setEditingProject(null)} onSave={saveProject} saving={saving}
+        />
+      )}
+      {projectDetail && (
+        <ProjectDetailModal
+          project={projectDetail} clients={clients} branches={branches} technicians={technicians}
+          orders={orders} salesOrders={salesOrders} materials={materials} projectMaterials={projectMaterials}
+          canEditProjects={canEdit("projects")} canDeleteProjects={canDelete("projects")} saving={saving}
+          onClose={() => setProjectDetail(null)}
+          onEdit={(p) => { setProjectDetail(null); setEditingProject(p); }}
+          onDelete={deleteProject}
+          onSetStatus={setProjectStatus}
+          onLinkOrder={linkOrderToProject}
+          onUnlinkOrder={unlinkOrderFromProject}
+          onLinkSalesOrder={linkSalesOrderToProject}
+          onUnlinkSalesOrder={unlinkSalesOrderFromProject}
+          onAddMaterial={addProjectMaterial}
+          onRemoveMaterial={removeProjectMaterial}
+        />
+      )}
       {showAddAccount && <AccountFormModal onClose={() => setShowAddAccount(false)} onSave={saveAccount} saving={saving} />}
       {editingAccount && <AccountFormModal initial={editingAccount} onClose={() => setEditingAccount(null)} onSave={saveAccount} saving={saving} />}
       {showAddTaxRate && <TaxRateFormModal onClose={() => setShowAddTaxRate(false)} onSave={saveTaxRate} saving={saving} />}
       {editingTaxRate && <TaxRateFormModal initial={editingTaxRate} onClose={() => setEditingTaxRate(null)} onSave={saveTaxRate} saving={saving} />}
-      {editingPermissionsFor && <UserPermissionsModal user={editingPermissionsFor} branches={branches} onClose={() => setEditingPermissionsFor(null)} onSave={updateUserPermissions} onUpdateBranch={updateUserBranch} onToggleActive={toggleUserActive} saving={saving} />}
+      {editingPermissionsFor && <UserPermissionsModal user={editingPermissionsFor} branches={branches} onClose={() => setEditingPermissionsFor(null)} onSave={updateUserPermissions} onUpdateBranch={updateUserBranch} onUpdateRole={updateUserRole} onToggleActive={toggleUserActive} saving={saving} />}
       {showAddPurchase && (
         <PurchaseFormModal
           suppliers={suppliers}
@@ -11063,6 +11719,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           companyName={companyName}
           company={company}
           canEdit={canEdit("purchases")}
+          canDelete={canDelete("purchases")}
           onClose={() => setPurchaseDetail(null)}
           onRegisterPayment={registerPurchasePayment}
           onDeletePayment={deletePurchasePayment}
@@ -11110,6 +11767,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           bankAccounts={companyBankAccounts}
           orderInfo={salesOrders.find((o) => o.quote_id === quoteDetail.quote.id) || null}
           canEdit={canEdit("quotes")}
+          canDelete={canDelete("quotes")}
           onClose={() => setQuoteDetail(null)}
           onMarkStatus={markQuoteStatus}
           onConvertToOrder={convertQuoteToOrder}
@@ -11128,6 +11786,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           company={company}
           workOrderInfo={orders.find((o) => o.id === salesOrderDetail.order.work_order_id) || null}
           canEdit={canEdit("salesOrders")}
+          canDelete={canDelete("salesOrders")}
           onClose={() => setSalesOrderDetail(null)}
           onGenerateInvoice={generateInvoiceFromOrder}
           onGenerateWorkOrder={convertSalesOrderToWorkOrder}
@@ -11185,6 +11844,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           orders={orders}
           quotes={quotes}
           canEdit={canEdit("incidents")}
+          canDelete={canDelete("incidents")}
           isTecnico={isTecnico}
           onClose={() => setIncidentDetail(null)}
           onMarkStatus={markIncidentStatus}
@@ -11211,6 +11871,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           company={company}
           bankAccounts={companyBankAccounts}
           canEdit={canEdit("invoices")}
+          canDelete={canDelete("invoices")}
           isAdmin={isAdmin}
           onClose={() => setInvoiceDetail(null)}
           onVoid={voidInvoice}
@@ -11288,6 +11949,7 @@ export default function MantenProApp() {
   const [company, setCompany] = useState(null);
   const [inviteInfo, setInviteInfo] = useState(undefined); // undefined = sin cargar, null = no hay/invalida
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   const loadProfile = async (userId) => {
     const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
@@ -11320,6 +11982,7 @@ export default function MantenProApp() {
       setAuthLoading(false);
     });
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (_event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
       setSession(session);
       if (session) {
         setAuthLoading(true);
@@ -11340,6 +12003,11 @@ export default function MantenProApp() {
 
   if (authLoading || inviteInfo === undefined) return <FullScreenLoader label="Cargando..." />;
   if (!session) return <AuthScreen inviteInfo={inviteInfo} />;
+
+  if (passwordRecovery) {
+    return <ChangePasswordModal title="Pon tu nueva contraseña" onDone={() => setPasswordRecovery(false)} />;
+  }
+
   if (profile === undefined) return <FullScreenLoader label="Cargando tu perfil..." />;
 
   if (profile === null && inviteInfo) {
