@@ -144,7 +144,7 @@ const ACTIVITY_TABLE_LABELS = {
   quotes: "Cotizaciones",
   sales_orders: "Órdenes de venta",
   tools: "Herramientas",
-  inventory_materials: "Materiales sobrantes",
+  inventory_materials: "Almacén",
   projects: "Proyectos",
   branches: "Sucursales",
   checklist_templates: "Checklists",
@@ -212,7 +212,7 @@ const PERMISSION_CATALOG = [
     { key: "checklists", label: "Checklists" },
     { key: "technicians", label: "Técnicos" },
     { key: "tools", label: "Herramientas" },
-    { key: "materials", label: "Materiales sobrantes" },
+    { key: "materials", label: "Almacén" },
     { key: "maintenanceSchedule", label: "Mantenimiento programado" },
   ] },
   { section: "Catálogo", items: [
@@ -2852,7 +2852,7 @@ function MaterialFormModal({ branches, initial, onClose, onSave, saving }) {
     onSave({ name: name.trim(), branch_id: branchId || null, quantity: Number(quantity), unit, notes: notes.trim() || null });
   };
   return (
-    <Modal title={initial ? "Editar material" : "Agregar material sobrante"} onClose={onClose}>
+    <Modal title={initial ? "Editar material" : "Agregar material al almacén"} onClose={onClose}>
       <Field label="Nombre del material">
         <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Tubería PVC 1/2, cable THHN #12" />
       </Field>
@@ -5406,7 +5406,7 @@ function SignaturePad({ onSave, saving }) {
   );
 }
 
-function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, techName, technicians, extraTechnicianIds, materials, onConsumeMaterial, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
+function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, techName, technicians, extraTechnicianIds, materials, onConsumeMaterial, canManageWarehouse, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(order.photo_url || "");
@@ -5419,11 +5419,9 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
 
   const [usedMaterials, setUsedMaterials] = useState([]);
   const [loadingMaterials, setLoadingMaterials] = useState(true);
-  const [newMaterialSource, setNewMaterialSource] = useState("");
-  const [newMaterialName, setNewMaterialName] = useState("");
-  const [newMaterialQty, setNewMaterialQty] = useState("");
-  const [newMaterialUnit, setNewMaterialUnit] = useState("");
-  const [newMaterialCost, setNewMaterialCost] = useState("");
+  const [pickMaterialId, setPickMaterialId] = useState("");
+  const [pickMaterialQty, setPickMaterialQty] = useState("");
+  const [materialErr, setMaterialErr] = useState("");
   const [savingMaterial, setSavingMaterial] = useState(false);
 
   useEffect(() => {
@@ -5438,36 +5436,38 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
     return () => { active = false; };
   }, [order.id]);
 
+  const availableWarehouseStock = materials.filter((m) => Number(m.quantity || 0) > 0);
+
   const addUsedMaterial = async () => {
-    const fromStock = newMaterialSource ? materials.find((m) => m.id === newMaterialSource) : null;
-    const name = fromStock ? fromStock.name : newMaterialName.trim();
-    const qty = Number(newMaterialQty);
-    if (!name || !qty) return;
+    setMaterialErr("");
+    const mat = materials.find((m) => m.id === pickMaterialId);
+    const qty = Number(pickMaterialQty);
+    if (!mat || !qty) return;
+    if (qty > Number(mat.quantity || 0)) { setMaterialErr("No hay suficiente cantidad disponible en el almacén."); return; }
     setSavingMaterial(true);
     const payload = {
       work_order_id: order.id,
-      material_id: fromStock ? fromStock.id : null,
-      name,
+      material_id: mat.id,
+      name: mat.name,
       quantity: qty,
-      unit: fromStock ? fromStock.unit : (newMaterialUnit.trim() || null),
-      unit_cost: newMaterialCost === "" ? 0 : Number(newMaterialCost),
+      unit: mat.unit || null,
     };
     const { data, error } = await supabase.from("work_order_materials").insert(payload).select().single();
     setSavingMaterial(false);
-    if (error) return;
+    if (error) { setMaterialErr(error.message); return; }
     setUsedMaterials((prev) => [...prev, data]);
-    if (fromStock) onConsumeMaterial(fromStock.id, qty);
-    setNewMaterialSource(""); setNewMaterialName(""); setNewMaterialQty(""); setNewMaterialUnit(""); setNewMaterialCost("");
+    onConsumeMaterial(mat.id, qty);
+    setPickMaterialId(""); setPickMaterialQty("");
   };
-  const removeUsedMaterial = async (id) => {
-    const { error } = await supabase.from("work_order_materials").delete().eq("id", id);
+  const removeUsedMaterial = async (m) => {
+    if (!window.confirm(`¿Quitar ${m.name} de esta orden? La cantidad regresará al almacén.`)) return;
+    const { error } = await supabase.from("work_order_materials").delete().eq("id", m.id);
     if (error) return;
-    setUsedMaterials((prev) => prev.filter((m) => m.id !== id));
+    if (m.material_id) onConsumeMaterial(m.material_id, -Number(m.quantity || 0));
+    setUsedMaterials((prev) => prev.filter((x) => x.id !== m.id));
   };
 
-  const materialsCost = usedMaterials.reduce((sum, m) => sum + Number(m.quantity || 0) * Number(m.unit_cost || 0), 0);
   const laborCost = (Number(laborHours) || 0) * (Number(laborRate) || 0);
-  const totalCost = materialsCost + laborCost;
 
   const [signerName, setSignerName] = useState(order.client_signature_name || "");
   const [resigning, setResigning] = useState(false);
@@ -5637,41 +5637,32 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
       </Field>
 
       <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
-        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Materiales usados</div>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Materiales retirados del almacén</div>
         {!loadingMaterials && usedMaterials.length > 0 && (
           <div className="mb-2 space-y-1">
             {usedMaterials.map((m) => (
               <div key={m.id} className="flex items-center justify-between text-sm px-3 py-1.5" style={{ background: C.panelAlt }}>
                 <span>{m.name} — {m.quantity} {m.unit || ""}</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono" style={{ color: C.muted }}>{fmtMoney(Number(m.quantity || 0) * Number(m.unit_cost || 0))}</span>
-                  {!readOnly && <button onClick={() => removeUsedMaterial(m.id)} style={iconBtnStyle}><X size={13} /></button>}
-                </div>
+                {!readOnly && canManageWarehouse && <button onClick={() => removeUsedMaterial(m)} style={iconBtnStyle}><X size={13} /></button>}
               </div>
             ))}
           </div>
         )}
-        {!loadingMaterials && usedMaterials.length === 0 && <div className="text-xs mb-2" style={{ color: C.muted }}>Todavía no se ha registrado ningún material.</div>}
-        {!readOnly && (
-          <div className="grid grid-cols-12 gap-2 min-w-[860px] items-end">
-            <div className="col-span-3">
-              <select className={`${inputClass} text-xs`} style={inputStyle} value={newMaterialSource} onChange={(e) => { setNewMaterialSource(e.target.value); setNewMaterialName(""); }}>
-                <option value="">Material libre...</option>
-                {materials.map((m) => <option key={m.id} value={m.id}>{m.name} ({Number(m.quantity || 0)} disp.)</option>)}
-              </select>
+        {!loadingMaterials && usedMaterials.length === 0 && <div className="text-xs mb-2" style={{ color: C.muted }}>Todavía no se ha retirado ningún material del almacén para esta orden.</div>}
+        {!readOnly && canManageWarehouse && (
+          <div>
+            <div className="grid grid-cols-12 gap-2 min-w-[500px] items-end">
+              <div className="col-span-7"><SearchSelect items={availableWarehouseStock} value={pickMaterialId} onChange={setPickMaterialId} placeholder="Buscar material del almacén..." getLabel={(m) => `${m.name} (disp. ${Number(m.quantity).toLocaleString("es-DO")} ${m.unit || ""})`} /></div>
+              <input type="number" step="0.01" className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={pickMaterialQty} onChange={(e) => setPickMaterialQty(e.target.value)} placeholder="Cant." />
+              <button onClick={addUsedMaterial} disabled={savingMaterial || !pickMaterialId || !pickMaterialQty} className="col-span-3 px-2 py-2 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+                <Plus size={13} className="inline" /> Retirar
+              </button>
             </div>
-            {!newMaterialSource && (
-              <input className={`${inputClass} col-span-3 text-xs`} style={inputStyle} value={newMaterialName} onChange={(e) => setNewMaterialName(e.target.value)} placeholder="Nombre del material" />
-            )}
-            <input type="number" step="0.01" className={`${inputClass} ${newMaterialSource ? "col-span-3" : "col-span-2"} text-xs`} style={inputStyle} value={newMaterialQty} onChange={(e) => setNewMaterialQty(e.target.value)} placeholder="Cant." />
-            {!newMaterialSource && (
-              <input className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={newMaterialUnit} onChange={(e) => setNewMaterialUnit(e.target.value)} placeholder="Unidad" />
-            )}
-            <input type="number" step="0.01" className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={newMaterialCost} onChange={(e) => setNewMaterialCost(e.target.value)} placeholder="Costo c/u" />
-            <button onClick={addUsedMaterial} disabled={savingMaterial} className="col-span-2 px-2 py-2 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
-              <Plus size={13} className="inline" /> Agregar
-            </button>
+            {materialErr && <div className="text-xs mt-1" style={{ color: "#E05252" }}>{materialErr}</div>}
           </div>
+        )}
+        {!readOnly && !canManageWarehouse && (
+          <div className="text-xs" style={{ color: C.muted }}>Solo un supervisor o administrador puede retirar materiales del almacén.</div>
         )}
       </div>
 
@@ -5688,11 +5679,8 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
       </div>
 
       <div className="mt-2 p-3 flex justify-between items-center text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-        <span style={{ color: C.muted }}>Costo total de esta orden</span>
-        <div className="text-right">
-          <div className="font-mono font-bold">{fmtMoney(totalCost)}</div>
-          <div className="text-xs" style={{ color: C.muted }}>Materiales {fmtMoney(materialsCost)} · Mano de obra {fmtMoney(laborCost)}</div>
-        </div>
+        <span style={{ color: C.muted }}>Costo de mano de obra</span>
+        <div className="font-mono font-bold">{fmtMoney(laborCost)}</div>
       </div>
 
       <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
@@ -8672,7 +8660,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       key: "inventoryMenu", label: "Inventario", Icon: Package,
       children: [
         { key: "tools", label: "Herramientas", Icon: Wrench },
-        { key: "materials", label: "Materiales sobrantes", Icon: Boxes },
+        { key: "materials", label: "Almacén", Icon: Boxes },
       ],
     },
     { key: "maintenanceSchedule", label: "Mantenimiento programado", Icon: CalendarDays },
@@ -9729,7 +9717,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           {!loadingScope && hasPerm("materials") && view === "materials" && (
             <div>
               <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{materials.length} material{materials.length !== 1 ? "es" : ""} sobrante{materials.length !== 1 ? "s" : ""}</div>
+                <div className="text-sm" style={{ color: C.muted }}>{materials.length} material{materials.length !== 1 ? "es" : ""} en almacén</div>
                 {canEdit("materials") && (
                   <button onClick={() => setShowAddMaterial(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
                     <Plus size={14} /> Agregar material
@@ -9759,7 +9747,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
                   </div>
                 ))}
-                {materials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay materiales sobrantes registrados.</div>}
+                {materials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay materiales registrados en el almacén.</div>}
               </div>
             </div>
           )}
@@ -11729,6 +11717,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           extraTechnicianIds={orderTechnicians.filter((wt) => wt.work_order_id === detailOrder.id).map((wt) => wt.technician_id)}
           materials={materials}
           onConsumeMaterial={consumeMaterialStock}
+          canManageWarehouse={canManage}
           onSaveSignature={saveClientSignature}
           onClose={() => { setDetailOrder(null); setDetailOrderAttachments([]); setDetailOrderChecklist([]); }}
           onSave={saveOrderDetail}
