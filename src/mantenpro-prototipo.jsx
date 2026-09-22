@@ -970,6 +970,9 @@ function SupportViewer({ onSignOut }) {
   const [error, setError] = useState("");
   const [billingNoteDraft, setBillingNoteDraft] = useState("");
   const [savingBilling, setSavingBilling] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletingCompany, setDeletingCompany] = useState(false);
+  const [savingModules, setSavingModules] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -988,6 +991,7 @@ function SupportViewer({ onSignOut }) {
     setData({});
     setTab("profiles");
     setBillingNoteDraft(companies.find((c) => c.id === companyId)?.billing_note || "");
+    setDeleteConfirmText("");
     if (!companyId) return;
     setLoadingData(true);
     const [profs, cli, prod, ord, qts, sord, inv, purch, ncf, cash] = await Promise.all([
@@ -1029,6 +1033,53 @@ function SupportViewer({ onSignOut }) {
     if (err) { setError(err.message); return; }
     if (!updated) { setError("No se pudo actualizar el estado de cobro."); return; }
     setCompanies((prev) => prev.map((c) => (c.id === companyId ? updated : c)));
+  };
+
+  // Venta por módulos: prende/apaga un módulo para la empresa. El candado real está en
+  // RLS (company_has_module, ver venta-por-modulos.sql) — esto solo decide qué módulos
+  // tiene contratados; el frontend de la empresa (hasPerm) lo usa para ocultar el menú.
+  const toggleCompanyModule = async (companyId, mod) => {
+    const current = companies.find((c) => c.id === companyId)?.enabled_modules || [];
+    const next = current.includes(mod) ? current.filter((m) => m !== mod) : [...current, mod];
+    setSavingModules(true);
+    setError("");
+    const { data: updated, error: err } = await supabase
+      .from("companies")
+      .update({ enabled_modules: next })
+      .eq("id", companyId)
+      .select()
+      .maybeSingle();
+    setSavingModules(false);
+    if (err) { setError(err.message); return; }
+    if (!updated) { setError("No se pudo actualizar los módulos."); return; }
+    setCompanies((prev) => prev.map((c) => (c.id === companyId ? updated : c)));
+  };
+
+  // Candado del lado del cliente: refleja lo mismo que la función del servidor va a
+  // verificar de todos modos (platform_admin_delete_empty_company revisa las 8 tablas
+  // completas, incluidas credit_notes e incidents que aquí no se cargan). Esto solo
+  // decide si mostrar el formulario de borrado o el aviso de "ya tiene actividad";
+  // el candado real está en la base de datos, no aquí.
+  const companyHasHistory = (data.orders || []).length > 0 || (data.quotes || []).length > 0 ||
+    (data.salesOrders || []).length > 0 || (data.invoices || []).length > 0 ||
+    (data.purchases || []).length > 0 || (data.cashSessions || []).length > 0;
+
+  const doDeleteCompany = async (companyToDelete) => {
+    if (deleteConfirmText.trim() !== companyToDelete.name) return;
+    if (!window.confirm(`¿Borrar "${companyToDelete.name}" por completo? Esto no se puede deshacer.`)) return;
+    setDeletingCompany(true);
+    setError("");
+    const { error: err } = await supabase.rpc("platform_admin_delete_empty_company", {
+      p_company_id: companyToDelete.id,
+      p_company_name_confirm: deleteConfirmText.trim(),
+    });
+    setDeletingCompany(false);
+    if (err) { setError(err.message); return; }
+    setCompanies((prev) => prev.filter((c) => c.id !== companyToDelete.id));
+    setSelectedCompanyId("");
+    setData({});
+    setDeleteConfirmText("");
+    window.alert(`"${companyToDelete.name}" fue borrada. Falta un paso manual: borra el login de sus usuarios desde Authentication → Users en el panel de Supabase (eso no se puede hacer por SQL).`);
   };
 
   return (
@@ -1127,10 +1178,61 @@ function SupportViewer({ onSignOut }) {
                 )}
               </div>
 
+              <div className="mb-6 p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>Módulos contratados</div>
+                <div className="text-xs mb-3" style={{ color: C.muted }}>Lo que desmarques aquí desaparece del menú de la empresa y queda bloqueado por RLS, aunque alguien llame la API directo.</div>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { key: "tecnico", label: "Departamento técnico" },
+                    { key: "comercial", label: "Comercial" },
+                    { key: "administracion", label: "Administración" },
+                  ].map((m) => {
+                    const on = (selectedCompany.enabled_modules || []).includes(m.key);
+                    return (
+                      <button
+                        key={m.key}
+                        disabled={savingModules}
+                        onClick={() => toggleCompanyModule(selectedCompany.id, m.key)}
+                        className="px-3 py-2 text-xs font-semibold flex items-center gap-2"
+                        style={{ background: on ? C.green + "20" : C.panelAlt, color: on ? C.green : C.muted, border: `1px solid ${on ? C.green + "60" : C.border}`, opacity: savingModules ? 0.6 : 1 }}
+                      >
+                        {on ? <CheckCircle2 size={13} /> : <X size={13} />} {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {loadingData ? (
                 <div className="text-sm" style={{ color: C.muted }}>Cargando datos...</div>
               ) : (
                 <>
+                  <div className="mb-6 p-4" style={{ background: C.panel, border: `1px solid ${C.red}60` }}>
+                    <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.red }}>Zona de peligro</div>
+                    {companyHasHistory ? (
+                      <div className="text-sm" style={{ color: C.muted }}>
+                        Esta empresa ya tiene actividad registrada (órdenes, cotizaciones, órdenes de venta, facturas, compras o sesiones de caja), así que no se puede borrar. Si dejó de pagar, usa "Suspender acceso" arriba — borrar destruiría facturas con NCF que hay que conservar para la DGII.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm mb-3" style={{ color: C.muted }}>
+                          Esta empresa no tiene ninguna operación registrada todavía (sirve para limpiar una empresa de prueba o creada por error). Borrarla es permanente y no se puede deshacer.
+                        </div>
+                        <Field label={`Para confirmar, escribe el nombre exacto de la empresa: "${selectedCompany.name}"`}>
+                          <input className={inputClass} style={inputStyle} value={deleteConfirmText} onChange={(e) => setDeleteConfirmText(e.target.value)} placeholder={selectedCompany.name} />
+                        </Field>
+                        <button
+                          disabled={deletingCompany || deleteConfirmText.trim() !== selectedCompany.name}
+                          onClick={() => doDeleteCompany(selectedCompany)}
+                          className="px-3 py-2 text-xs font-semibold disabled:opacity-40"
+                          style={{ background: C.red, color: "#fff" }}
+                        >
+                          {deletingCompany ? "Borrando..." : "Eliminar empresa"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+
                   <div className="flex gap-3 flex-wrap mb-6">
                     <KpiCard label="Usuarios" value={(data.profiles || []).length} accent={C.blue} />
                     <KpiCard label="Clientes" value={(data.clients || []).length} accent={C.green} />
@@ -3397,13 +3499,21 @@ function TaxRateFormModal({ initial, onClose, onSave, saving }) {
   );
 }
 
-function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onRequestNewSupplier, onEnsureGenericProduct }) {
+function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onRequestNewSupplier, onEnsureGenericProduct, prefill }) {
   const [title, setTitle] = useState("");
-  const [supplierId, setSupplierId] = useState(suppliers[0]?.id || "");
+  const [supplierId, setSupplierId] = useState(prefill?.supplier_id || suppliers[0]?.id || "");
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [purchaseDate, setPurchaseDate] = useState(() => todayStrRD());
   const [notes, setNotes] = useState("");
-  const [blocks, setBlocks] = useState([{ id: 0, kind: "item", product_id: "", quantity: 1, unit_cost: 0, is_taxable: true }]);
+  // goods_receipt_id: si esta factura viene de una nota de entrega ya registrada, el
+  // inventario NO se vuelve a tocar al guardar (ver createPurchase) — ya subió al recibir.
+  const [goodsReceiptId] = useState(prefill?.goods_receipt_id || null);
+  const [blocks, setBlocks] = useState(() => prefill?.items?.length
+    ? prefill.items.map((it, idx) => {
+      const prod = products.find((p) => p.id === it.product_id);
+      return { id: idx, kind: "item", product_id: it.product_id, quantity: it.quantity, unit_cost: it.unit_cost, is_taxable: prod?.is_taxable ?? true };
+    })
+    : [{ id: 0, kind: "item", product_id: "", quantity: 1, unit_cost: 0, is_taxable: true }]);
   const [retainItbis, setRetainItbis] = useState(false);
   const [retainIsr, setRetainIsr] = useState(false);
   const [pdfDetectedTotal, setPdfDetectedTotal] = useState(null);
@@ -3493,12 +3603,17 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
       title: title.trim() || null, supplier_id: supplierId, invoice_number: invoiceNumber.trim() || null, purchase_date: purchaseDate, notes: notes.trim() || null,
       applies_254_06: apply254_06, retains_itbis: retainItbis, retains_isr: retainIsr,
       service_value: serviceValue, itbis_amount: itbisAmount, isr_retained: isrRetained, itbis_retained: itbisRetained,
-      total,
+      total, goods_receipt_id: goodsReceiptId,
     }, validItems);
   };
 
   return (
     <Modal title="Registrar compra" onClose={onClose} wide>
+      {goodsReceiptId ? (
+        <div className="mb-3 p-3 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.green}60`, color: C.text }}>
+          Esta factura viene de la nota de entrega <span className="font-mono">{prefill?.receiptLabel}</span> — el proveedor y los renglones ya se llenaron con lo que se recibió. El inventario no se va a duplicar (ya subió al registrar esa nota de entrega); solo puedes ajustar el costo si la factura final vino distinta.
+        </div>
+      ) : (
       <div className="mb-3 p-3" style={{ background: C.panelAlt, border: `1px solid ${C.amber}60` }}>
         <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: C.amber }}>
           <Upload size={14} />
@@ -3512,6 +3627,7 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
         )}
         {pdfError && <div className="text-xs mt-1" style={{ color: C.red }}>{pdfError}</div>}
       </div>
+      )}
       <Field label="Título de la compra (opcional)">
         <input className={inputClass} style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ej. Reposición de inventario trimestral" />
       </Field>
@@ -3764,6 +3880,266 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, supplier
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={doPrint} className="flex items-center gap-2 px-4 py-2 text-sm" style={{ color: C.amber, border: `1px solid ${C.border}` }}><FileText size={14} /> Imprimir</button>
         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
+      </div>
+    </Modal>
+  );
+}
+
+const PURCHASE_ORDER_STATUS_CFG = {
+  pendiente: { label: "Pendiente", color: C.amber },
+  parcial: { label: "Recibido parcial", color: C.blue },
+  recibido: { label: "Recibido completo", color: C.green },
+  cancelado: { label: "Cancelado", color: C.muted },
+};
+
+function PurchaseOrderFormModal({ suppliers, branches, products, onClose, onSave, saving, onRequestNewSupplier }) {
+  const [supplierId, setSupplierId] = useState(suppliers[0]?.id || "");
+  const [branchId, setBranchId] = useState("");
+  const [expectedDate, setExpectedDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [items, setItems] = useState([{ tempId: 0, product_id: "", quantity: 1, unit_cost: 0 }]);
+  const newTempId = () => Date.now() + Math.random();
+
+  const updateItem = (tempId, patch) => setItems((prev) => prev.map((it) => (it.tempId === tempId ? { ...it, ...patch } : it)));
+  const addItem = () => setItems((prev) => [...prev, { tempId: newTempId(), product_id: "", quantity: 1, unit_cost: 0 }]);
+  const removeItem = (tempId) => setItems((prev) => prev.filter((it) => it.tempId !== tempId));
+  const onProductPick = (tempId, productId) => {
+    const prod = products.find((p) => p.id === productId);
+    updateItem(tempId, { product_id: productId, unit_cost: prod ? prod.cost_price : 0 });
+  };
+
+  const validItems = items.filter((it) => it.product_id && Number(it.quantity) > 0);
+  const total = validItems.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_cost), 0);
+
+  const submit = () => {
+    if (!supplierId || validItems.length === 0) return;
+    onSave(
+      { supplier_id: supplierId, branch_id: branchId || null, expected_date: expectedDate || null, notes: notes.trim() || null },
+      validItems.map((it) => ({ product_id: it.product_id, quantity: Number(it.quantity), unit_cost: Number(it.unit_cost) }))
+    );
+  };
+
+  return (
+    <Modal title="Nuevo pedido a proveedor" onClose={onClose} wide>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Esto solo registra qué le pediste al proveedor — no toca el inventario. El inventario sube cuando registres la Nota de entrega con lo que realmente llegó.</div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Proveedor">
+          <div className="flex gap-2">
+            <div className="flex-1"><SearchSelect items={suppliers} value={supplierId} onChange={setSupplierId} placeholder="Buscar proveedor..." getLabel={(s) => s.name} /></div>
+            {onRequestNewSupplier && <button type="button" onClick={onRequestNewSupplier} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>}
+          </div>
+        </Field>
+        <Field label="Sucursal (opcional)">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">Sin especificar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+      </div>
+      <Field label="Fecha estimada de llegada (opcional)">
+        <input type="date" className={inputClass} style={inputStyle} value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
+      </Field>
+
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos pedidos</div>
+      <div className="space-y-2 mb-3">
+        {items.map((it) => (
+          <div key={it.tempId} className="grid grid-cols-12 gap-2 items-center">
+            <div className="col-span-6"><ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(it.tempId, id)} placeholder="Buscar producto..." /></div>
+            <input type="text" inputMode="decimal" className={`${inputClass} col-span-2`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(it.tempId, { quantity: e.target.value })} placeholder="Cant." />
+            <input type="text" inputMode="decimal" className={`${inputClass} col-span-3`} style={inputStyle} value={it.unit_cost} onChange={(e) => updateItem(it.tempId, { unit_cost: e.target.value })} placeholder="Costo unit." />
+            <button onClick={() => removeItem(it.tempId)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+          </div>
+        ))}
+      </div>
+      <button onClick={addItem} className="flex items-center gap-2 text-sm mb-3" style={{ color: C.amber }}><Plus size={14} /> Agregar producto</button>
+      <div className="text-right text-sm font-semibold mb-3" style={{ color: C.text }}>Total estimado: {fmtMoney(total)}</div>
+      <Field label="Notas (opcional)">
+        <textarea className={inputClass} style={{ ...inputStyle, minHeight: 60 }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Condiciones, referencia del proveedor, etc." />
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving || !supplierId || validItems.length === 0} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Guardando..." : "Crear pedido"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function GoodsReceiptFormModal({ suppliers, branches, products, openOrders, orderItemsFor, fromOrder, onClose, onSave, saving }) {
+  const newTempId = () => Date.now() + Math.random();
+  const pendingFromOrder = (order) => {
+    const pending = (orderItemsFor(order?.id) || []).filter((it) => Number(it.received_quantity || 0) < Number(it.quantity));
+    return pending.length > 0
+      ? pending.map((it) => ({ tempId: newTempId(), product_id: it.product_id, quantity: Number(it.quantity) - Number(it.received_quantity || 0), unit_cost: Number(it.unit_cost) }))
+      : [{ tempId: newTempId(), product_id: "", quantity: 1, unit_cost: 0 }];
+  };
+
+  const [purchaseOrderId, setPurchaseOrderId] = useState(fromOrder?.id || "");
+  const [supplierId, setSupplierId] = useState(fromOrder?.supplier_id || suppliers[0]?.id || "");
+  const [branchId, setBranchId] = useState(fromOrder?.branch_id || "");
+  const [receiptDate, setReceiptDate] = useState(() => todayStrRD());
+  const [notes, setNotes] = useState("");
+  const [items, setItems] = useState(() => fromOrder ? pendingFromOrder(fromOrder) : [{ tempId: newTempId(), product_id: "", quantity: 1, unit_cost: 0 }]);
+
+  const onPickOrder = (orderId) => {
+    setPurchaseOrderId(orderId);
+    const order = openOrders.find((o) => o.id === orderId);
+    if (order) {
+      setSupplierId(order.supplier_id);
+      setBranchId(order.branch_id || "");
+      setItems(pendingFromOrder(order));
+    } else {
+      setItems([{ tempId: newTempId(), product_id: "", quantity: 1, unit_cost: 0 }]);
+    }
+  };
+
+  const updateItem = (tempId, patch) => setItems((prev) => prev.map((it) => (it.tempId === tempId ? { ...it, ...patch } : it)));
+  const addItem = () => setItems((prev) => [...prev, { tempId: newTempId(), product_id: "", quantity: 1, unit_cost: 0 }]);
+  const removeItem = (tempId) => setItems((prev) => prev.filter((it) => it.tempId !== tempId));
+  const onProductPick = (tempId, productId) => {
+    const prod = products.find((p) => p.id === productId);
+    updateItem(tempId, { product_id: productId, unit_cost: prod ? prod.cost_price : 0 });
+  };
+
+  const validItems = items.filter((it) => it.product_id && Number(it.quantity) > 0);
+
+  const submit = () => {
+    if (!supplierId || validItems.length === 0) return;
+    onSave(
+      { supplier_id: supplierId, purchase_order_id: purchaseOrderId || null, branch_id: branchId || null, receipt_date: receiptDate, notes: notes.trim() || null },
+      validItems.map((it) => ({ product_id: it.product_id, quantity: Number(it.quantity), unit_cost: Number(it.unit_cost) }))
+    );
+  };
+
+  return (
+    <Modal title="Nueva nota de entrega" onClose={onClose} wide>
+      <div className="text-xs mb-3" style={{ color: C.muted }}>Registra lo que llegó de verdad (puede ser distinto a lo pedido). El inventario sube con lo que pongas aquí, no cuando llegue la factura.</div>
+      {fromOrder ? (
+        <div className="mb-3 p-3 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+          Recibiendo contra el pedido <span className="font-mono">{fromOrder.order_number}</span> — proveedor {suppliers.find((s) => s.id === fromOrder.supplier_id)?.name || "—"}. Las cantidades de abajo son las que faltan por recibir; ajústalas si llegó distinto.
+        </div>
+      ) : (
+        <Field label="Pedido relacionado (opcional)">
+          <select className={inputClass} style={inputStyle} value={purchaseOrderId} onChange={(e) => onPickOrder(e.target.value)}>
+            <option value="">Sin pedido — recepción libre</option>
+            {openOrders.map((o) => <option key={o.id} value={o.id}>{o.order_number} · {suppliers.find((s) => s.id === o.supplier_id)?.name || "—"}</option>)}
+          </select>
+        </Field>
+      )}
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Proveedor">
+          {purchaseOrderId ? (
+            <div className={inputClass} style={{ ...inputStyle, display: "flex", alignItems: "center", color: C.muted }}>{suppliers.find((s) => s.id === supplierId)?.name || "—"}</div>
+          ) : (
+            <SearchSelect items={suppliers} value={supplierId} onChange={setSupplierId} placeholder="Buscar proveedor..." getLabel={(s) => s.name} />
+          )}
+        </Field>
+        <Field label="Sucursal (opcional)">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            <option value="">Sin especificar</option>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Fecha de recepción">
+          <input type="date" className={inputClass} style={inputStyle} value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+        </Field>
+      </div>
+
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos recibidos</div>
+      <div className="space-y-2 mb-3">
+        {items.map((it) => (
+          <div key={it.tempId} className="grid grid-cols-12 gap-2 items-center">
+            <div className="col-span-6"><ProductSearchSelect products={products} value={it.product_id} onChange={(id) => onProductPick(it.tempId, id)} placeholder="Buscar producto..." /></div>
+            <input type="text" inputMode="decimal" className={`${inputClass} col-span-2`} style={inputStyle} value={it.quantity} onChange={(e) => updateItem(it.tempId, { quantity: e.target.value })} placeholder="Cant. recibida" />
+            <input type="text" inputMode="decimal" className={`${inputClass} col-span-3`} style={inputStyle} value={it.unit_cost} onChange={(e) => updateItem(it.tempId, { unit_cost: e.target.value })} placeholder="Costo unit." />
+            <button onClick={() => removeItem(it.tempId)} className="col-span-1" style={iconBtnStyle}><X size={16} /></button>
+          </div>
+        ))}
+      </div>
+      <button onClick={addItem} className="flex items-center gap-2 text-sm mb-3" style={{ color: C.amber }}><Plus size={14} /> Agregar producto</button>
+      <Field label="Notas (opcional)">
+        <textarea className={inputClass} style={{ ...inputStyle, minHeight: 60 }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Diferencias con lo pedido, estado de la mercancía, etc." />
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving || !supplierId || validItems.length === 0} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.green, color: "#0B1F13" }}>
+          {saving ? "Guardando..." : "Registrar recepción"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function PurchaseOrderDetailModal({ po, items, supplierName, branchName, canEdit, onClose, onCancel, onDelete, onReceive }) {
+  const cfg = PURCHASE_ORDER_STATUS_CFG[po.status] || PURCHASE_ORDER_STATUS_CFG.pendiente;
+  const total = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_cost), 0);
+  return (
+    <Modal title={`Pedido ${po.order_number || ""}`} onClose={onClose} wide>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-semibold" style={{ color: C.text }}>{supplierName}</div>
+          <div className="text-xs" style={{ color: C.muted }}>{branchName ? `${branchName} · ` : ""}Pedido: {fmtDate(po.order_date)}{po.expected_date ? ` · Llegada esperada: ${fmtDate(po.expected_date)}` : ""}</div>
+        </div>
+        <Pill label={cfg.label} color={cfg.color} />
+      </div>
+      {po.notes && <div className="text-sm mb-3 p-2" style={{ background: C.panelAlt, color: C.muted }}>{po.notes}</div>}
+      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+        <div className="col-span-5">Producto</div>
+        <div className="col-span-2 text-right">Pedido</div>
+        <div className="col-span-2 text-right">Recibido</div>
+        <div className="col-span-3 text-right">Costo unit.</div>
+      </div>
+      <div className="space-y-1 mb-3">
+        {items.map((it) => (
+          <div key={it.id} className="grid grid-cols-12 gap-2 text-sm py-1" style={{ borderBottom: `1px solid ${C.border}` }}>
+            <div className="col-span-5 truncate" style={{ color: C.text }}>{it.productName}</div>
+            <div className="col-span-2 text-right font-mono">{it.quantity}</div>
+            <div className="col-span-2 text-right font-mono" style={{ color: Number(it.received_quantity) >= Number(it.quantity) ? C.green : C.amber }}>{it.received_quantity || 0}</div>
+            <div className="col-span-3 text-right font-mono" style={{ color: C.muted }}>{fmtMoney(it.unit_cost)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between text-base font-bold mb-4" style={{ color: C.text }}><span>Total estimado</span><span className="font-mono">{fmtMoney(total)}</span></div>
+      <div className="flex justify-end gap-2">
+        {onDelete && canEdit && <button onClick={() => { onDelete(po); onClose(); }} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}60` }}>Eliminar</button>}
+        {onCancel && canEdit && (po.status === "pendiente" || po.status === "parcial") && <button onClick={() => onCancel(po)} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar pedido</button>}
+        {onReceive && canEdit && (po.status === "pendiente" || po.status === "parcial") && <button onClick={() => { onReceive(po); onClose(); }} className="px-4 py-2 text-sm font-semibold" style={{ background: C.green, color: "#0B1F13" }}>Recibir mercancía</button>}
+      </div>
+    </Modal>
+  );
+}
+
+function GoodsReceiptDetailModal({ receipt, items, supplierName, branchName, orderNumber, invoiced, canEdit, onClose, onDelete, onInvoice }) {
+  const total = items.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_cost), 0);
+  return (
+    <Modal title={`Nota de entrega ${receipt.receipt_number || ""}`} onClose={onClose} wide>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <div className="font-semibold" style={{ color: C.text }}>{supplierName}</div>
+          <div className="text-xs" style={{ color: C.muted }}>{branchName ? `${branchName} · ` : ""}Recibido: {fmtDate(receipt.receipt_date)}{orderNumber ? ` · Pedido: ${orderNumber}` : ""}</div>
+        </div>
+        <Pill label={invoiced ? "Facturada" : "Sin facturar"} color={invoiced ? C.green : C.amber} />
+      </div>
+      {receipt.notes && <div className="text-sm mb-3 p-2" style={{ background: C.panelAlt, color: C.muted }}>{receipt.notes}</div>}
+      <div className="grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
+        <div className="col-span-6">Producto</div>
+        <div className="col-span-2 text-right">Cantidad</div>
+        <div className="col-span-4 text-right">Costo unit.</div>
+      </div>
+      <div className="space-y-1 mb-3">
+        {items.map((it) => (
+          <div key={it.id} className="grid grid-cols-12 gap-2 text-sm py-1" style={{ borderBottom: `1px solid ${C.border}` }}>
+            <div className="col-span-6 truncate" style={{ color: C.text }}>{it.productName}</div>
+            <div className="col-span-2 text-right font-mono">{it.quantity}</div>
+            <div className="col-span-4 text-right font-mono" style={{ color: C.muted }}>{fmtMoney(it.unit_cost)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-between text-base font-bold mb-4" style={{ color: C.text }}><span>Total recibido</span><span className="font-mono">{fmtMoney(total)}</span></div>
+      <div className="flex justify-end gap-2">
+        {onDelete && canEdit && !invoiced && <button onClick={() => { onDelete(receipt); onClose(); }} className="px-4 py-2 text-sm" style={{ color: C.red, border: `1px solid ${C.red}60` }}>Eliminar</button>}
+        {onInvoice && canEdit && !invoiced && <button onClick={() => { onInvoice(receipt); onClose(); }} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Registrar factura</button>}
       </div>
     </Modal>
   );
@@ -4409,13 +4785,52 @@ const CREDIT_NOTE_STATUS_CFG = {
   emitida: { label: "Emitida", color: "#4FA8D8" },
 };
 
+function ExchangeRatePromptModal({ contracts, onClose, onConfirm, saving }) {
+  const usdContracts = contracts.filter((c) => c.currency === "USD");
+  const [rate, setRate] = useState(usdContracts[0]?.exchange_rate ?? "");
+  const isBatch = contracts.length > 1;
+  const submit = () => {
+    if (!(Number(rate) > 0)) return;
+    onConfirm(Number(rate));
+  };
+  return (
+    <Modal title="Tasa de cambio de hoy" onClose={onClose}>
+      <div className="text-sm mb-3" style={{ color: C.muted }}>
+        {isBatch
+          ? `${usdContracts.length} de los ${contracts.length} contrato${contracts.length !== 1 ? "s" : ""} a facturar está${usdContracts.length !== 1 ? "n" : ""} en USD. Indica la tasa de hoy para que sus facturas queden con el valor correcto en RD$ — los contratos en RD$ no la necesitan y se generan igual.`
+          : "Este contrato está en USD. Indica la tasa de hoy para que la factura quede con el valor correcto en RD$."}
+      </div>
+      <div className="mb-3 space-y-1">
+        {usdContracts.map((c) => (
+          <div key={c.id} className="text-xs" style={{ color: C.muted }}>{c.title} — US$ {Number(c.foreign_amount || 0).toFixed(2)}/ciclo</div>
+        ))}
+      </div>
+      <Field label="Tasa de cambio (RD$ por US$1)">
+        <input type="number" min="0" step="0.01" autoFocus className={inputClass} style={inputStyle} value={rate} onChange={(e) => setRate(e.target.value)} placeholder="Ej. 60.50" />
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving || !(Number(rate) > 0)} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          {saving ? "Generando..." : "Generar factura" + (isBatch ? "s" : "")}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 function RecurringContractFormModal({ clients, branches, ncfSequences, initial, onClose, onSave, saving }) {
   const [clientId, setClientId] = useState(initial?.client_id || clients[0]?.id || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || "");
   const [ncfSequenceId, setNcfSequenceId] = useState(initial?.ncf_sequence_id || "");
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
-  const [amount, setAmount] = useState(initial?.amount ?? "");
+  // El monto que se muestra/edita aquí es en la moneda elegida (currency); amount en la
+  // base de datos siempre queda en RD$ (regla fiscal), así que si el contrato ya existía
+  // en USD, el campo se rellena con foreign_amount (el monto original en US$), no con
+  // amount (que sería el equivalente en RD$).
+  const [amount, setAmount] = useState((initial?.currency === "USD" ? initial?.foreign_amount : initial?.amount) ?? "");
+  const [currency, setCurrency] = useState(initial?.currency || "DOP");
+  const [exchangeRate, setExchangeRate] = useState(initial?.exchange_rate ?? 1);
   const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
   const [frequencyDays, setFrequencyDays] = useState(initial?.frequency_days ?? 30);
   const [nextInvoiceDate, setNextInvoiceDate] = useState(initial?.next_invoice_date || todayStrRD());
@@ -4424,13 +4839,18 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
   const [notes, setNotes] = useState(initial?.notes || "");
 
   const b02Sequences = ncfSequences.filter((s) => s.ncf_type === "B02" && s.next_number <= s.range_end);
+  const rate = currency === "USD" ? (Number(exchangeRate) || 1) : 1;
 
   const submit = () => {
     if (!clientId || !title.trim() || !amount || !frequencyDays || !nextInvoiceDate) return;
     if (endDate && endDate < nextInvoiceDate) return;
     onSave({
       client_id: clientId, branch_id: branchId || null, ncf_sequence_id: ncfSequenceId || null,
-      title: title.trim(), description: description.trim() || null, amount: Number(amount), is_taxable: isTaxable,
+      title: title.trim(), description: description.trim() || null,
+      amount: Number(amount) * rate, // siempre en RD$, ver nota de más arriba
+      currency, exchange_rate: rate,
+      foreign_amount: currency === "USD" ? Number(amount) : null,
+      is_taxable: isTaxable,
       frequency_days: Number(frequencyDays), next_invoice_date: nextInvoiceDate, end_date: endDate || null, is_active: isActive, notes: notes.trim() || null,
     });
   };
@@ -4447,13 +4867,29 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
         <input className={inputClass} style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Se usa como descripción del renglón en la factura" />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Monto (RD$, antes de ITBIS)">
+        <Field label="Moneda">
+          <select className={inputClass} style={inputStyle} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            <option value="DOP">Pesos (RD$)</option>
+            <option value="USD">Dólares (US$)</option>
+          </select>
+        </Field>
+        {currency === "USD" && (
+          <Field label="Tasa de cambio (RD$ por US$1)">
+            <input type="number" min="0" step="0.01" className={inputClass} style={inputStyle} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} placeholder="Ej. 60.50" />
+          </Field>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label={currency === "USD" ? "Monto (US$, antes de ITBIS)" : "Monto (RD$, antes de ITBIS)"}>
           <input type="number" step="0.01" min="0" className={inputClass} style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
         </Field>
         <Field label="Cada cuántos días facturar">
           <input type="number" min="1" className={inputClass} style={inputStyle} value={frequencyDays} onChange={(e) => setFrequencyDays(e.target.value)} placeholder="Ej. 30" />
         </Field>
       </div>
+      {currency === "USD" && (
+        <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Cada factura generada por este contrato saldrá en US$. El NCF y los reportes fiscales siempre usan el equivalente en pesos, con la tasa de cambio que tenga el contrato en ese momento.</div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Sucursal (opcional)">
           <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
@@ -6343,7 +6779,22 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     [isVendedor, profile.branch_id, profile.extra_branch_ids]
   );
   const effectivePermissions = (profile.permissions && typeof profile.permissions === "object" && !Array.isArray(profile.permissions)) ? profile.permissions : (ROLE_DEFAULT_PERMISSIONS[profile.role] || {});
-  const hasPerm = (key) => isAdmin || !!effectivePermissions[key];
+  // Venta por módulos: qué módulo ('tecnico' | 'comercial' | 'administracion') dueño de cada
+  // pantalla — coincide 1:1 con las secciones del menú (RAW_NAV más abajo). Lo que no aparece
+  // aquí (dashboard, catálogo, reportes) es compartido entre módulos y no se bloquea por esto;
+  // el candado real y definitivo vive en RLS (ver venta-por-modulos.sql) — esto es solo para
+  // no mostrar en el menú/UI algo que el backend igual va a rechazar.
+  const MODULE_OF_KEY = {
+    orders: "tecnico", agenda: "tecnico", incidents: "tecnico", projects: "tecnico", equipment: "tecnico",
+    checklists: "tecnico", technicians: "tecnico", tools: "tecnico", materials: "tecnico", maintenanceSchedule: "tecnico",
+    suppliers: "comercial", purchaseOrders: "comercial", deliveryNotes: "comercial", purchases: "comercial",
+    supplierReceipts: "comercial", otherExpenses: "comercial", purchaseLedger: "comercial", quotes: "comercial",
+    salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
+    chartOfAccounts: "administracion", receivables: "administracion", payables: "administracion", taxRates: "administracion",
+    bankReconciliation: "administracion", ncf: "administracion", activityLog: "administracion",
+  };
+  const companyHasModule = (mod) => !mod || (company?.enabled_modules || []).includes(mod);
+  const hasPerm = (key) => (isAdmin || !!effectivePermissions[key]) && companyHasModule(MODULE_OF_KEY[key]);
   const canEdit = (key) => isAdmin || effectivePermissions[key] === "edit" || effectivePermissions[key] === "edit_no_delete";
   const canDelete = (key) => isAdmin || effectivePermissions[key] === "edit";
   const maxDiscountPct = isAdmin ? 100 : Number(profile.max_discount_pct) || 0;
@@ -6383,6 +6834,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [invoicePaymentFilter, setInvoicePaymentFilter] = useState("all");
   const [suppliers, setSuppliers] = useState([]);
   const [purchases, setPurchases] = useState([]);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
+  const [purchaseOrderItems, setPurchaseOrderItems] = useState([]);
+  const [goodsReceipts, setGoodsReceipts] = useState([]);
+  const [goodsReceiptItems, setGoodsReceiptItems] = useState([]);
   const [otherExpenses, setOtherExpenses] = useState([]);
   const [tools, setTools] = useState([]);
   const [toolLists, setToolLists] = useState([]);
@@ -6463,6 +6918,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [showAddChecklist, setShowAddChecklist] = useState(false);
   const [editingChecklist, setEditingChecklist] = useState(null);
   const [orderAttachmentIds, setOrderAttachmentIds] = useState(new Set());
+  const [orderChecklistSummary, setOrderChecklistSummary] = useState(new Map()); // work_order_id -> { total, answered } — alimenta el KPI de cumplimiento de checklist en Informes
   const [showAddBranch, setShowAddBranch] = useState(false);
   const [editingBranch, setEditingBranch] = useState(null);
   const [showAddTech, setShowAddTech] = useState(false);
@@ -6484,6 +6940,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [editingSupplier, setEditingSupplier] = useState(null);
   const [showAddPurchase, setShowAddPurchase] = useState(false);
   const [purchaseDetail, setPurchaseDetail] = useState(null);
+  const [prefillReceiptId, setPrefillReceiptId] = useState(null); // abre el form de Compras con esta nota de entrega ya elegida
+  const [showAddPurchaseOrder, setShowAddPurchaseOrder] = useState(false);
+  const [purchaseOrderDetail, setPurchaseOrderDetail] = useState(null);
+  const [showAddReceipt, setShowAddReceipt] = useState(false);
+  const [receiptFromOrder, setReceiptFromOrder] = useState(null); // pedido desde el que se abrió "Recibir mercancía"
+  const [receiptDetail, setReceiptDetail] = useState(null);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [editingExpense, setEditingExpense] = useState(null);
   const [showAddTool, setShowAddTool] = useState(false);
@@ -6524,6 +6986,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [showAddInvoice, setShowAddInvoice] = useState(false);
   const [showAddContract, setShowAddContract] = useState(false);
   const [editingContract, setEditingContract] = useState(null);
+  // Al generar factura(s) de contrato(s) en USD, se pide la tasa del día en vez de reusar la
+  // tasa que quedó guardada de cuando se creó/editó el contrato — ver generateContractInvoice.
+  const [exchangeRatePrompt, setExchangeRatePrompt] = useState(null); // { mode: "single" | "batch", contracts: [] }
   const [showStatement, setShowStatement] = useState(false);
   const [invoiceDetail, setInvoiceDetail] = useState(null);
   const [invoicePrefill, setInvoicePrefill] = useState(null);
@@ -6554,13 +7019,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const loadAll = async () => {
     setLoadingScope(true);
-    const [br, tech, eq, loc, ord, woa, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, tloans, mats, wot, rcon, banktx, cba, projs, projmats] = await Promise.all([
+    const [br, tech, eq, loc, ord, woa, wocki, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, tloans, mats, wot, rcon, banktx, cba, projs, projmats, pords, pordit, grcpts, grcptit] = await Promise.all([
       supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
       supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
       supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
       supabase.from("locations").select("*").eq("company_id", companyId).order("name"),
       supabase.from("work_orders").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
       supabase.from("work_order_attachments").select("work_order_id"),
+      supabase.from("work_order_checklist_items").select("work_order_id, checked, respuesta, response_type"),
       supabase.from("checklist_templates").select("*").eq("company_id", companyId).order("equipment_type"),
       supabase.from("checklist_template_items").select("*").order("position"),
       supabase.from("profiles").select("*").eq("company_id", companyId).order("created_at"),
@@ -6591,6 +7057,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       supabase.from("company_bank_accounts").select("*").eq("company_id", companyId).order("created_at"),
       supabase.from("projects").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
       supabase.from("project_materials").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
+      supabase.from("purchase_orders").select("*").eq("company_id", companyId).order("order_date", { ascending: false }),
+      supabase.from("purchase_order_items").select("*"),
+      supabase.from("goods_receipts").select("*").eq("company_id", companyId).order("receipt_date", { ascending: false }),
+      supabase.from("goods_receipt_items").select("*"),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -6599,6 +7069,19 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setLocations(loc.data || []);
     setOrders(ord.data || []);
     setOrderAttachmentIds(new Set((woa.data || []).map((r) => r.work_order_id)));
+    // Misma regla que isChecklistItemAnswered en OrderDetailModal, para que el KPI de
+    // Informes cuente "respondido" igual que la pantalla donde el técnico lo llena.
+    const checklistSummary = new Map();
+    (wocki.data || []).forEach((it) => {
+      const cur = checklistSummary.get(it.work_order_id) || { total: 0, answered: 0 };
+      cur.total += 1;
+      const answered = it.response_type === "ok_no_ok_na" ? !!(it.respuesta && it.respuesta.trim())
+        : it.response_type === "numeric" ? !!(it.respuesta && it.respuesta.trim() !== "" && !isNaN(Number(it.respuesta)))
+        : !!it.checked;
+      if (answered) cur.answered += 1;
+      checklistSummary.set(it.work_order_id, cur);
+    });
+    setOrderChecklistSummary(checklistSummary);
     setChecklistTemplates((cktpl.data || []).map((t) => ({ ...t, items: (ckitems.data || []).filter((it) => it.template_id === t.id) })));
     setProfiles(profs.data || []);
     setInvites(inv.data || []);
@@ -6628,6 +7111,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setCompanyBankAccounts(cba.data || []);
     setProjects(projs.data || []);
     setProjectMaterials(projmats.data || []);
+    setPurchaseOrders(pords.data || []);
+    setPurchaseOrderItems(pordit.data || []);
+    setGoodsReceipts(grcpts.data || []);
+    setGoodsReceiptItems(grcptit.data || []);
     setLoadingScope(false);
   };
 
@@ -7147,6 +7634,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const reopened = reportsOrders.filter((o) => (o.reopened_count || 0) > 0);
     return { everCompleted: everCompleted.length, reopened: reopened.length, pct: everCompleted.length > 0 ? (reopened.length / everCompleted.length) * 100 : null };
   }, [reportsOrders]);
+
+  // Cumplimiento de checklist al cierre: de las órdenes cerradas en el rango filtrado,
+  // separa dos cosas distintas. (1) "Uso": cuántas se cerraron habiendo cargado algún
+  // checklist — cargarlo es opcional, así que una orden puede cerrarse sin ninguno.
+  // (2) "Completado": de las que sí tenían checklist, cuántas quedaron con el 100% de
+  // los puntos respondidos. En teoría (2) siempre debería dar 100%, porque el botón de
+  // cerrar ya exige el checklist completo si hay uno cargado (ver closeRequirements en
+  // OrderDetailModal) — pero esa regla es solo del lado del cliente, así que este
+  // número también sirve para detectar órdenes viejas (de antes de esa regla) o
+  // cerradas por otra vía que quedaron con el checklist a medias.
+  const checklistCompliance = useMemo(() => {
+    const closed = reportsOrders.filter((o) => o.status === "completada");
+    const withChecklist = closed.filter((o) => (orderChecklistSummary.get(o.id)?.total || 0) > 0);
+    const complete = withChecklist.filter((o) => {
+      const s = orderChecklistSummary.get(o.id);
+      return s.total > 0 && s.answered === s.total;
+    });
+    return {
+      closedTotal: closed.length,
+      withChecklist: withChecklist.length,
+      usagePct: closed.length > 0 ? (withChecklist.length / closed.length) * 100 : null,
+      complete: complete.length,
+      completePct: withChecklist.length > 0 ? (complete.length / withChecklist.length) * 100 : null,
+    };
+  }, [reportsOrders, orderChecklistSummary]);
 
   const techChartData = useMemo(() => techStats.map((t) => ({ name: t.name.split(" ")[0], Preventivo: t.preventivo, Correctivo: t.correctivo, Predictivo: t.predictivo })), [techStats]);
   const equipChartData = useMemo(
@@ -8310,6 +8822,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
         continue;
       }
+      // Si esta factura viene de una nota de entrega ya registrada, el inventario ya subió
+      // en ese momento (ver createGoodsReceipt) — la factura no lo vuelve a tocar, solo
+      // actualiza el costo con el monto final facturado.
+      if (payload.goods_receipt_id) {
+        await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
+        continue;
+      }
       // El ajuste de stock se hace con una función de la base de datos (adjust_product_stock,
       // ver SQL) que suma/resta de forma atómica en el propio UPDATE — evita que dos ventas o
       // compras simultáneas del mismo producto se pisen entre sí usando un stock_qty ya viejo
@@ -8321,16 +8840,24 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setSaving(false);
     setShowAddSupplier(false);
     setShowAddPurchase(false);
+    setPrefillReceiptId(null);
     loadAll();
   };
 
   const deletePurchase = async (purchase) => {
-    if (!window.confirm("¿Eliminar esta compra? Se restará la cantidad comprada del inventario.")) return;
-    const { data: items } = await supabase.from("purchase_items").select("*").eq("purchase_id", purchase.id);
-    for (const it of items || []) {
-      const prod = products.find((p) => p.id === it.product_id);
-      if (!prod) continue;
-      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity) });
+    // Si esta compra viene de una nota de entrega, el inventario le pertenece a esa nota —
+    // borrar la factura no debe tocarlo (la nota de entrega se borra aparte, si hace falta).
+    const linkedToReceipt = !!purchase.goods_receipt_id;
+    if (!window.confirm(linkedToReceipt
+      ? "¿Eliminar esta compra? El inventario NO se ajustará — ya quedó controlado por su nota de entrega."
+      : "¿Eliminar esta compra? Se restará la cantidad comprada del inventario.")) return;
+    if (!linkedToReceipt) {
+      const { data: items } = await supabase.from("purchase_items").select("*").eq("purchase_id", purchase.id);
+      for (const it of items || []) {
+        const prod = products.find((p) => p.id === it.product_id);
+        if (!prod) continue;
+        await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity) });
+      }
     }
     const { error } = await supabase.from("purchases").delete().eq("id", purchase.id);
     if (error) { setErrorMsg(error.message); return; }
@@ -8371,6 +8898,120 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const { data: allPayments } = await supabase.from("purchase_payments").select("*").eq("purchase_id", purchase.id).order("payment_date");
     if (updated) setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
     setPurchaseDetail((prev) => (prev ? { ...prev, purchase: updated || prev.purchase, payments: allPayments || [] } : prev));
+  };
+
+  // ---- Pedidos a Proveedores ----
+  const createPurchaseOrder = async (payload, items) => {
+    setSaving(true);
+    const { data: numData, error: numError } = await supabase.rpc("next_document_number", { p_doc_type: "purchase_order" });
+    if (numError) { setSaving(false); setErrorMsg(`No se pudo generar el número de pedido: ${numError.message}`); return; }
+    const order_number = `PO-${String(numData).padStart(5, "0")}`;
+    const { data: po, error } = await supabase.from("purchase_orders").insert({ ...payload, company_id: companyId, order_number }).select().single();
+    if (error) { setSaving(false); setErrorMsg(error.message); return; }
+    const itemRows = items.map((it) => ({ purchase_order_id: po.id, product_id: it.product_id, quantity: Number(it.quantity), unit_cost: Number(it.unit_cost) }));
+    const { data: insertedItems, error: itemsError } = await supabase.from("purchase_order_items").insert(itemRows).select();
+    setSaving(false);
+    if (itemsError) { setErrorMsg(itemsError.message); return; }
+    setPurchaseOrders((prev) => [po, ...prev]);
+    setPurchaseOrderItems((prev) => [...prev, ...(insertedItems || [])]);
+    setShowAddPurchaseOrder(false);
+  };
+
+  const cancelPurchaseOrder = async (po) => {
+    if (!window.confirm(`¿Cancelar el pedido ${po.order_number || ""}? Ya no se podrá recibir mercancía contra él.`)) return;
+    const { data: updated, error } = await supabase.from("purchase_orders").update({ status: "cancelado" }).eq("id", po.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setPurchaseOrders((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  };
+
+  const deletePurchaseOrder = async (po) => {
+    const hasReceipts = goodsReceipts.some((r) => r.purchase_order_id === po.id);
+    if (hasReceipts) { setErrorMsg("Este pedido ya tiene notas de entrega registradas — no se puede borrar. Si ya no aplica, cancélalo en vez de borrarlo."); return; }
+    if (!window.confirm(`¿Eliminar el pedido ${po.order_number || ""}?`)) return;
+    const { error } = await supabase.from("purchase_orders").delete().eq("id", po.id);
+    if (error) { setErrorMsg(error.message); return; }
+    setPurchaseOrders((prev) => prev.filter((p) => p.id !== po.id));
+    setPurchaseOrderItems((prev) => prev.filter((it) => it.purchase_order_id !== po.id));
+  };
+
+  // Recalcula pendiente/parcial/recibido de un pedido a partir de sus renglones ya
+  // actualizados (received_quantity vs quantity) y guarda el nuevo estado.
+  const recomputePurchaseOrderStatus = async (purchaseOrderId, poItemsAfter) => {
+    const allReceived = poItemsAfter.every((it) => Number(it.received_quantity) >= Number(it.quantity));
+    const anyReceived = poItemsAfter.some((it) => Number(it.received_quantity) > 0);
+    const newStatus = allReceived ? "recibido" : anyReceived ? "parcial" : "pendiente";
+    const { data: updatedPo } = await supabase.from("purchase_orders").update({ status: newStatus }).eq("id", purchaseOrderId).select().single();
+    if (updatedPo) setPurchaseOrders((prev) => prev.map((po) => (po.id === updatedPo.id ? updatedPo : po)));
+  };
+
+  // ---- Nota de entrega proveedores ----
+  // Aquí es donde de verdad sube el inventario — no al registrar la compra/factura (ver
+  // nota en createPurchase). Si la nota viene de un pedido, además avanza received_quantity
+  // de cada renglón que haga match por producto y recalcula el estado del pedido.
+  const createGoodsReceipt = async (payload, items) => {
+    setSaving(true);
+    const { data: numData, error: numError } = await supabase.rpc("next_document_number", { p_doc_type: "goods_receipt" });
+    if (numError) { setSaving(false); setErrorMsg(`No se pudo generar el número de nota de entrega: ${numError.message}`); return; }
+    const receipt_number = `NE-${String(numData).padStart(5, "0")}`;
+    const { data: gr, error } = await supabase.from("goods_receipts").insert({ ...payload, company_id: companyId, receipt_number }).select().single();
+    if (error) { setSaving(false); setErrorMsg(error.message); return; }
+    const itemRows = items.map((it) => ({ goods_receipt_id: gr.id, product_id: it.product_id, quantity: Number(it.quantity), unit_cost: Number(it.unit_cost) }));
+    const { data: insertedItems, error: itemsError } = await supabase.from("goods_receipt_items").insert(itemRows).select();
+    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
+
+    for (const row of itemRows) {
+      const prod = products.find((p) => p.id === row.product_id);
+      if (!prod || (prod.item_type || "producto") === "servicio") continue;
+      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: row.quantity });
+      await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
+    }
+
+    if (payload.purchase_order_id) {
+      const poItems = purchaseOrderItems.filter((it) => it.purchase_order_id === payload.purchase_order_id);
+      const poItemsAfter = [];
+      for (const poItem of poItems) {
+        const receivedNow = itemRows.filter((r) => r.product_id === poItem.product_id).reduce((s, r) => s + Number(r.quantity), 0);
+        const newReceived = Number(poItem.received_quantity || 0) + receivedNow;
+        if (receivedNow > 0) await supabase.from("purchase_order_items").update({ received_quantity: newReceived }).eq("id", poItem.id);
+        poItemsAfter.push({ ...poItem, received_quantity: newReceived });
+      }
+      setPurchaseOrderItems((prev) => prev.map((it) => poItemsAfter.find((p) => p.id === it.id) || it));
+      await recomputePurchaseOrderStatus(payload.purchase_order_id, poItemsAfter);
+    }
+
+    setSaving(false);
+    setGoodsReceipts((prev) => [gr, ...prev]);
+    setGoodsReceiptItems((prev) => [...prev, ...(insertedItems || [])]);
+    setShowAddReceipt(false);
+    setReceiptFromOrder(null);
+  };
+
+  const deleteGoodsReceipt = async (receipt) => {
+    const alreadyInvoiced = purchases.some((p) => p.goods_receipt_id === receipt.id);
+    if (alreadyInvoiced) { setErrorMsg("Esta nota de entrega ya tiene una compra/factura vinculada — bórrala primero a ella."); return; }
+    if (!window.confirm(`¿Eliminar la nota de entrega ${receipt.receipt_number || ""}? Se restará del inventario lo que había sumado.`)) return;
+    const items = goodsReceiptItems.filter((it) => it.goods_receipt_id === receipt.id);
+    for (const it of items) {
+      const prod = products.find((p) => p.id === it.product_id);
+      if (!prod || (prod.item_type || "producto") === "servicio") continue;
+      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity) });
+    }
+    if (receipt.purchase_order_id) {
+      const poItems = purchaseOrderItems.filter((it) => it.purchase_order_id === receipt.purchase_order_id);
+      const poItemsAfter = [];
+      for (const poItem of poItems) {
+        const removedNow = items.filter((r) => r.product_id === poItem.product_id).reduce((s, r) => s + Number(r.quantity), 0);
+        const newReceived = Math.max(0, Number(poItem.received_quantity || 0) - removedNow);
+        if (removedNow > 0) await supabase.from("purchase_order_items").update({ received_quantity: newReceived }).eq("id", poItem.id);
+        poItemsAfter.push({ ...poItem, received_quantity: newReceived });
+      }
+      setPurchaseOrderItems((prev) => prev.map((it) => poItemsAfter.find((p) => p.id === it.id) || it));
+      await recomputePurchaseOrderStatus(receipt.purchase_order_id, poItemsAfter);
+    }
+    const { error } = await supabase.from("goods_receipts").delete().eq("id", receipt.id);
+    if (error) { setErrorMsg(error.message); return; }
+    setGoodsReceipts((prev) => prev.filter((r) => r.id !== receipt.id));
+    setGoodsReceiptItems((prev) => prev.filter((it) => it.goods_receipt_id !== receipt.id));
   };
 
   // ---- Secuencias NCF ----
@@ -8648,7 +9289,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (error) { setErrorMsg(error.message); return; }
     setRecurringContracts((prev) => prev.filter((c) => c.id !== id));
   };
-  const generateContractInvoice = async (contract) => {
+  const generateContractInvoice = async (contract, overrideRate) => {
     if (contract.end_date && contract.end_date < todayStr) {
       setErrorMsg(`El contrato "${contract.title}" venció el ${fmtDate(contract.end_date)} y ya no genera facturas.`);
       return false;
@@ -8657,8 +9298,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       setErrorMsg(`El contrato "${contract.title}" no tiene una secuencia NCF asignada. Edítalo primero para indicarla.`);
       return false;
     }
-    const subtotal = Number(contract.amount);
+    // Si el contrato está en USD, la factura generada hereda esa moneda (igual que una
+    // factura manual en USD): los campos fiscales (subtotal/itbis/total) siguen en RD$,
+    // y foreign_* llevan el equivalente en US$ para que se imprima y se vea como USD.
+    // La tasa NO se reusa congelada del contrato: cada ciclo pide (o recibe por overrideRate)
+    // la tasa del día, porque la DGII espera que cada factura refleje la tasa vigente al
+    // momento de emitirla, no la que había cuando se creó el contrato meses atrás.
+    const isUsdContract = contract.currency === "USD";
+    const effectiveRate = isUsdContract ? Number(overrideRate ?? contract.exchange_rate ?? 1) : 1;
+    const foreignSubtotal = isUsdContract ? Number(contract.foreign_amount || 0) : null;
+    const subtotal = isUsdContract ? foreignSubtotal * effectiveRate : Number(contract.amount); // siempre en RD$ — ver nota de moneda en el formulario del contrato
     const itbis = contract.is_taxable ? subtotal * 0.18 : 0;
+    const foreignItbis = isUsdContract ? (contract.is_taxable ? foreignSubtotal * 0.18 : 0) : null;
     const payload = {
       title: contract.title,
       client_id: contract.client_id,
@@ -8672,6 +9323,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       applies_norma_0205: false,
       itbis_retained: false,
       total: subtotal + itbis,
+      currency: contract.currency || "DOP",
+      exchange_rate: effectiveRate,
+      foreign_subtotal: foreignSubtotal,
+      foreign_itbis: foreignItbis,
+      foreign_total: isUsdContract ? foreignSubtotal + foreignItbis : null,
     };
     const items = [{ product_id: null, description: contract.description || contract.title, quantity: 1, unit_price: subtotal, is_taxable: contract.is_taxable, chapter: null }];
 
@@ -8702,14 +9358,32 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return true;
   };
   const generateOneContractInvoice = async (contract) => {
+    if (contract.currency === "USD") {
+      setExchangeRatePrompt({ mode: "single", contracts: [contract] });
+      return;
+    }
     setSaving(true);
     await generateContractInvoice(contract);
     setSaving(false);
   };
   const generateAllDueContracts = async () => {
+    if (dueContracts.some((c) => c.currency === "USD")) {
+      setExchangeRatePrompt({ mode: "batch", contracts: dueContracts });
+      return;
+    }
     setSaving(true);
     for (const c of dueContracts) await generateContractInvoice(c);
     setSaving(false);
+  };
+  // Confirmación del cuadro de tasa de cambio: aplica la tasa ingresada solo a los contratos
+  // en USD del lote; los que están en RD$ (si el lote es "todas las vencidas" mixto) generan
+  // con su flujo normal, sin tasa.
+  const confirmExchangeRatePrompt = async (rate) => {
+    const { contracts } = exchangeRatePrompt;
+    setSaving(true);
+    for (const c of contracts) await generateContractInvoice(c, c.currency === "USD" ? rate : undefined);
+    setSaving(false);
+    setExchangeRatePrompt(null);
   };
 
   // ---- Conciliación bancaria ----
@@ -11071,6 +11745,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   accent={reopenStats.pct === null ? C.muted : reopenStats.pct <= 5 ? C.green : reopenStats.pct <= 15 ? C.amber : C.red}
                   sub={`${reopenStats.reopened} reabiertas de ${reopenStats.everCompleted} completadas`}
                 />
+                <KpiCard
+                  label="Uso de checklist al cierre"
+                  value={checklistCompliance.usagePct === null ? "—" : `${checklistCompliance.usagePct.toFixed(0)}%`}
+                  accent={checklistCompliance.usagePct === null ? C.muted : checklistCompliance.usagePct >= 80 ? C.green : checklistCompliance.usagePct >= 50 ? C.amber : C.red}
+                  sub={`${checklistCompliance.withChecklist} con checklist de ${checklistCompliance.closedTotal} cerradas`}
+                />
+                <KpiCard
+                  label="Checklist completado al cierre"
+                  value={checklistCompliance.completePct === null ? "—" : `${checklistCompliance.completePct.toFixed(0)}%`}
+                  accent={checklistCompliance.completePct === null ? C.muted : checklistCompliance.completePct >= 95 ? C.green : checklistCompliance.completePct >= 80 ? C.amber : C.red}
+                  sub={`${checklistCompliance.complete} de ${checklistCompliance.withChecklist} con checklist quedaron 100% respondidas`}
+                />
               </div>
 
               {overdueOpenOrders.length > 0 && (
@@ -11502,12 +12188,100 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             </div>
           )}
 
-          {((view === "purchaseOrders" && hasPerm("purchaseOrders")) || (view === "deliveryNotes" && hasPerm("deliveryNotes"))) && (
-            <div className="p-8 text-center" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-              <div className="text-sm font-semibold mb-1" style={{ color: C.text }}>
-                {view === "purchaseOrders" ? "Pedidos a Proveedores" : "Nota de entrega proveedores"}
+          {!loadingScope && hasPerm("purchaseOrders") && view === "purchaseOrders" && (
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>{purchaseOrders.length} pedido{purchaseOrders.length !== 1 ? "s" : ""} a proveedores</div>
+                <button onClick={() => setShowAddPurchaseOrder(true)} disabled={products.length === 0 || suppliers.length === 0 || !canEdit("purchaseOrders")} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                  <Plus size={14} /> Nuevo pedido
+                </button>
               </div>
-              <div className="text-sm" style={{ color: C.muted }}>Este módulo está en desarrollo — todavía no tiene funcionalidad.</div>
+              {(products.length === 0 || suppliers.length === 0) && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un producto y un proveedor antes de crear un pedido.</div>}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {purchaseOrders.map((po) => {
+                  const cfg = PURCHASE_ORDER_STATUS_CFG[po.status] || PURCHASE_ORDER_STATUS_CFG.pendiente;
+                  const sup = suppliers.find((s) => s.id === po.supplier_id);
+                  const poItems = purchaseOrderItems.filter((it) => it.purchase_order_id === po.id);
+                  const total = poItems.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_cost), 0);
+                  return (
+                    <div key={po.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{sup?.name || "—"}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>{po.order_number}</div>
+                        </div>
+                        <Pill label={cfg.label} color={cfg.color} />
+                      </div>
+                      <div className="text-xs mt-1" style={{ color: C.muted }}>{poItems.length} producto{poItems.length !== 1 ? "s" : ""}{po.expected_date ? ` · Llega: ${fmtDate(po.expected_date)}` : ""}</div>
+                      <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <span style={{ color: C.muted }}>{fmtDate(po.order_date)}</span>
+                        <span className="font-mono font-semibold">{fmtMoney(total)}</span>
+                      </div>
+                      <div className="flex items-center justify-end gap-3 mt-2">
+                        {(po.status === "pendiente" || po.status === "parcial") && canEdit("deliveryNotes") && (
+                          <button onClick={() => { setReceiptFromOrder(po); setShowAddReceipt(true); }} className="flex items-center gap-1 text-xs" style={{ color: C.green }}><Truck size={13} /> Recibir</button>
+                        )}
+                        <button onClick={() => setPurchaseOrderDetail(po)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
+                        {canDelete("purchaseOrders") && <button onClick={() => deletePurchaseOrder(po)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {purchaseOrders.length === 0 && (
+                  <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>
+                    Todavía no hay pedidos a proveedores registrados.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!loadingScope && hasPerm("deliveryNotes") && view === "deliveryNotes" && (
+            <div>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm" style={{ color: C.muted }}>{goodsReceipts.length} nota{goodsReceipts.length !== 1 ? "s" : ""} de entrega</div>
+                <button onClick={() => { setReceiptFromOrder(null); setShowAddReceipt(true); }} disabled={products.length === 0 || suppliers.length === 0 || !canEdit("deliveryNotes")} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.green, color: "#0B1F13" }}>
+                  <Plus size={14} /> Nueva nota de entrega
+                </button>
+              </div>
+              {(products.length === 0 || suppliers.length === 0) && <div className="text-sm mb-3" style={{ color: C.muted }}>Agrega al menos un producto y un proveedor antes de registrar una recepción.</div>}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {goodsReceipts.map((gr) => {
+                  const sup = suppliers.find((s) => s.id === gr.supplier_id);
+                  const grItems = goodsReceiptItems.filter((it) => it.goods_receipt_id === gr.id);
+                  const total = grItems.reduce((s, it) => s + Number(it.quantity) * Number(it.unit_cost), 0);
+                  const relatedPo = purchaseOrders.find((po) => po.id === gr.purchase_order_id);
+                  const invoiced = purchases.some((p) => p.goods_receipt_id === gr.id);
+                  return (
+                    <div key={gr.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-start justify-between gap-2 mb-1">
+                        <div className="min-w-0">
+                          <div className="font-semibold truncate">{sup?.name || "—"}</div>
+                          <div className="text-xs truncate" style={{ color: C.muted }}>{gr.receipt_number}{relatedPo ? ` · Pedido ${relatedPo.order_number}` : ""}</div>
+                        </div>
+                        <Pill label={invoiced ? "Facturada" : "Sin facturar"} color={invoiced ? C.green : C.amber} />
+                      </div>
+                      <div className="text-xs mt-1" style={{ color: C.muted }}>{grItems.length} producto{grItems.length !== 1 ? "s" : ""}</div>
+                      <div className="flex items-center justify-between pt-2 mt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
+                        <span style={{ color: C.muted }}>{fmtDate(gr.receipt_date)}</span>
+                        <span className="font-mono font-semibold">{fmtMoney(total)}</span>
+                      </div>
+                      <div className="flex items-center justify-end gap-3 mt-2">
+                        {!invoiced && canEdit("purchases") && (
+                          <button onClick={() => { setPrefillReceiptId(gr.id); setShowAddPurchase(true); }} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><ClipboardList size={13} /> Facturar</button>
+                        )}
+                        <button onClick={() => setReceiptDetail(gr)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><FileText size={13} /> Detalle</button>
+                        {!invoiced && canDelete("deliveryNotes") && <button onClick={() => deleteGoodsReceipt(gr)} style={iconBtnStyle}><Trash2 size={14} /></button>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {goodsReceipts.length === 0 && (
+                  <div className="col-span-full px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>
+                    Todavía no hay notas de entrega registradas.
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -12581,7 +13355,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         {expired ? <Pill label="Finalizado" color={C.muted} /> : c.is_active ? <Pill label="Activo" color={C.green} /> : <Pill label="Inactivo" color={C.muted} />}
                       </div>
                       <div className="text-xs mt-2 space-y-1" style={{ color: C.muted }}>
-                        <div>Monto: <span style={{ color: C.text }} className="font-mono">{fmtMoney(c.amount)}{c.is_taxable ? " +ITBIS" : ""}</span></div>
+                        <div>Monto: <span style={{ color: C.text }} className="font-mono">{c.currency === "USD" ? `US$ ${Number(c.foreign_amount || 0).toFixed(2)} (≈ ${fmtMoney(c.amount)})` : fmtMoney(c.amount)}{c.is_taxable ? " +ITBIS" : ""}</span></div>
                         <div>Frecuencia: <span style={{ color: C.text }}>Cada {c.frequency_days} días{c.end_date ? ` · hasta ${fmtDate(c.end_date)}` : ""}</span></div>
                         <div>Próxima factura: <span style={{ color: due ? C.red : C.text }} className="font-mono">{fmtDate(c.next_invoice_date)}{due ? " (vencido)" : ""}</span></div>
                       </div>
@@ -12928,17 +13702,29 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {showAddTaxRate && <TaxRateFormModal onClose={() => setShowAddTaxRate(false)} onSave={saveTaxRate} saving={saving} />}
       {editingTaxRate && <TaxRateFormModal initial={editingTaxRate} onClose={() => setEditingTaxRate(null)} onSave={saveTaxRate} saving={saving} />}
       {editingPermissionsFor && <UserPermissionsModal user={editingPermissionsFor} branches={branches} onClose={() => setEditingPermissionsFor(null)} onSave={updateUserPermissions} onUpdateBranch={updateUserBranch} onUpdateRole={updateUserRole} onToggleActive={toggleUserActive} saving={saving} />}
-      {showAddPurchase && (
-        <PurchaseFormModal
-          suppliers={suppliers}
-          products={products}
-          onClose={() => setShowAddPurchase(false)}
-          onSave={createPurchase}
-          saving={saving}
-          onRequestNewSupplier={() => setShowAddSupplier(true)}
-          onEnsureGenericProduct={ensureGenericPurchaseProduct}
-        />
-      )}
+      {showAddPurchase && (() => {
+        const receipt = prefillReceiptId ? goodsReceipts.find((r) => r.id === prefillReceiptId) : null;
+        const prefill = receipt
+          ? {
+              supplier_id: receipt.supplier_id,
+              goods_receipt_id: receipt.id,
+              receiptLabel: receipt.receipt_number,
+              items: goodsReceiptItems.filter((it) => it.goods_receipt_id === receipt.id).map((it) => ({ product_id: it.product_id, quantity: it.quantity, unit_cost: it.unit_cost })),
+            }
+          : null;
+        return (
+          <PurchaseFormModal
+            suppliers={suppliers}
+            products={products}
+            prefill={prefill}
+            onClose={() => { setShowAddPurchase(false); setPrefillReceiptId(null); }}
+            onSave={createPurchase}
+            saving={saving}
+            onRequestNewSupplier={() => setShowAddSupplier(true)}
+            onEnsureGenericProduct={ensureGenericPurchaseProduct}
+          />
+        );
+      })()}
       {purchaseDetail && (
         <PurchaseDetailModal
           purchase={purchaseDetail.purchase}
@@ -12953,6 +13739,57 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onClose={() => setPurchaseDetail(null)}
           onRegisterPayment={registerPurchasePayment}
           onDeletePayment={deletePurchasePayment}
+        />
+      )}
+      {showAddPurchaseOrder && (
+        <PurchaseOrderFormModal
+          suppliers={suppliers}
+          branches={branches}
+          products={products}
+          onClose={() => setShowAddPurchaseOrder(false)}
+          onSave={createPurchaseOrder}
+          saving={saving}
+          onRequestNewSupplier={() => setShowAddSupplier(true)}
+        />
+      )}
+      {purchaseOrderDetail && (
+        <PurchaseOrderDetailModal
+          po={purchaseOrderDetail}
+          items={purchaseOrderItems.filter((it) => it.purchase_order_id === purchaseOrderDetail.id).map((it) => ({ ...it, productName: products.find((p) => p.id === it.product_id)?.name || "Producto eliminado" }))}
+          supplierName={suppliers.find((s) => s.id === purchaseOrderDetail.supplier_id)?.name || "—"}
+          branchName={branches.find((b) => b.id === purchaseOrderDetail.branch_id)?.name || ""}
+          canEdit={canEdit("purchaseOrders")}
+          onClose={() => setPurchaseOrderDetail(null)}
+          onCancel={cancelPurchaseOrder}
+          onDelete={deletePurchaseOrder}
+          onReceive={(po) => { setReceiptFromOrder(po); setShowAddReceipt(true); }}
+        />
+      )}
+      {showAddReceipt && (
+        <GoodsReceiptFormModal
+          suppliers={suppliers}
+          branches={branches}
+          products={products}
+          openOrders={purchaseOrders.filter((po) => po.status === "pendiente" || po.status === "parcial")}
+          orderItemsFor={(poId) => purchaseOrderItems.filter((it) => it.purchase_order_id === poId)}
+          fromOrder={receiptFromOrder}
+          onClose={() => { setShowAddReceipt(false); setReceiptFromOrder(null); }}
+          onSave={createGoodsReceipt}
+          saving={saving}
+        />
+      )}
+      {receiptDetail && (
+        <GoodsReceiptDetailModal
+          receipt={receiptDetail}
+          items={goodsReceiptItems.filter((it) => it.goods_receipt_id === receiptDetail.id).map((it) => ({ ...it, productName: products.find((p) => p.id === it.product_id)?.name || "Producto eliminado" }))}
+          supplierName={suppliers.find((s) => s.id === receiptDetail.supplier_id)?.name || "—"}
+          branchName={branches.find((b) => b.id === receiptDetail.branch_id)?.name || ""}
+          orderNumber={purchaseOrders.find((po) => po.id === receiptDetail.purchase_order_id)?.order_number || ""}
+          invoiced={purchases.some((p) => p.goods_receipt_id === receiptDetail.id)}
+          canEdit={canEdit("deliveryNotes")}
+          onClose={() => setReceiptDetail(null)}
+          onDelete={deleteGoodsReceipt}
+          onInvoice={(r) => { setPrefillReceiptId(r.id); setShowAddPurchase(true); }}
         />
       )}
       {showAddNcf && <NCFSequenceFormModal onClose={() => setShowAddNcf(false)} onSave={saveNcfSequence} saving={saving} />}
@@ -13142,6 +13979,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           initial={editingContract}
           onClose={() => setEditingContract(null)}
           onSave={saveRecurringContract}
+          saving={saving}
+        />
+      )}
+      {exchangeRatePrompt && (
+        <ExchangeRatePromptModal
+          contracts={exchangeRatePrompt.contracts}
+          onClose={() => setExchangeRatePrompt(null)}
+          onConfirm={confirmExchangeRatePrompt}
           saving={saving}
         />
       )}
