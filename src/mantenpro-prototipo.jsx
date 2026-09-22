@@ -1186,6 +1186,7 @@ function SupportViewer({ onSignOut }) {
                     { key: "tecnico", label: "Departamento técnico" },
                     { key: "comercial", label: "Comercial" },
                     { key: "administracion", label: "Administración" },
+                    { key: "contable", label: "Gestión Contable" },
                   ].map((m) => {
                     const on = (selectedCompany.enabled_modules || []).includes(m.key);
                     return (
@@ -6790,8 +6791,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     suppliers: "comercial", purchaseOrders: "comercial", deliveryNotes: "comercial", purchases: "comercial",
     supplierReceipts: "comercial", otherExpenses: "comercial", purchaseLedger: "comercial", quotes: "comercial",
     salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
-    chartOfAccounts: "administracion", receivables: "administracion", payables: "administracion", taxRates: "administracion",
-    bankReconciliation: "administracion", ncf: "administracion", activityLog: "administracion",
+    chartOfAccounts: "contable", receivables: "contable", payables: "contable", taxRates: "contable",
+    bankReconciliation: "contable", ncf: "contable", activityLog: "administracion",
   };
   const companyHasModule = (mod) => !mod || (company?.enabled_modules || []).includes(mod);
   const hasPerm = (key) => (isAdmin || !!effectivePermissions[key]) && companyHasModule(MODULE_OF_KEY[key]);
@@ -10229,7 +10230,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     informesMenu: INFORMES_CHILD_KEYS.includes(_urlView),
   }));
   const toggleSubmenu = (key) => setOpenSubmenus((prev) => ({ ...prev, [key]: !prev[key] }));
-  const [openSections, setOpenSections] = useState({ "Departamento Técnico": true, "Comercial": true, "Administración": true });
+  const [openSections, setOpenSections] = useState({ "Departamento Técnico": true, "Comercial": true, "Administración": true, "Gestión Contable": true });
   const toggleSection = (name) => setOpenSections((prev) => ({ ...prev, [name]: prev[name] === false ? true : false }));
 
   const RAW_NAV = [
@@ -10294,6 +10295,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     },
     { section: "Administración" },
     { key: "branches", label: "Sucursales", Icon: Building2 },
+    { key: "users", label: "Usuarios", Icon: ShieldCheck },
+    { key: "companyProfile", label: "Perfil de la empresa", Icon: Building2 },
+    { key: "activityLog", label: "Historial de actividad", Icon: History },
+    { section: "Gestión Contable" },
     {
       key: "accountingMenu", label: "Gestión Contable", Icon: Hash,
       children: [
@@ -10306,9 +10311,6 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         { key: "dgiiCatalog", label: "Catálogo RNC (DGII)", Icon: Search },
       ],
     },
-    { key: "users", label: "Usuarios", Icon: ShieldCheck },
-    { key: "companyProfile", label: "Perfil de la empresa", Icon: Building2 },
-    { key: "activityLog", label: "Historial de actividad", Icon: History },
   ];
   const NAV = [];
   {
