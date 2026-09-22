@@ -302,6 +302,17 @@ function PermissionChecklist({ value, onChange }) {
 const fmtDate = (iso) =>
   iso ? new Date(iso + "T00:00:00").toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
+// Fecha de "hoy" en la hora de República Dominicana (America/Santo_Domingo, UTC-4, sin horario de verano).
+// Usar esto en vez de new Date().toISOString().slice(0,10), que da la fecha en UTC y se adelanta
+// un día después de las 8:00 pm hora RD.
+const todayStrRD = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+// Suma/resta días de calidad a una fecha "YYYY-MM-DD" sin pasar por la hora local del navegador
+// (evita que el resultado se corra un día cuando el equipo no está en horario de RD).
+const addDaysToDateStr = (dateStr, days) => {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + Number(days))).toISOString().slice(0, 10);
+};
+
 // ---------------------------------------------------------------------------
 // Small building blocks
 // ---------------------------------------------------------------------------
@@ -957,6 +968,8 @@ function SupportViewer({ onSignOut }) {
   const [tab, setTab] = useState("profiles");
   const [data, setData] = useState({});
   const [error, setError] = useState("");
+  const [billingNoteDraft, setBillingNoteDraft] = useState("");
+  const [savingBilling, setSavingBilling] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -974,6 +987,7 @@ function SupportViewer({ onSignOut }) {
     setSelectedCompanyId(companyId);
     setData({});
     setTab("profiles");
+    setBillingNoteDraft(companies.find((c) => c.id === companyId)?.billing_note || "");
     if (!companyId) return;
     setLoadingData(true);
     const [profs, cli, prod, ord, qts, sord, inv, purch, ncf, cash] = await Promise.all([
@@ -997,6 +1011,25 @@ function SupportViewer({ onSignOut }) {
   };
 
   const totalFacturado = (data.invoices || []).reduce((s, inv) => s + (Number(inv.total) || 0), 0);
+
+  // Suspender/reactivar el acceso de una empresa por cobro. Solo puede hacerse desde
+  // aquí (Modo Soporte): la app bloquea del lado del servidor (trigger
+  // protect_company_billing_status) que un admin de empresa cambie estas columnas
+  // desde su propio panel, así que este es el único lugar donde de verdad surte efecto.
+  const toggleBillingStatus = async (companyId, nextStatus) => {
+    setSavingBilling(true);
+    setError("");
+    const { data: updated, error: err } = await supabase
+      .from("companies")
+      .update({ billing_status: nextStatus, billing_note: billingNoteDraft.trim() || null, billing_status_updated_at: new Date().toISOString() })
+      .eq("id", companyId)
+      .select()
+      .maybeSingle();
+    setSavingBilling(false);
+    if (err) { setError(err.message); return; }
+    if (!updated) { setError("No se pudo actualizar el estado de cobro."); return; }
+    setCompanies((prev) => prev.map((c) => (c.id === companyId ? updated : c)));
+  };
 
   return (
     <div className="w-full min-h-screen flex" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -1026,7 +1059,8 @@ function SupportViewer({ onSignOut }) {
               style={{ color: selectedCompanyId === c.id ? C.text : C.muted, background: selectedCompanyId === c.id ? C.panelAlt : "transparent", borderLeft: `2px solid ${selectedCompanyId === c.id ? C.amber : "transparent"}` }}
             >
               <Building2 size={16} />
-              <span className="truncate">{c.name}</span>
+              <span className="truncate flex-1">{c.name}</span>
+              {c.billing_status === "suspendida" && <Dot color={C.red} />}
             </button>
           ))}
         </nav>
@@ -1049,12 +1083,48 @@ function SupportViewer({ onSignOut }) {
           ) : (
             <>
               <div className="mb-5">
-                <div className="text-xl font-bold">{selectedCompany.name}</div>
+                <div className="flex items-center gap-3">
+                  <div className="text-xl font-bold">{selectedCompany.name}</div>
+                  <Pill label={selectedCompany.billing_status === "suspendida" ? "Suspendida" : "Al día"} color={selectedCompany.billing_status === "suspendida" ? C.red : C.green} />
+                </div>
                 <div className="text-xs mt-1" style={{ color: C.muted }}>
                   {selectedCompany.created_at && `Creada el ${fmtDate((selectedCompany.created_at || "").slice(0, 10))}`}
                   {selectedCompany.rnc && ` · RNC ${selectedCompany.rnc}`}
                   <span className="font-mono"> · {selectedCompany.id}</span>
                 </div>
+              </div>
+
+              <div className="mb-6 p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>Cobro / suscripción</div>
+                <textarea
+                  value={billingNoteDraft}
+                  onChange={(e) => setBillingNoteDraft(e.target.value)}
+                  placeholder="Nota opcional (motivo de suspensión, referencia de pago, etc.) — se muestra a la empresa si está suspendida."
+                  className="w-full text-sm mb-3 p-2"
+                  style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text, minHeight: 60 }}
+                />
+                {selectedCompany.billing_status === "suspendida" ? (
+                  <button
+                    disabled={savingBilling}
+                    onClick={() => toggleBillingStatus(selectedCompany.id, "al_dia")}
+                    className="px-3 py-2 text-xs font-semibold"
+                    style={{ background: C.green, color: "#08210F", opacity: savingBilling ? 0.6 : 1 }}
+                  >
+                    Reactivar acceso
+                  </button>
+                ) : (
+                  <button
+                    disabled={savingBilling}
+                    onClick={() => toggleBillingStatus(selectedCompany.id, "suspendida")}
+                    className="px-3 py-2 text-xs font-semibold"
+                    style={{ background: C.red, color: "#fff", opacity: savingBilling ? 0.6 : 1 }}
+                  >
+                    Suspender acceso
+                  </button>
+                )}
+                {selectedCompany.billing_status_updated_at && (
+                  <div className="text-xs mt-2" style={{ color: C.muted }}>Último cambio: {fmtDate((selectedCompany.billing_status_updated_at || "").slice(0, 10))}</div>
+                )}
               </div>
 
               {loadingData ? (
@@ -1104,18 +1174,14 @@ function InviteAcceptScreen({ session, inviteInfo, onDone, onSignOut }) {
   const accept = async () => {
     setLoading(true);
     setError("");
-    const { error: profErr } = await supabase.from("profiles").insert({
-      id: session.user.id,
-      company_id: inviteInfo.company_id,
-      role: inviteInfo.role,
-      technician_id: inviteInfo.technician_id || null,
-      branch_id: inviteInfo.branch_id || null,
-      permissions: inviteInfo.permissions || null,
-      full_name: fullName.trim() || null,
-      email: session.user.email,
-    });
-    if (profErr) { setLoading(false); setError(profErr.message); return; }
-    await supabase.from("invites").update({ used: true }).eq("id", inviteInfo.id);
+    // accept_invite busca la invitación por token del lado del servidor y toma de ahí
+    // company_id/rol/permisos/sucursal — no de lo que mande el cliente — y además verifica
+    // que el correo de la invitación coincida con el de la sesión actual. Antes era un
+    // insert directo a "profiles" con company_id/rol tomados de inviteInfo (estado del
+    // cliente), lo que dependía enteramente de la política RLS de "profiles" para impedir
+    // que alguien insertara su propio perfil con una empresa o rol arbitrarios.
+    const { error: acceptError } = await supabase.rpc("accept_invite", { p_token: inviteInfo.token, p_full_name: fullName.trim() || null });
+    if (acceptError) { setLoading(false); setError(acceptError.message); return; }
     setLoading(false);
     onDone();
   };
@@ -1353,6 +1419,7 @@ function EquipmentFormModal({ branches, locations, technicians, initial, onClose
   const [usageUnit, setUsageUnit] = useState(initial?.usage_unit || "");
   const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
+  const [operationalStatus, setOperationalStatus] = useState(initial?.operational_status || "operativo");
 
   const branchLocations = locations.filter((l) => l.branch_id === branchId);
   const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === defaultTechId));
@@ -1369,6 +1436,7 @@ function EquipmentFormModal({ branches, locations, technicians, initial, onClose
       current_usage: currentUsage === "" ? null : Number(currentUsage),
       usage_interval: usageInterval === "" ? null : Number(usageInterval),
       usage_last_maintenance: initial?.usage_last_maintenance ?? null,
+      operational_status: operationalStatus,
     });
   };
 
@@ -1380,6 +1448,14 @@ function EquipmentFormModal({ branches, locations, technicians, initial, onClose
         </Field>
         <Field label="Tipo de equipo">
           <input className={inputClass} style={inputStyle} value={type} onChange={(e) => setType(e.target.value)} placeholder="Ej. Compresor, Chiller, AC Central" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Estado operativo">
+          <select className={inputClass} style={inputStyle} value={operationalStatus} onChange={(e) => setOperationalStatus(e.target.value)}>
+            <option value="operativo">Operativo</option>
+            <option value="fuera_servicio">Fuera de servicio</option>
+          </select>
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -1635,9 +1711,9 @@ function checklistItemsToBlocks(items) {
       if (sec) blocks.push({ id: n++, kind: "section", name: sec });
       currentSection = sec;
     }
-    blocks.push({ id: n++, kind: "item", text: it.text });
+    blocks.push({ id: n++, kind: "item", text: it.text, response_type: it.response_type || "check", range_min: it.range_min ?? "", range_max: it.range_max ?? "" });
   });
-  if (blocks.length === 0) blocks.push({ id: n++, kind: "item", text: "" });
+  if (blocks.length === 0) blocks.push({ id: n++, kind: "item", text: "", response_type: "check", range_min: "", range_max: "" });
   return blocks;
 }
 
@@ -1744,12 +1820,21 @@ function printDocument(title, bodyHtml) {
   win.focus();
 }
 
+// Marca de la columna "Cotejo" en los reportes impresos, según el tipo de respuesta del punto
+// (checkbox de siempre, OK/No OK/N/A, o numérico) — antes solo miraba "checked", así que los
+// puntos OK/No OK/N/A y numéricos ya respondidos salían con esa columna vacía en el PDF.
+const checklistItemMark = (it) => {
+  if (it.response_type === "ok_no_ok_na") return it.respuesta === "OK" ? "✓" : it.respuesta === "No OK" ? "✗" : it.respuesta === "N/A" ? "N/A" : "";
+  if (it.response_type === "numeric") return it.respuesta !== "" && it.respuesta != null ? "✓" : "";
+  return it.checked ? "✓" : "";
+};
+
 function checklistPrintHtml({ companyName, order, branchName, equipName, techName, checklistItems }) {
   const groups = groupChecklistItemsBySection(checklistItems || []);
   const showSections = groups.length > 1 || (groups[0] && groups[0].section !== "General");
   const itemRow = (it) => `
     <tr>
-      <td style="text-align:center;width:60px;">${it.checked ? "✓" : ""}</td>
+      <td style="text-align:center;width:60px;">${checklistItemMark(it)}</td>
       <td>${it.text || ""}</td>
       <td>${it.respuesta || ""}</td>
       <td>${it.observaciones || ""}</td>
@@ -1775,6 +1860,66 @@ function checklistPrintHtml({ companyName, order, branchName, equipName, techNam
       <thead><tr><th>Cotejo</th><th>Punto a revisar</th><th>Respuesta</th><th>Observaciones</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
+  `;
+}
+
+function orderServiceReportHtml({ companyName, order, branchName, equipName, techName, clientName, checklistItems, usedMaterials, laborHours, beforePhotos, afterPhotos }) {
+  const t = TYPE_CFG[order.type], p = PRIORITY_CFG[order.priority], s = STATUS_CFG[order.status];
+  const groups = groupChecklistItemsBySection(checklistItems || []);
+  const showSections = groups.length > 1 || (groups[0] && groups[0].section !== "General");
+  const itemRow = (it) => `
+    <tr>
+      <td style="text-align:center;width:50px;">${checklistItemMark(it)}</td>
+      <td>${it.text || ""}</td>
+      <td>${it.respuesta || ""}</td>
+      <td>${it.observaciones || ""}</td>
+    </tr>`;
+  const checklistRows = showSections
+    ? groups.map((g) => `<tr><td colspan="4" style="background:#f2f2f2;font-weight:bold">${g.section}</td></tr>${g.items.map(itemRow).join("")}`).join("")
+    : groups.map((g) => g.items.map(itemRow).join("")).join("");
+  const materialsRows = (usedMaterials || []).map((m) => `<tr><td>${m.name}</td><td style="text-align:right">${Number(m.quantity || 0).toLocaleString("es-DO")} ${m.unit || ""}</td></tr>`).join("");
+  const photoGrid = (photos) => (photos && photos.length > 0)
+    ? `<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;">${photos.map((a) => `<img src="${a.file_url}" style="width:140px;height:105px;object-fit:cover;border:1px solid #ccc;" />`).join("")}</div>`
+    : `<div class="muted">Sin fotos</div>`;
+  return `
+    <div class="header-row">
+      <div>
+        <h1>${companyName || ""}</h1>
+        <div class="muted">Informe de servicio &middot; Orden ${order.code}</div>
+        ${order.title ? `<div class="muted" style="margin-top:2px">${order.title}</div>` : ""}
+      </div>
+      <div class="muted">${fmtDate(order.scheduled)}</div>
+    </div>
+    <div class="muted" style="margin-bottom:4px;">
+      Sucursal: ${branchName(order.branch_id)} &nbsp;&middot;&nbsp;
+      Equipo: ${equipName(order.equipment_id)} &nbsp;&middot;&nbsp;
+      Técnico: ${techName(order.technician_id)}
+      ${clientName ? ` &nbsp;&middot;&nbsp; Cliente: ${clientName}` : ""}
+    </div>
+    <div class="muted" style="margin-bottom:12px;">
+      Tipo: ${t?.label || order.type} &nbsp;&middot;&nbsp; Prioridad: ${p?.label || order.priority} &nbsp;&middot;&nbsp; Estado: ${s?.label || order.status}
+      ${laborHours ? ` &nbsp;&middot;&nbsp; Horas trabajadas: ${laborHours}` : ""}
+    </div>
+    ${order.resolution_notes ? `<div style="margin-bottom:12px;"><b>Nota de solución / cierre</b><div class="muted" style="margin-top:2px;white-space:pre-wrap;">${order.resolution_notes}</div></div>` : ""}
+    ${checklistRows ? `
+      <div style="margin-top:10px;font-weight:bold;">Checklist</div>
+      <table><thead><tr><th>Cotejo</th><th>Punto a revisar</th><th>Respuesta</th><th>Observaciones</th></tr></thead><tbody>${checklistRows}</tbody></table>
+    ` : ""}
+    ${materialsRows ? `
+      <div style="margin-top:14px;font-weight:bold;">Materiales retirados del almacén</div>
+      <table><thead><tr><th>Material</th><th style="text-align:right">Cantidad</th></tr></thead><tbody>${materialsRows}</tbody></table>
+    ` : ""}
+    <div style="margin-top:14px;font-weight:bold;">Fotos — antes</div>
+    ${photoGrid(beforePhotos)}
+    <div style="margin-top:14px;font-weight:bold;">Fotos — después</div>
+    ${photoGrid(afterPhotos)}
+    ${order.client_signature_url ? `
+      <div style="margin-top:18px;padding-top:10px;border-top:1px solid #ddd;">
+        <div style="font-weight:bold;margin-bottom:4px;">Firma del cliente</div>
+        <img src="${order.client_signature_url}" style="max-width:260px;background:#fff;border:1px solid #ccc;" />
+        <div class="muted" style="margin-top:2px;">Firmado por ${order.client_signature_name || ""}${order.client_signature_at ? " — " + fmtDate(order.client_signature_at.slice(0, 10)) : ""}</div>
+      </div>
+    ` : ""}
   `;
 }
 
@@ -1863,7 +2008,7 @@ function ClientAssetFormModal({ clients, branches, technicians, initial, onClose
   const [brand, setBrand] = useState(initial?.brand || "");
   const [model, setModel] = useState(initial?.model || "");
   const [serial, setSerial] = useState(initial?.serial_number || "");
-  const [installDate, setInstallDate] = useState(initial?.install_date || new Date().toISOString().slice(0, 10));
+  const [installDate, setInstallDate] = useState(initial?.install_date || todayStrRD());
   const [warrantyMonths, setWarrantyMonths] = useState(initial?.warranty_months ?? 12);
   const [notes, setNotes] = useState(initial?.notes || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || "");
@@ -2414,7 +2559,7 @@ function UserPermissionsModal({ user, branches, onClose, onSave, onUpdateBranch,
 }
 
 function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
-  const [expenseDate, setExpenseDate] = useState(initial?.expense_date || (() => new Date().toISOString().slice(0, 10))());
+  const [expenseDate, setExpenseDate] = useState(initial?.expense_date || (() => todayStrRD())());
   const [category, setCategory] = useState(initial?.category || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [amount, setAmount] = useState(initial?.amount ?? "");
@@ -2843,27 +2988,72 @@ function BulkToolFormModal({ branches, technicians, onClose, onSave, saving }) {
 
 function MaterialFormModal({ branches, initial, onClose, onSave, saving }) {
   const [name, setName] = useState(initial?.name || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [partCode, setPartCode] = useState(initial?.part_code || "");
+  const [partNumber, setPartNumber] = useState(initial?.part_number || "");
+  const [serialNumber, setSerialNumber] = useState(initial?.serial_number || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
   const [quantity, setQuantity] = useState(initial?.quantity ?? "");
   const [unit, setUnit] = useState(initial?.unit || MATERIAL_UNITS[0]);
+  const [minQuantity, setMinQuantity] = useState(initial?.min_quantity ?? "");
+  const [maxQuantity, setMaxQuantity] = useState(initial?.max_quantity ?? "");
+  const [location, setLocation] = useState(initial?.location || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const submit = () => {
     if (!name.trim() || quantity === "") return;
-    onSave({ name: name.trim(), branch_id: branchId || null, quantity: Number(quantity), unit, notes: notes.trim() || null });
+    onSave({
+      name: name.trim(),
+      description: description.trim() || null,
+      part_code: partCode.trim() || null,
+      part_number: partNumber.trim() || null,
+      serial_number: serialNumber.trim() || null,
+      branch_id: branchId || null,
+      quantity: Number(quantity),
+      unit,
+      min_quantity: minQuantity === "" ? null : Number(minQuantity),
+      max_quantity: maxQuantity === "" ? null : Number(maxQuantity),
+      location: location.trim() || null,
+      notes: notes.trim() || null,
+    });
   };
   return (
     <Modal title={initial ? "Editar material" : "Agregar material al almacén"} onClose={onClose}>
       <Field label="Nombre del material">
         <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Tubería PVC 1/2, cable THHN #12" />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Cantidad">
+      <Field label="Descripción (opcional)">
+        <input className={inputClass} style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Detalle más largo del repuesto/material" />
+      </Field>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="ID / código de repuesto">
+          <input className={inputClass} style={inputStyle} value={partCode} onChange={(e) => setPartCode(e.target.value)} placeholder="Código interno" />
+        </Field>
+        <Field label="Número de parte">
+          <input className={inputClass} style={inputStyle} value={partNumber} onChange={(e) => setPartNumber(e.target.value)} placeholder="Del fabricante" />
+        </Field>
+        <Field label="Número de serie">
+          <input className={inputClass} style={inputStyle} value={serialNumber} onChange={(e) => setSerialNumber(e.target.value)} placeholder="Si aplica" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Stock actual">
           <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
         </Field>
         <Field label="Unidad">
           <select className={inputClass} style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)}>
             {MATERIAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
+        </Field>
+        <Field label="Ubicación en almacén">
+          <input className={inputClass} style={inputStyle} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Ej. Pasillo 3, estante B" />
+        </Field>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Stock mínimo (opcional — avisa cuando la cantidad caiga a este nivel o menos)">
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={minQuantity} onChange={(e) => setMinQuantity(e.target.value)} placeholder="Ej. 5" />
+        </Field>
+        <Field label="Stock máximo (opcional)">
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={maxQuantity} onChange={(e) => setMaxQuantity(e.target.value)} placeholder="Ej. 50" />
         </Field>
       </div>
       <Field label="Sucursal">
@@ -2967,8 +3157,8 @@ function ProjectFormModal({ branches, clients, technicians, initial, onClose, on
 }
 
 function ProjectDetailModal({
-  project, clients, branches, technicians, orders, salesOrders, materials, projectMaterials,
-  canEditProjects, canDeleteProjects, onClose, onEdit, onDelete, onSetStatus,
+  project, clients, branches, technicians, orders, orderTechnicians, salesOrders, materials, projectMaterials,
+  canEditProjects, canDeleteProjects, canManageWarehouse, onClose, onEdit, onDelete, onSetStatus,
   onLinkOrder, onUnlinkOrder, onLinkSalesOrder, onUnlinkSalesOrder, onAddMaterial, onRemoveMaterial, saving,
 }) {
   const [pickOrderId, setPickOrderId] = useState("");
@@ -2978,6 +3168,17 @@ function ProjectDetailModal({
   const [pickMaterialNotes, setPickMaterialNotes] = useState("");
 
   const linkedOrders = orders.filter((o) => o.project_id === project.id);
+  // Costo real = mano de obra de las órdenes de trabajo vinculadas (técnico principal + adicionales).
+  // No incluye materiales porque el Almacén no guarda un costo unitario por material.
+  const projectLaborCost = linkedOrders.reduce((sum, o) => {
+    const primary = (Number(o.labor_hours) || 0) * (Number(o.labor_rate_used) || 0);
+    const extra = (orderTechnicians || []).filter((wt) => wt.work_order_id === o.id).reduce((s, wt) => {
+      const rate = technicians.find((t) => t.id === wt.technician_id)?.hourly_rate;
+      return s + (Number(wt.hours) || 0) * (Number(rate) || 0);
+    }, 0);
+    return sum + primary + extra;
+  }, 0);
+  const budgetPct = project.budget ? (projectLaborCost / Number(project.budget)) * 100 : null;
   const availableOrders = orders.filter((o) => !o.project_id);
   const linkedSalesOrders = salesOrders.filter((o) => o.project_id === project.id);
   const availableSalesOrders = salesOrders.filter((o) => !o.project_id);
@@ -3017,6 +3218,28 @@ function ProjectDetailModal({
       </div>
       {project.description && <div className="text-sm mb-4 p-3" style={{ background: C.panelAlt, color: C.muted }}>{project.description}</div>}
 
+      {/* Presupuesto vs. costo real */}
+      <div className="mb-4 p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Presupuesto vs. costo real (mano de obra)</div>
+        <div className="flex items-center justify-between text-sm mb-1">
+          <span style={{ color: C.muted }}>Costo real hasta ahora</span>
+          <span className="font-mono font-bold">{fmtMoney(projectLaborCost)}</span>
+        </div>
+        {project.budget != null ? (
+          <>
+            <div className="w-full h-2" style={{ background: C.border }}>
+              <div style={{ width: `${Math.min(100, budgetPct)}%`, height: "100%", background: budgetPct > 100 ? C.red : budgetPct > 80 ? C.amber : C.green }} />
+            </div>
+            <div className="text-xs mt-1" style={{ color: budgetPct > 100 ? C.red : C.muted }}>
+              {budgetPct.toFixed(0)}% del presupuesto ({fmtMoney(project.budget)}){budgetPct > 100 ? " — presupuesto excedido" : ""}
+            </div>
+          </>
+        ) : (
+          <div className="text-xs" style={{ color: C.muted }}>Este proyecto no tiene presupuesto asignado (edítalo para agregar uno y comparar).</div>
+        )}
+        <div className="text-xs mt-1" style={{ color: C.muted }}>Solo incluye mano de obra de las órdenes de trabajo vinculadas; no incluye materiales (el Almacén no registra costo unitario).</div>
+      </div>
+
       {/* Órdenes de trabajo */}
       <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.border}` }}>
         <div className="text-sm font-semibold mb-2">Órdenes de trabajo vinculadas ({linkedOrders.length})</div>
@@ -3053,15 +3276,15 @@ function ProjectDetailModal({
                   {mat?.name || "Material eliminado"} <span className="text-xs" style={{ color: C.muted }}>× {Number(pm.quantity).toLocaleString("es-DO")} {mat?.unit || ""}</span>
                   {pm.notes && <div className="text-xs" style={{ color: C.muted }}>{pm.notes}</div>}
                 </div>
-                {canDeleteProjects && <button onClick={() => onRemoveMaterial(pm)} style={iconBtnStyle} title="Quitar y devolver al inventario"><Trash2 size={14} /></button>}
+                {canDeleteProjects && canManageWarehouse && <button onClick={() => onRemoveMaterial(pm)} style={iconBtnStyle} title="Quitar y devolver al inventario"><Trash2 size={14} /></button>}
               </div>
             );
           })}
           {linkedMaterials.length === 0 && <div className="text-xs" style={{ color: C.muted }}>Todavía no hay materiales asignados a este proyecto.</div>}
         </div>
-        {canEditProjects && (
+        {canEditProjects && canManageWarehouse && (
           <div className="flex flex-wrap gap-2">
-            <div className="flex-1 min-w-[160px]"><SearchSelect items={availableMaterials} value={pickMaterialId} onChange={setPickMaterialId} placeholder="Buscar material sobrante..." getLabel={(m) => `${m.name} (disp. ${Number(m.quantity).toLocaleString("es-DO")} ${m.unit || ""})`} /></div>
+            <div className="flex-1 min-w-[160px]"><SearchSelect items={availableMaterials} value={pickMaterialId} onChange={setPickMaterialId} placeholder="Buscar material del almacén..." getLabel={(m) => `${m.name} (disp. ${Number(m.quantity).toLocaleString("es-DO")} ${m.unit || ""})`} /></div>
             <input type="text" inputMode="decimal" className="px-3 py-2 text-sm w-24" style={inputStyle} value={pickMaterialQty} onChange={(e) => setPickMaterialQty(e.target.value)} placeholder="Cant." />
             <input type="text" className="px-3 py-2 text-sm flex-1 min-w-[120px]" style={inputStyle} value={pickMaterialNotes} onChange={(e) => setPickMaterialNotes(e.target.value)} placeholder="Notas (opcional)" />
             <button
@@ -3070,6 +3293,9 @@ function ProjectDetailModal({
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}
             ><Plus size={12} /> Descontar y asignar</button>
           </div>
+        )}
+        {canEditProjects && !canManageWarehouse && (
+          <div className="text-xs" style={{ color: C.muted }}>Solo un supervisor o administrador puede retirar materiales del almacén.</div>
         )}
       </div>
 
@@ -3175,7 +3401,7 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   const [title, setTitle] = useState("");
   const [supplierId, setSupplierId] = useState(suppliers[0]?.id || "");
   const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [purchaseDate, setPurchaseDate] = useState(() => todayStrRD());
   const [notes, setNotes] = useState("");
   const [blocks, setBlocks] = useState([{ id: 0, kind: "item", product_id: "", quantity: 1, unit_cost: 0, is_taxable: true }]);
   const [retainItbis, setRetainItbis] = useState(false);
@@ -3416,7 +3642,7 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, supplier
   const payCfg = PAYABLE_STATUS_CFG[purchase.payment_status] || PAYABLE_STATUS_CFG.pendiente;
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [payAmount, setPayAmount] = useState(balance > 0 ? balance.toFixed(2) : "");
-  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payDate, setPayDate] = useState(() => todayStrRD());
   const [payMethod, setPayMethod] = useState("");
   const [payNotes, setPayNotes] = useState("");
   const submitPayment = () => {
@@ -3604,7 +3830,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccou
   const [clientId, setClientId] = useState(prefill?.client_id || clients[0]?.id || "");
   const [sequenceId, setSequenceId] = useState("");
   const [branchId, setBranchId] = useState(prefill?.branch_id || defaultBranchId || branches?.[0]?.id || "");
-  const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [invoiceDate, setInvoiceDate] = useState(() => todayStrRD());
   const [discountPct, setDiscountPct] = useState(prefill?.discount_pct ?? 0);
   const [applyNorma0205, setApplyNorma0205] = useState(false);
   const [exemptItbis, setExemptItbis] = useState(false);
@@ -3881,7 +4107,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
   const isImage = (name) => /\.(png|jpe?g|gif|webp)$/i.test(name || "");
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [payAmount, setPayAmount] = useState(balance > 0 ? balance.toFixed(2) : "");
-  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payDate, setPayDate] = useState(() => todayStrRD());
   const [payMethod, setPayMethod] = useState("");
   const [payNotes, setPayNotes] = useState("");
   const [paymentFiles, setPaymentFiles] = useState([]);
@@ -4192,7 +4418,7 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
   const [amount, setAmount] = useState(initial?.amount ?? "");
   const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
   const [frequencyDays, setFrequencyDays] = useState(initial?.frequency_days ?? 30);
-  const [nextInvoiceDate, setNextInvoiceDate] = useState(initial?.next_invoice_date || new Date().toISOString().slice(0, 10));
+  const [nextInvoiceDate, setNextInvoiceDate] = useState(initial?.next_invoice_date || todayStrRD());
   const [endDate, setEndDate] = useState(initial?.end_date || "");
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [notes, setNotes] = useState(initial?.notes || "");
@@ -4333,10 +4559,11 @@ const SALES_ORDER_STATUS_CFG = {
   cancelada: { label: "Cancelada", color: "#E8654F" },
 };
 
-function QuoteFormModal({ clients, products, prefill, initial, initialItems, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
+function QuoteFormModal({ clients, products, branches, defaultBranchId, prefill, initial, initialItems, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
   const [title, setTitle] = useState(initial?.title || prefill?.title || "");
   const [clientId, setClientId] = useState(initial?.client_id || prefill?.client_id || clients[0]?.id || "");
-  const [quoteDate, setQuoteDate] = useState(initial?.quote_date || (() => new Date().toISOString().slice(0, 10))());
+  const [branchId, setBranchId] = useState(initial?.branch_id || prefill?.branch_id || defaultBranchId || branches?.[0]?.id || "");
+  const [quoteDate, setQuoteDate] = useState(initial?.quote_date || (() => todayStrRD())());
   const [validUntil, setValidUntil] = useState(initial?.valid_until || "");
   const [discountPct, setDiscountPct] = useState(initial?.discount_pct ?? 0);
   const [currency, setCurrency] = useState(initial?.currency || "DOP");
@@ -4403,7 +4630,7 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
     const validItems = resolvedItems.filter((it) => it.description.trim() && Number(it.quantity) > 0);
     if (!clientId || validItems.length === 0) return;
     onSave({
-      title: title.trim() || null, client_id: clientId, quote_date: quoteDate, valid_until: validUntil || null, discount_pct: discountPct,
+      title: title.trim() || null, client_id: clientId, branch_id: branchId || null, quote_date: quoteDate, valid_until: validUntil || null, discount_pct: discountPct,
       subtotal: subtotal * rate, itbis: itbis * rate, total: total * rate,
       currency, exchange_rate: rate, notes: notes.trim() || null,
       foreign_subtotal: currency === "USD" ? subtotal : null,
@@ -4431,6 +4658,12 @@ function QuoteFormModal({ clients, products, prefill, initial, initialItems, max
           <input type="date" className={inputClass} style={inputStyle} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
         </Field>
       </div>
+      <Field label="Sucursal">
+        <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+          <option value="">Sin asignar</option>
+          {(branches || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </Field>
       <Field label={`Descuento (% — máximo permitido: ${maxDiscountPct}%)`}>
         <input type="number" min="0" max={maxDiscountPct} step="0.5" className={inputClass} style={inputStyle} value={discountPct} onChange={(e) => onDiscountChange(e.target.value)} disabled={maxDiscountPct <= 0} />
         {maxDiscountPct <= 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>No tienes permiso para aplicar descuentos — pídele a un admin que te asigne un límite.</div>}
@@ -5116,7 +5349,7 @@ function ChecklistTemplateFormModal({ initial, onClose, onSave, saving }) {
   const newBlockId = () => Date.now() + Math.random();
 
   const updateBlock = (id, patch) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
-  const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", text: "" }]);
+  const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", text: "", response_type: "check", range_min: "", range_max: "" }]);
   const addSectionRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "section", name: "" }]);
   const removeBlock = (id) => setBlocks((prev) => prev.filter((b) => b.id !== id));
 
@@ -5125,7 +5358,7 @@ function ChecklistTemplateFormModal({ initial, onClose, onSave, saving }) {
     const result = [];
     blocks.forEach((b) => {
       if (b.kind === "section") current = b.name.trim();
-      else result.push({ text: b.text, section: current });
+      else result.push({ text: b.text, section: current, response_type: b.response_type || "check", range_min: b.range_min, range_max: b.range_max });
     });
     return result;
   }, [blocks]);
@@ -5150,7 +5383,7 @@ function ChecklistTemplateFormModal({ initial, onClose, onSave, saving }) {
               newBlocks.push({ id: newBlockId(), kind: "section", name: sec });
               lastSection = sec;
             }
-            newBlocks.push({ id: newBlockId(), kind: "item", text: it.text });
+            newBlocks.push({ id: newBlockId(), kind: "item", text: it.text, response_type: "check", range_min: "", range_max: "" });
           });
           return [...existing, ...newBlocks];
         });
@@ -5164,7 +5397,15 @@ function ChecklistTemplateFormModal({ initial, onClose, onSave, saving }) {
   };
 
   const submit = () => {
-    const cleanItems = resolvedItems.map((it) => ({ text: it.text.trim(), section: it.section })).filter((it) => it.text);
+    const cleanItems = resolvedItems
+      .map((it) => ({
+        text: it.text.trim(),
+        section: it.section,
+        response_type: it.response_type || "check",
+        range_min: it.response_type === "numeric" && it.range_min !== "" && it.range_min != null ? Number(it.range_min) : null,
+        range_max: it.response_type === "numeric" && it.range_max !== "" && it.range_max != null ? Number(it.range_max) : null,
+      }))
+      .filter((it) => it.text);
     if (!equipmentType.trim() || !name.trim() || cleanItems.length === 0) return;
     onSave({ equipment_type: equipmentType.trim(), name: name.trim() }, cleanItems);
   };
@@ -5198,9 +5439,24 @@ function ChecklistTemplateFormModal({ initial, onClose, onSave, saving }) {
               <button onClick={() => removeBlock(b.id)} style={iconBtnStyle}><X size={16} /></button>
             </div>
           ) : (
-            <div key={b.id} className="flex gap-2">
-              <input className={inputClass} style={inputStyle} value={b.text} onChange={(e) => updateBlock(b.id, { text: e.target.value })} placeholder="Punto a revisar" />
-              <button onClick={() => removeBlock(b.id)} style={iconBtnStyle}><X size={16} /></button>
+            <div key={b.id} className="space-y-1 pb-2" style={{ borderBottom: `1px dashed ${C.border}` }}>
+              <div className="flex gap-2">
+                <input className={inputClass} style={inputStyle} value={b.text} onChange={(e) => updateBlock(b.id, { text: e.target.value })} placeholder="Punto a revisar" />
+                <select className={inputClass} style={{ ...inputStyle, maxWidth: 170 }} value={b.response_type || "check"} onChange={(e) => updateBlock(b.id, { response_type: e.target.value })}>
+                  <option value="check">Cotejo (✓)</option>
+                  <option value="ok_no_ok_na">OK / No OK / N/A</option>
+                  <option value="numeric">Numérico (con rango)</option>
+                </select>
+                <button onClick={() => removeBlock(b.id)} style={iconBtnStyle}><X size={16} /></button>
+              </div>
+              {b.response_type === "numeric" && (
+                <div className="flex items-center gap-2 pl-1">
+                  <span className="text-xs" style={{ color: C.muted }}>Rango esperado:</span>
+                  <input type="number" className={inputClass} style={{ ...inputStyle, maxWidth: 110 }} value={b.range_min} onChange={(e) => updateBlock(b.id, { range_min: e.target.value })} placeholder="Mín" />
+                  <span className="text-xs" style={{ color: C.muted }}>a</span>
+                  <input type="number" className={inputClass} style={{ ...inputStyle, maxWidth: 110 }} value={b.range_max} onChange={(e) => updateBlock(b.id, { range_max: e.target.value })} placeholder="Máx" />
+                </div>
+              )}
             </div>
           )
         ))}
@@ -5406,11 +5662,39 @@ function SignaturePad({ onSave, saving }) {
   );
 }
 
-function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, techName, technicians, extraTechnicianIds, materials, onConsumeMaterial, canManageWarehouse, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
+// Horas de un técnico adicional en una orden multi-técnico. Estado local propio para no
+// disparar un guardado en cada tecla — se guarda al salir del campo (onBlur), igual que
+// los demás campos de texto del detalle de la orden.
+function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave }) {
+  const [hours, setHours] = useState(row.hours ?? "");
+  const cost = (Number(hours) || 0) * (Number(hourlyRate) || 0);
+  return (
+    <div className="flex items-center gap-3 px-3 py-2" style={{ background: C.panelAlt }}>
+      <div className="flex-1 text-sm truncate">{name}</div>
+      <input
+        type="number" step="0.25" min="0" disabled={readOnly}
+        className={inputClass} style={{ ...inputStyle, maxWidth: 100 }}
+        value={hours}
+        onChange={(e) => setHours(e.target.value)}
+        onBlur={(e) => onSave(row, e.target.value)}
+        placeholder="Horas"
+      />
+      <div className="text-xs font-mono text-right" style={{ color: C.muted, width: 90 }}>{fmtMoney(cost)}</div>
+    </div>
+  );
+}
+
+function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onConsumeMaterial, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
-  const [photoFile, setPhotoFile] = useState(null);
-  const [photoPreview, setPhotoPreview] = useState(order.photo_url || "");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [uploadingStage, setUploadingStage] = useState(null);
+  const handleAddPhotos = async (stage, fileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length === 0) return;
+    setUploadingStage(stage);
+    for (const file of files) { await onAddPhoto(order, file, stage); }
+    setUploadingStage(null);
+  };
   const t = TYPE_CFG[order.type], p = PRIORITY_CFG[order.priority], s = STATUS_CFG[order.status];
 
   const technician = technicians.find((tc) => tc.id === order.technician_id);
@@ -5468,6 +5752,11 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
   };
 
   const laborCost = (Number(laborHours) || 0) * (Number(laborRate) || 0);
+  const extraTechnicianCost = (extraTechnicianRows || []).reduce((sum, row) => {
+    const rate = technicians.find((t) => t.id === row.technician_id)?.hourly_rate;
+    return sum + (Number(row.hours) || 0) * (Number(rate) || 0);
+  }, 0);
+  const totalLaborCost = laborCost + extraTechnicianCost;
 
   const [signerName, setSignerName] = useState(order.client_signature_name || "");
   const [resigning, setResigning] = useState(false);
@@ -5480,22 +5769,96 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
     setResigning(false);
   };
 
-  const onFileChange = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
-  };
-
   const isImage = (name) => /\.(png|jpe?g|gif|webp)$/i.test(name || "");
-  const checkedCount = (checklistItems || []).filter((it) => it.checked).length;
+  const isChecklistItemAnswered = (it) => {
+    if (it.response_type === "ok_no_ok_na") return !!(it.respuesta && it.respuesta.trim());
+    if (it.response_type === "numeric") return !!(it.respuesta && it.respuesta.trim() !== "" && !isNaN(Number(it.respuesta)));
+    return !!it.checked;
+  };
+  const checkedCount = (checklistItems || []).filter(isChecklistItemAnswered).length;
+  const uncheckedCount = (checklistItems || []).length - checkedCount;
   const checklistGroups = groupChecklistItemsBySection(checklistItems || []);
   const showChecklistSections = checklistGroups.length > 1 || (checklistGroups[0] && checklistGroups[0].section !== "General");
   const canRemoveChecklist = order.status !== "completada";
+  const orderEquipType = (equipType ? equipType(order.equipment_id) : "") || "";
+  const [showAllTemplates, setShowAllTemplates] = useState(false);
+  const matchingTemplates = (checklistTemplates || []).filter(
+    (tpl) => orderEquipType && tpl.equipment_type && tpl.equipment_type.trim().toLowerCase() === orderEquipType.trim().toLowerCase()
+  );
+  const visibleTemplates = (!orderEquipType || showAllTemplates || matchingTemplates.length === 0) ? (checklistTemplates || []) : matchingTemplates;
+
+  const closeRequirements = [];
+  if (uncheckedCount > 0) closeRequirements.push(`checklist (${uncheckedCount} punto${uncheckedCount !== 1 ? "s" : ""} sin marcar)`);
+  if (!notes.trim()) closeRequirements.push("nota de cierre");
+  if (!order.client_signature_url) closeRequirements.push("firma del cliente");
+  const canCloseOrder = closeRequirements.length === 0;
 
   const doPrintChecklist = () => {
     const html = checklistPrintHtml({ companyName, order, branchName, equipName, techName, checklistItems });
     printDocument(`Checklist ${order.code}`, html);
+  };
+
+  const orderClient = (clients || []).find((c) => c.id === order.client_id) || null;
+  const [reportEmail, setReportEmail] = useState(orderClient?.email || "");
+  const [sendingReport, setSendingReport] = useState(false);
+  const [reportSentMsg, setReportSentMsg] = useState("");
+  const beforePhotos = (attachments || []).filter((a) => a.stage === "antes");
+  const afterPhotos = (attachments || []).filter((a) => a.stage === "despues");
+
+  const doPrintServiceReport = () => {
+    const html = orderServiceReportHtml({
+      companyName, order, branchName, equipName, techName,
+      clientName: orderClient?.name || "",
+      checklistItems, usedMaterials, laborHours, beforePhotos, afterPhotos,
+    });
+    printDocument(`Informe de servicio ${order.code}`, html);
+  };
+
+  const doSendServiceReport = async () => {
+    if (!reportEmail.trim()) return;
+    setSendingReport(true);
+    setReportSentMsg("");
+    const materialsText = usedMaterials.length > 0
+      ? usedMaterials.map((m) => `- ${m.name}: ${m.quantity} ${m.unit || ""}`).join("\n")
+      : "Ninguno";
+    // Respaldo en texto plano (mejor entregabilidad y por si el cliente de correo no
+    // muestra HTML). El correo real que se ve es el "html" de abajo: el mismo informe
+    // completo que se imprime, con checklist, materiales y fotos antes/después —
+    // las fotos se ven porque son URLs públicas del storage, no adjuntos.
+    const text = [
+      `Informe de servicio — Orden ${order.code}`,
+      order.title || "",
+      "",
+      `Sucursal: ${branchName(order.branch_id)}`,
+      `Equipo: ${equipName(order.equipment_id)}`,
+      `Técnico: ${techName(order.technician_id)}`,
+      `Fecha: ${fmtDate(order.scheduled)}`,
+      "",
+      "Nota de solución / cierre:",
+      order.resolution_notes || notes || "—",
+      "",
+      "Materiales retirados del almacén:",
+      materialsText,
+    ].join("\n");
+    const reportBodyHtml = orderServiceReportHtml({
+      companyName, order, branchName, equipName, techName,
+      clientName: orderClient?.name || "",
+      checklistItems, usedMaterials, laborHours, beforePhotos, afterPhotos,
+    });
+    const html = `<html><head><style>
+      body { font-family: Arial, Helvetica, sans-serif; color: #111; }
+      h1 { font-size: 18px; margin: 0 0 2px; }
+      .muted { color: #666; font-size: 12px; }
+      table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; font-size: 13px; }
+      th { background: #f2f2f2; }
+      .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+    </style></head><body>${reportBodyHtml}</body></html>`;
+    const { error } = await supabase.functions.invoke("send-client-email", {
+      body: { to: reportEmail.trim(), subject: `Informe de servicio — Orden ${order.code}`, text, html },
+    });
+    setSendingReport(false);
+    setReportSentMsg(error ? `No se pudo enviar: ${error.message}` : "Enviado.");
   };
 
   return (
@@ -5518,17 +5881,19 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         </div>
         <div>Fecha programada<br /><span style={{ color: C.text }}>{fmtDate(order.scheduled)}</span></div>
         {order.deadline && (
-          <div>Fecha límite (deadline)<br /><span style={{ color: order.status !== "completada" && order.deadline < new Date().toISOString().slice(0, 10) ? C.red : C.text }}>{fmtDate(order.deadline)}</span></div>
+          <div>Fecha límite (deadline)<br /><span style={{ color: order.status !== "completada" && order.deadline < todayStrRD() ? C.red : C.text }}>{fmtDate(order.deadline)}</span></div>
         )}
       </div>
 
       {!isTecnico && !readOnly && checklistItems && checklistItems.length === 0 && checklistTemplates && checklistTemplates.length > 0 && (
         <div className="mb-4 px-3 py-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-          <div className="text-xs mb-2" style={{ color: C.muted }}>Elige un checklist para cargar en esta orden:</div>
+          <div className="text-xs mb-2" style={{ color: C.muted }}>
+            Elige un checklist para cargar en esta orden{orderEquipType ? ` (equipo tipo "${orderEquipType}")` : ""}:
+          </div>
           <div className="flex items-center gap-2">
             <select className={inputClass} style={inputStyle} value={selectedTemplateId} onChange={(e) => setSelectedTemplateId(e.target.value)}>
               <option value="">Selecciona un checklist...</option>
-              {checklistTemplates.map((tpl) => (
+              {visibleTemplates.map((tpl) => (
                 <option key={tpl.id} value={tpl.id}>{tpl.name} — {tpl.equipment_type}</option>
               ))}
             </select>
@@ -5544,6 +5909,19 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
               Cargar checklist
             </button>
           </div>
+          {orderEquipType && matchingTemplates.length > 0 && !showAllTemplates && (
+            <button onClick={() => setShowAllTemplates(true)} className="text-xs mt-2" style={{ color: C.amber }}>
+              Ver todos los checklists ({checklistTemplates.length})
+            </button>
+          )}
+          {orderEquipType && showAllTemplates && matchingTemplates.length > 0 && (
+            <button onClick={() => setShowAllTemplates(false)} className="text-xs mt-2" style={{ color: C.muted }}>
+              Ver solo los de "{orderEquipType}"
+            </button>
+          )}
+          {orderEquipType && matchingTemplates.length === 0 && (
+            <div className="text-xs mt-2" style={{ color: C.muted }}>No hay ningún checklist configurado para el tipo "{orderEquipType}"; se muestran todos.</div>
+          )}
         </div>
       )}
 
@@ -5567,22 +5945,74 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
                   <div className="text-xs font-semibold uppercase tracking-wide px-1 pt-2 pb-1" style={{ color: C.amber }}>{g.section}</div>
                 )}
                 <div className="space-y-2">
-                  {g.items.map((it) => (
-                    <div key={it.id} className="px-3 py-2" style={{ background: C.panelAlt }}>
-                      <label className="flex items-center gap-2 text-sm cursor-pointer mb-2">
-                        <input type="checkbox" checked={it.checked} onChange={(e) => onToggleChecklistItem(it, e.target.checked)} disabled={readOnly} />
-                        <span style={{ color: it.checked ? C.muted : C.text, textDecoration: it.checked ? "line-through" : "none" }}>{it.text}</span>
-                      </label>
+                  {g.items.map((it) => {
+                    const numericVal = it.respuesta !== "" && it.respuesta != null ? Number(it.respuesta) : null;
+                    const outOfRange = it.response_type === "numeric" && numericVal != null && !isNaN(numericVal) &&
+                      ((it.range_min != null && numericVal < Number(it.range_min)) || (it.range_max != null && numericVal > Number(it.range_max)));
+                    const isBadOkNoOkNa = it.response_type === "ok_no_ok_na" && it.respuesta === "No OK";
+                    const needsIncident = outOfRange || isBadOkNoOkNa;
+                    return (
+                    <div key={it.id} className="px-3 py-2" style={{ background: C.panelAlt, border: needsIncident ? `1px solid ${C.red}` : "none" }}>
+                      {it.response_type === "ok_no_ok_na" ? (
+                        <div className="mb-2">
+                          <div className="text-sm mb-1" style={{ color: C.text }}>{it.text}</div>
+                          <div className="flex items-center gap-1">
+                            {["OK", "No OK", "N/A"].map((opt) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                disabled={readOnly}
+                                onClick={() => { onChecklistFieldChange(it, "respuesta", opt); onChecklistFieldBlur(it, "respuesta", opt); }}
+                                className="text-xs px-3 py-1 font-semibold disabled:opacity-50"
+                                style={{
+                                  background: it.respuesta === opt ? (opt === "No OK" ? C.red : opt === "OK" ? C.green : C.muted) : "transparent",
+                                  color: it.respuesta === opt ? "#fff" : C.muted,
+                                  border: `1px solid ${it.respuesta === opt ? "transparent" : C.border}`,
+                                }}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : it.response_type === "numeric" ? (
+                        <div className="mb-2">
+                          <div className="text-sm mb-1" style={{ color: C.text }}>
+                            {it.text}
+                            {(it.range_min != null || it.range_max != null) && (
+                              <span className="text-xs ml-2" style={{ color: C.muted }}>(rango: {it.range_min ?? "—"} a {it.range_max ?? "—"})</span>
+                            )}
+                          </div>
+                          <input
+                            type="number"
+                            className={inputClass}
+                            style={{ ...inputStyle, maxWidth: 160, borderColor: outOfRange ? C.red : undefined }}
+                            placeholder="Lectura"
+                            value={it.respuesta || ""}
+                            onChange={(e) => onChecklistFieldChange(it, "respuesta", e.target.value)}
+                            onBlur={(e) => onChecklistFieldBlur(it, "respuesta", e.target.value)}
+                            disabled={readOnly}
+                          />
+                          {outOfRange && <div className="text-xs mt-1" style={{ color: C.red }}>Fuera del rango esperado.</div>}
+                        </div>
+                      ) : (
+                        <label className="flex items-center gap-2 text-sm cursor-pointer mb-2">
+                          <input type="checkbox" checked={it.checked} onChange={(e) => onToggleChecklistItem(it, e.target.checked)} disabled={readOnly} />
+                          <span style={{ color: it.checked ? C.muted : C.text, textDecoration: it.checked ? "line-through" : "none" }}>{it.text}</span>
+                        </label>
+                      )}
                       <div className="grid grid-cols-2 gap-2">
-                        <input
-                          className={inputClass}
-                          style={inputStyle}
-                          placeholder="Respuesta / lectura"
-                          value={it.respuesta || ""}
-                          onChange={(e) => onChecklistFieldChange(it, "respuesta", e.target.value)}
-                          onBlur={(e) => onChecklistFieldBlur(it, "respuesta", e.target.value)}
-                          disabled={readOnly}
-                        />
+                        {it.response_type === "check" || !it.response_type ? (
+                          <input
+                            className={inputClass}
+                            style={inputStyle}
+                            placeholder="Respuesta / lectura"
+                            value={it.respuesta || ""}
+                            onChange={(e) => onChecklistFieldChange(it, "respuesta", e.target.value)}
+                            onBlur={(e) => onChecklistFieldBlur(it, "respuesta", e.target.value)}
+                            disabled={readOnly}
+                          />
+                        ) : <div />}
                         <input
                           className={inputClass}
                           style={inputStyle}
@@ -5593,8 +6023,19 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
                           disabled={readOnly}
                         />
                       </div>
+                      {needsIncident && !readOnly && onCreateIncidentFromChecklist && (
+                        <button
+                          type="button"
+                          onClick={() => onCreateIncidentFromChecklist(order, it, it.respuesta)}
+                          className="flex items-center gap-1 text-xs mt-2"
+                          style={{ color: C.red }}
+                        >
+                          <AlertTriangle size={13} /> Reportar como incidente
+                        </button>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -5602,11 +6043,11 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         </div>
       )}
 
-      {attachments && attachments.length > 0 && (
+      {attachments && attachments.filter((a) => !a.stage).length > 0 && (
         <div className="mb-4">
           <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Archivos de apoyo</div>
           <div className="grid grid-cols-2 gap-2">
-            {attachments.map((a) => (
+            {attachments.filter((a) => !a.stage).map((a) => (
               <a key={a.id} href={a.file_url} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.amber }}>
                 {isImage(a.file_name) ? <ImageIcon size={14} /> : <FileText size={14} />}
                 <span className="truncate">{a.file_name || "Archivo"}</span>
@@ -5618,7 +6059,7 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
 
       {readOnly && (
         <div className="text-xs mb-3 px-3 py-2" style={{ background: C.panelAlt, color: C.muted, border: `1px solid ${C.border}` }}>
-          Esta orden ya está completada — no se puede editar la nota ni la foto.
+          Esta orden ya está completada — no se puede editar la nota ni las fotos.
         </div>
       )}
 
@@ -5626,15 +6067,53 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         <textarea rows={4} disabled={readOnly} className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Qué se hizo, repuestos usados, observaciones..." />
       </Field>
 
-      <Field label="Foto de evidencia">
-        {photoPreview && <img src={photoPreview} alt="Evidencia" className="w-full max-h-56 object-cover mb-2" style={{ border: `1px solid ${C.border}` }} />}
-        {!readOnly && (
-          <label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer w-fit" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
-            <ImageIcon size={14} /> {photoPreview ? "Cambiar foto" : "Subir foto"}
-            <input type="file" accept="image/*" className="hidden" onChange={onFileChange} />
-          </label>
+      <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Fotos — antes / después</div>
+        {order.photo_url && (
+          <div className="mb-3">
+            <div className="text-xs mb-1" style={{ color: C.muted }}>Foto de cierre (registro anterior a este cambio)</div>
+            <img src={order.photo_url} alt="Evidencia" className="w-full max-h-56 object-cover" style={{ border: `1px solid ${C.border}` }} />
+          </div>
         )}
-      </Field>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {["antes", "despues"].map((stage) => {
+            const stagePhotos = (attachments || []).filter((a) => a.stage === stage);
+            return (
+              <div key={stage}>
+                <div className="text-xs mb-2" style={{ color: C.muted }}>{stage === "antes" ? "Antes" : "Después"} ({stagePhotos.length})</div>
+                {stagePhotos.length > 0 && (
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    {stagePhotos.map((a) => (
+                      <div key={a.id} className="relative">
+                        <a href={a.file_url} target="_blank" rel="noreferrer">
+                          {isImage(a.file_name) ? (
+                            <img src={a.file_url} alt={stage} className="w-full h-24 object-cover" style={{ border: `1px solid ${C.border}` }} />
+                          ) : (
+                            <div className="w-full h-24 flex items-center justify-center text-xs" style={{ border: `1px solid ${C.border}`, color: C.muted }}>
+                              <FileText size={16} />
+                            </div>
+                          )}
+                        </a>
+                        {!readOnly && (
+                          <button onClick={() => onDeletePhoto(a)} className="absolute top-1 right-1 p-0.5" style={{ background: "#000000a0", color: "#fff" }}>
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!readOnly && (
+                  <label className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer w-fit" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
+                    <ImageIcon size={13} /> {uploadingStage === stage ? "Subiendo..." : "Agregar foto"}
+                    <input type="file" accept="image/*" multiple disabled={uploadingStage === stage} className="hidden" onChange={(e) => handleAddPhotos(stage, e.target.files)} />
+                  </label>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
         <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Materiales retirados del almacén</div>
@@ -5667,7 +6146,9 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
       </div>
 
       <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
-        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Mano de obra</div>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>
+          Mano de obra{extraTechnicianRows && extraTechnicianRows.length > 0 ? ` — ${techName(order.technician_id)} (técnico principal)` : ""}
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Horas trabajadas">
             <input type="number" step="0.25" min="0" disabled={readOnly} className={inputClass} style={inputStyle} value={laborHours} onChange={(e) => setLaborHours(e.target.value)} placeholder="Ej. 2.5" />
@@ -5678,9 +6159,27 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         </div>
       </div>
 
+      {extraTechnicianRows && extraTechnicianRows.length > 0 && (
+        <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Horas de los técnicos adicionales</div>
+          <div className="space-y-1">
+            {extraTechnicianRows.map((row) => (
+              <TechnicianHoursRow
+                key={row.id}
+                row={row}
+                name={techName(row.technician_id)}
+                hourlyRate={technicians.find((t) => t.id === row.technician_id)?.hourly_rate}
+                readOnly={readOnly}
+                onSave={onUpdateTechnicianHours}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-2 p-3 flex justify-between items-center text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-        <span style={{ color: C.muted }}>Costo de mano de obra</span>
-        <div className="font-mono font-bold">{fmtMoney(laborCost)}</div>
+        <span style={{ color: C.muted }}>Costo de mano de obra{extraTechnicianRows && extraTechnicianRows.length > 0 ? " (total, todos los técnicos)" : ""}</span>
+        <div className="font-mono font-bold">{fmtMoney(totalLaborCost)}</div>
       </div>
 
       <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
@@ -5712,6 +6211,33 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         )}
       </div>
 
+      <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Informe de servicio</div>
+        <div className="text-xs mb-2" style={{ color: C.muted }}>Incluye checklist, materiales retirados, horas, fotos de antes/después y la firma del cliente.</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={doPrintServiceReport} className="flex items-center gap-2 px-3 py-2 text-xs font-semibold" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
+            <FileText size={13} /> Imprimir / descargar PDF
+          </button>
+          <input
+            type="email"
+            className={inputClass}
+            style={{ ...inputStyle, width: 220 }}
+            value={reportEmail}
+            onChange={(e) => { setReportEmail(e.target.value); setReportSentMsg(""); }}
+            placeholder="correo del cliente"
+          />
+          <button
+            onClick={doSendServiceReport}
+            disabled={!reportEmail.trim() || sendingReport}
+            className="flex items-center gap-2 px-3 py-2 text-xs font-semibold disabled:opacity-50"
+            style={{ background: C.amber, color: "#1A1500" }}
+          >
+            {sendingReport ? "Enviando..." : "Enviar por correo"}
+          </button>
+          {reportSentMsg && <span className="text-xs" style={{ color: reportSentMsg.startsWith("No") ? C.red : C.green }}>{reportSentMsg}</span>}
+        </div>
+      </div>
+
       <ActivityHistorySection
         tableName="work_orders"
         recordId={order.id}
@@ -5720,24 +6246,45 @@ function OrderDetailModal({ order, attachments, checklistItems, checklistTemplat
         statusLabels={Object.fromEntries(Object.entries(STATUS_CFG).map(([k, v]) => [k, v.label]))}
       />
 
+      {!readOnly && order.status !== "completada" && !canCloseOrder && (
+        <div className="mt-3 text-xs" style={{ color: C.amber }}>
+          Para cerrar esta orden todavía falta: {closeRequirements.join(", ")}.
+        </div>
+      )}
+
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{readOnly ? "Cerrar" : "Cancelar"}</button>
         {!readOnly && (
-          <button onClick={() => onSave(order, notes, photoFile, undefined, laborHours, laborRate)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          <button onClick={() => onSave(order, notes, null, undefined, laborHours, laborRate)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
             {saving ? "Guardando..." : "Guardar"}
           </button>
         )}
         {!readOnly && order.status !== "completada" && (
           <button
             onClick={() => {
+              if (!canCloseOrder) return;
               if (!window.confirm("¿Cerrar esta orden de trabajo? Se guardará la nota y la foto, y quedará marcada como Completada.")) return;
-              onSave(order, notes, photoFile, "completada", laborHours, laborRate);
+              onSave(order, notes, null, "completada", laborHours, laborRate);
             }}
-            disabled={saving}
+            disabled={saving || !canCloseOrder}
+            title={canCloseOrder ? undefined : `Falta: ${closeRequirements.join(", ")}`}
             className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50"
             style={{ background: C.green, color: "#0B1F13" }}
           >
             <CheckCircle2 size={14} /> {saving ? "Cerrando..." : "Cerrar orden"}
+          </button>
+        )}
+        {!readOnly && order.status === "completada" && canManageWarehouse && (
+          <button
+            onClick={() => {
+              if (!window.confirm("¿Reabrir esta orden de trabajo? Volverá a estado \"En progreso\" y el checklist quedará editable.")) return;
+              onSave(order, notes, null, "en_progreso", laborHours, laborRate);
+            }}
+            disabled={saving}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+            style={{ color: C.amber, border: `1px solid ${C.amber}60` }}
+          >
+            Reabrir orden
           </button>
         )}
       </div>
@@ -5789,6 +6336,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const isTecnico = profile.role === "tecnico";
   const isVendedor = profile.role === "vendedor";
   const canUseCaja = isAdmin || profile.role === "supervisor" || isVendedor;
+  // Un vendedor solo debe ver/operar cotizaciones y facturas de su(s) propia(s) sucursal(es) —
+  // igual que ya pasa en Caja. Admin y supervisor siguen viendo todas.
+  const vendorBranchIds = useMemo(
+    () => (isVendedor ? [profile.branch_id, ...(profile.extra_branch_ids || [])].filter(Boolean) : null),
+    [isVendedor, profile.branch_id, profile.extra_branch_ids]
+  );
   const effectivePermissions = (profile.permissions && typeof profile.permissions === "object" && !Array.isArray(profile.permissions)) ? profile.permissions : (ROLE_DEFAULT_PERMISSIONS[profile.role] || {});
   const hasPerm = (key) => isAdmin || !!effectivePermissions[key];
   const canEdit = (key) => isAdmin || effectivePermissions[key] === "edit" || effectivePermissions[key] === "edit_no_delete";
@@ -5848,6 +6401,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [bankTransactions, setBankTransactions] = useState([]);
   const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
   const [importingBankStatement, setImportingBankStatement] = useState(false);
+  const [bankImportMsg, setBankImportMsg] = useState("");
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -5864,11 +6418,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [activityActionFilter, setActivityActionFilter] = useState("all");
   const [activityUserFilter, setActivityUserFilter] = useState("all");
   const [activityDateFrom, setActivityDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
-  const [activityDateTo, setActivityDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [activityDateTo, setActivityDateTo] = useState(() => todayStrRD());
   const [financialDateFrom, setFinancialDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
-  const [financialDateTo, setFinancialDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [financialDateTo, setFinancialDateTo] = useState(() => todayStrRD());
   const [salesReportDateFrom, setSalesReportDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
-  const [salesReportDateTo, setSalesReportDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [salesReportDateTo, setSalesReportDateTo] = useState(() => todayStrRD());
   const [invoicePaymentsAll, setInvoicePaymentsAll] = useState([]);
   const [purchasePaymentsAll, setPurchasePaymentsAll] = useState([]);
   const [loadingFinancial, setLoadingFinancial] = useState(false);
@@ -5887,6 +6441,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [selectedEquipment, setSelectedEquipment] = useState(new Set());
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; });
   const [searchedDate, setSearchedDate] = useState("");
+  const [agendaTechFilter, setAgendaTechFilter] = useState("all");
+  const [agendaViewMode, setAgendaViewMode] = useState("month");
+  const [agendaWeekAnchor, setAgendaWeekAnchor] = useState(() => todayStrRD());
   const [view, setView] = useState(() => new URLSearchParams(window.location.search).get("view") || "dashboard");
   const changeView = (key) => {
     setView(key);
@@ -5947,6 +6504,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [editingToolList, setEditingToolList] = useState(null);
   const [showAddMaterial, setShowAddMaterial] = useState(false);
   const [editingMaterial, setEditingMaterial] = useState(null);
+  const [materialsLowStockOnly, setMaterialsLowStockOnly] = useState(false);
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [editingAccount, setEditingAccount] = useState(null);
   const [showAddTaxRate, setShowAddTaxRate] = useState(false);
@@ -5991,6 +6549,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [orderEquipmentFilter, setOrderEquipmentFilter] = useState("all");
   const [orderDateFrom, setOrderDateFrom] = useState("");
   const [orderDateTo, setOrderDateTo] = useState("");
+  const [techReportDateFrom, setTechReportDateFrom] = useState("");
+  const [techReportDateTo, setTechReportDateTo] = useState("");
 
   const loadAll = async () => {
     setLoadingScope(true);
@@ -6288,7 +6848,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return { totalInvoiced, totalCollected, totalPending, totalQuoted, conversionRate, quotesCount: quotesInRange.length, invoicesCount: invoicesInRange.length, quoteStatusCounts, topClients, months, maxMonthTotal };
   }, [invoices, quotes, clients, salesReportDateFrom, salesReportDateTo]);
 
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const visibleQuotes = useMemo(() => (vendorBranchIds ? quotes.filter((q) => vendorBranchIds.includes(q.branch_id)) : quotes), [quotes, vendorBranchIds]);
+  const visibleInvoices = useMemo(() => (vendorBranchIds ? invoices.filter((inv) => vendorBranchIds.includes(inv.branch_id)) : invoices), [invoices, vendorBranchIds]);
+  // Igual que arriba, pero para restringir las opciones del <select> de sucursal en los
+  // formularios de cotización/factura: un vendedor solo puede elegir entre sus propias sucursales.
+  const vendorScopedBranches = useMemo(() => (vendorBranchIds ? branches.filter((b) => vendorBranchIds.includes(b.id)) : branches), [branches, vendorBranchIds]);
+
+  const todayStr = todayStrRD();
   const dueContracts = useMemo(
     () => recurringContracts.filter((c) => c.is_active && c.next_invoice_date <= todayStr && (!c.end_date || c.end_date >= todayStr))
       .sort((a, b) => (a.next_invoice_date || "").localeCompare(b.next_invoice_date || "")),
@@ -6296,11 +6862,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   );
 
   const overdueReceivables = useMemo(() => {
-    const pending = invoices.filter((inv) => inv.status !== "anulada" && (Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0)) > 0.009)
+    const pending = visibleInvoices.filter((inv) => inv.status !== "anulada" && (Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0)) > 0.009)
       .map((inv) => ({ ...inv, balance: Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0), days: Math.max(0, Math.floor((Date.now() - new Date(inv.invoice_date).getTime()) / 86400000)) }));
     const overdue = pending.filter((inv) => inv.days > 30);
     return { count: overdue.length, total: overdue.reduce((s, inv) => s + inv.balance, 0) };
-  }, [invoices]);
+  }, [visibleInvoices]);
 
   const financialMonthlyChart = useMemo(() => {
     const months = [];
@@ -6408,15 +6974,21 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return true;
   }), [equipment, branchFilter, equipmentTechFilter, equipmentTypeFilter, equipmentSearch]);
 
+  const orderMatchesAgendaTech = (o, techId) => {
+    if (techId === "all") return true;
+    if (o.technician_id === techId) return true;
+    return orderTechnicians.some((wt) => wt.work_order_id === o.id && wt.technician_id === techId);
+  };
   const ordersByDate = useMemo(() => {
     const map = {};
     scopedOrders.forEach((o) => {
       if (!o.scheduled) return;
+      if (!orderMatchesAgendaTech(o, agendaTechFilter)) return;
       if (!map[o.scheduled]) map[o.scheduled] = [];
       map[o.scheduled].push(o);
     });
     return map;
-  }, [scopedOrders]);
+  }, [scopedOrders, agendaTechFilter, orderTechnicians]);
 
   const overdueOrders = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -6466,11 +7038,39 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const branchName = (id) => branches.find((b) => b.id === id)?.name || "—";
   const techName = (id) => technicians.find((t) => t.id === id)?.name || "Sin asignar";
   const equipName = (id) => equipment.find((e) => e.id === id)?.name || "—";
+  const equipType = (id) => equipment.find((e) => e.id === id)?.type || "";
   const locationName = (id) => locations.find((l) => l.id === id)?.name || null;
 
+  // Los informes técnicos respetan el filtro de sucursal de arriba (branchFilter) y el rango
+  // de fechas propio de esta pantalla (techReportDateFrom/To), en vez de usar siempre todo el
+  // histórico sin importar qué sucursal esté seleccionada.
+  const reportsOrders = useMemo(() => orders.filter((o) =>
+    (branchFilter === "all" || o.branch_id === branchFilter) &&
+    (!techReportDateFrom || (o.scheduled && o.scheduled >= techReportDateFrom)) &&
+    (!techReportDateTo || (o.scheduled && o.scheduled <= techReportDateTo))
+  ), [orders, branchFilter, techReportDateFrom, techReportDateTo]);
+  const reportsIncidents = useMemo(() => incidents.filter((i) =>
+    (branchFilter === "all" || i.branch_id === branchFilter) &&
+    (!techReportDateFrom || (i.created_at && i.created_at.slice(0, 10) >= techReportDateFrom)) &&
+    (!techReportDateTo || (i.created_at && i.created_at.slice(0, 10) <= techReportDateTo))
+  ), [incidents, branchFilter, techReportDateFrom, techReportDateTo]);
+  const reportsEquipment = useMemo(() => equipment.filter((eq) => branchFilter === "all" || eq.branch_id === branchFilter), [equipment, branchFilter]);
+
+  // Costo de mano de obra de una orden: técnico principal (labor_hours × labor_rate_used) +
+  // técnicos adicionales (horas por técnico × tarifa por hora de cada uno). No incluye materiales
+  // porque el Almacén no guarda un costo unitario.
+  const orderLaborCost = (o) => {
+    const primary = (Number(o.labor_hours) || 0) * (Number(o.labor_rate_used) || 0);
+    const extra = orderTechnicians.filter((wt) => wt.work_order_id === o.id).reduce((sum, wt) => {
+      const rate = technicians.find((t) => t.id === wt.technician_id)?.hourly_rate;
+      return sum + (Number(wt.hours) || 0) * (Number(rate) || 0);
+    }, 0);
+    return primary + extra;
+  };
+
   const techStats = useMemo(() => technicians.map((t) => {
-    const own = orders.filter((o) => o.technician_id === t.id);
-    const ownIncidents = incidents.filter((i) => i.technician_id === t.id);
+    const own = reportsOrders.filter((o) => o.technician_id === t.id || orderTechnicians.some((wt) => wt.work_order_id === o.id && wt.technician_id === t.id));
+    const ownIncidents = reportsIncidents.filter((i) => i.technician_id === t.id);
     return {
       ...t,
       total: own.length,
@@ -6482,12 +7082,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       incidentesTotal: ownIncidents.length,
       incidentesAbiertos: ownIncidents.filter((i) => i.status === "abierto" || i.status === "en_revision").length,
       incidentesCompletados: ownIncidents.filter((i) => i.status === "resuelto").length,
+      reopened: own.filter((o) => (o.reopened_count || 0) > 0).length,
+      laborCost: own.reduce((sum, o) => sum + (o.technician_id === t.id ? (Number(o.labor_hours) || 0) * (Number(o.labor_rate_used) || 0) : 0) + (Number(orderTechnicians.find((wt) => wt.work_order_id === o.id && wt.technician_id === t.id)?.hours) || 0) * (Number(t.hourly_rate) || 0), 0),
     };
-  }), [technicians, orders, incidents]);
+  }), [technicians, reportsOrders, reportsIncidents, orderTechnicians]);
 
-  const equipStats = useMemo(() => equipment.map((eq) => {
-    const own = orders.filter((o) => o.equipment_id === eq.id);
-    const ownIncidents = incidents.filter((i) => i.equipment_id === eq.id);
+  const equipStats = useMemo(() => reportsEquipment.map((eq) => {
+    const own = reportsOrders.filter((o) => o.equipment_id === eq.id);
+    const ownIncidents = reportsIncidents.filter((i) => i.equipment_id === eq.id);
     return {
       ...eq,
       total: own.length,
@@ -6495,8 +7097,56 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       open: own.filter((o) => o.status !== "completada").length,
       incidentesTotal: ownIncidents.length,
       incidentesAbiertos: ownIncidents.filter((i) => i.status === "abierto" || i.status === "en_revision").length,
+      laborCost: own.reduce((sum, o) => sum + orderLaborCost(o), 0),
     };
-  }), [equipment, orders, incidents]);
+  }), [reportsEquipment, reportsOrders, reportsIncidents, orderTechnicians, technicians]);
+
+  // % cumplimiento del preventivo: de las órdenes preventivas programadas en el rango de fechas
+  // filtrado, cuántas ya se completaron.
+  const preventiveCompliance = useMemo(() => {
+    const prev = reportsOrders.filter((o) => o.type === "preventivo");
+    const done = prev.filter((o) => o.status === "completada");
+    return { total: prev.length, done: done.length, pct: prev.length > 0 ? (done.length / prev.length) * 100 : null };
+  }, [reportsOrders]);
+
+  // Tiempo promedio de reparación: horas entre que se creó y se completó, solo órdenes correctivas
+  // ya cerradas (requiere completed_at, ver SQL).
+  const avgRepairTime = useMemo(() => {
+    const durations = reportsOrders
+      .filter((o) => o.type === "correctivo" && o.status === "completada" && o.completed_at && o.created_at)
+      .map((o) => (new Date(o.completed_at).getTime() - new Date(o.created_at).getTime()) / (1000 * 60 * 60));
+    const avg = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : null;
+    return { n: durations.length, avgHours: avg, label: avg === null ? "—" : avg < 48 ? `${avg.toFixed(1)} h` : `${(avg / 24).toFixed(1)} días` };
+  }, [reportsOrders]);
+
+  // Cumplimiento de fecha límite: de las órdenes con deadline ya cerradas, cuántas se
+  // cerraron el mismo día del deadline o antes (a diferencia de "cumplimiento del
+  // preventivo", que solo mira si se completó, sin importar si fue a tiempo).
+  const deadlineCompliance = useMemo(() => {
+    const withDeadline = reportsOrders.filter((o) => o.status === "completada" && o.deadline && o.completed_at);
+    const onTime = withDeadline.filter((o) => o.completed_at.slice(0, 10) <= o.deadline);
+    return { total: withDeadline.length, onTime: onTime.length, pct: withDeadline.length > 0 ? (onTime.length / withDeadline.length) * 100 : null };
+  }, [reportsOrders]);
+
+  // Órdenes vencidas: activas ahora mismo (no cerradas) cuya fecha límite ya pasó. No se
+  // filtra por el rango de fechas del reporte (es un indicador del momento actual), solo
+  // por sucursal.
+  const overdueOpenOrders = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return orders
+      .filter((o) => (branchFilter === "all" || o.branch_id === branchFilter) && o.status !== "completada" && o.deadline && o.deadline < today)
+      .map((o) => ({ ...o, daysOverdue: Math.round((new Date(today) - new Date(o.deadline)) / 86400000) }))
+      .sort((a, b) => b.daysOverdue - a.daysOverdue);
+  }, [orders, branchFilter]);
+
+  // Tasa de reapertura: de las órdenes que en algún momento se completaron (lo están
+  // ahora, o reopened_count dice que lo estuvieron antes de reabrirse), cuántas se
+  // reabrieron al menos una vez. Mide calidad del trabajo, no solo velocidad.
+  const reopenStats = useMemo(() => {
+    const everCompleted = reportsOrders.filter((o) => o.status === "completada" || (o.reopened_count || 0) > 0);
+    const reopened = reportsOrders.filter((o) => (o.reopened_count || 0) > 0);
+    return { everCompleted: everCompleted.length, reopened: reopened.length, pct: everCompleted.length > 0 ? (reopened.length / everCompleted.length) * 100 : null };
+  }, [reportsOrders]);
 
   const techChartData = useMemo(() => techStats.map((t) => ({ name: t.name.split(" ")[0], Preventivo: t.preventivo, Correctivo: t.correctivo, Predictivo: t.predictivo })), [techStats]);
   const equipChartData = useMemo(
@@ -6512,7 +7162,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const hoursBetween = (a, b) => (new Date(b).getTime() - new Date(a).getTime()) / (1000 * 60 * 60);
     const byPriority = {};
     Object.keys(PRIORITY_CFG).forEach((k) => { byPriority[k] = { responseHours: [], resolutionHours: [] }; });
-    incidents.forEach((i) => {
+    reportsIncidents.forEach((i) => {
       const bucket = byPriority[i.priority] || (byPriority[i.priority] = { responseHours: [], resolutionHours: [] });
       if (i.attended_at && i.created_at) bucket.responseHours.push(hoursBetween(i.created_at, i.attended_at));
       if (i.completed_at && i.created_at) bucket.resolutionHours.push(hoursBetween(i.created_at, i.completed_at));
@@ -6530,14 +7180,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       nResponse: v.responseHours.length,
       nResolution: v.resolutionHours.length,
     }));
-  }, [incidents]);
+  }, [reportsIncidents]);
 
   const isDueByUsage = (item) => item.usage_unit && item.usage_interval && item.current_usage != null &&
     (Number(item.current_usage) - Number(item.usage_last_maintenance || 0)) >= Number(item.usage_interval);
   const isDueByDate = (item) => item.maintenance_frequency_days && item.next_maintenance_date && item.next_maintenance_date <= todayStr;
 
+  // Un equipo "fuera de servicio" no debe entrar al plan de mantenimiento preventivo — no tiene
+  // sentido generarle una orden (ni despachar un técnico) a algo que ya se sabe que no funciona.
   const dueEquipment = useMemo(
-    () => equipment.filter((e) => isDueByDate(e) || isDueByUsage(e))
+    () => equipment.filter((e) => e.operational_status !== "fuera_servicio" && (isDueByDate(e) || isDueByUsage(e)))
       .sort((a, b) => (a.next_maintenance_date || "").localeCompare(b.next_maintenance_date || "")),
     [equipment, todayStr]
   );
@@ -6547,15 +7199,17 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     [clientAssets, todayStr]
   );
   const upcomingEquipment = useMemo(() => {
-    const in7 = new Date(); in7.setDate(in7.getDate() + 7);
-    const in7Str = in7.toISOString().slice(0, 10);
-    return equipment.filter((e) => !isDueByDate(e) && !isDueByUsage(e) && e.maintenance_frequency_days && e.next_maintenance_date && e.next_maintenance_date > todayStr && e.next_maintenance_date <= in7Str);
+    const in7Str = addDaysToDateStr(todayStr, 7);
+    return equipment.filter((e) => e.operational_status !== "fuera_servicio" && !isDueByDate(e) && !isDueByUsage(e) && e.maintenance_frequency_days && e.next_maintenance_date && e.next_maintenance_date > todayStr && e.next_maintenance_date <= in7Str);
   }, [equipment, todayStr]);
   const upcomingClientAssets = useMemo(() => {
-    const in7 = new Date(); in7.setDate(in7.getDate() + 7);
-    const in7Str = in7.toISOString().slice(0, 10);
+    const in7Str = addDaysToDateStr(todayStr, 7);
     return clientAssets.filter((a) => !isDueByDate(a) && !isDueByUsage(a) && a.maintenance_frequency_days && a.next_maintenance_date && a.next_maintenance_date > todayStr && a.next_maintenance_date <= in7Str);
   }, [clientAssets, todayStr]);
+  const lowStockMaterials = useMemo(
+    () => materials.filter((m) => m.min_quantity != null && Number(m.quantity || 0) <= Number(m.min_quantity)),
+    [materials]
+  );
 
   const filteredClients = useMemo(() => {
     if (!clientSearch.trim()) return clients;
@@ -6587,20 +7241,20 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return true;
   }), [purchases, suppliers, purchaseSupplierFilter, purchaseSearch]);
 
-  const filteredQuotes = useMemo(() => quotes.filter((q) => {
+  const filteredQuotes = useMemo(() => visibleQuotes.filter((q) => {
     const clientNameStr = clients.find((c) => c.id === q.client_id)?.name || "";
     if (quoteStatusFilter !== "all" && q.status !== quoteStatusFilter) return false;
     if (quoteSearch && !clientNameStr.toLowerCase().includes(quoteSearch.toLowerCase()) && !(q.quote_number || "").toLowerCase().includes(quoteSearch.toLowerCase())) return false;
     return true;
-  }), [quotes, clients, quoteStatusFilter, quoteSearch]);
+  }), [visibleQuotes, clients, quoteStatusFilter, quoteSearch]);
 
-  const filteredInvoices = useMemo(() => invoices.filter((inv) => {
+  const filteredInvoices = useMemo(() => visibleInvoices.filter((inv) => {
     const clientNameStr = clients.find((c) => c.id === inv.client_id)?.name || "";
     if (invoiceStatusFilter !== "all" && inv.status !== invoiceStatusFilter) return false;
     if (invoicePaymentFilter !== "all" && (inv.payment_status || "pendiente") !== invoicePaymentFilter) return false;
     if (invoiceSearch && !clientNameStr.toLowerCase().includes(invoiceSearch.toLowerCase()) && !(inv.ncf || "").toLowerCase().includes(invoiceSearch.toLowerCase()) && !(inv.invoice_number || "").toLowerCase().includes(invoiceSearch.toLowerCase())) return false;
     return true;
-  }), [invoices, clients, invoiceStatusFilter, invoicePaymentFilter, invoiceSearch]);
+  }), [visibleInvoices, clients, invoiceStatusFilter, invoicePaymentFilter, invoiceSearch]);
 
   const activeWarrantyAssets = useMemo(() => {
     const today = new Date();
@@ -6614,20 +7268,56 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   }, [clientAssets]);
 
   // ---- Órdenes ----
+  // Solo agrega/quita los técnicos que cambiaron — no borra y vuelve a insertar todos, porque eso
+  // perdería las horas ya registradas (columna "hours") de los técnicos que se mantienen.
   const syncOrderTechnicians = async (workOrderId, techIds) => {
-    await supabase.from("work_order_technicians").delete().eq("work_order_id", workOrderId);
-    setOrderTechnicians((prev) => prev.filter((wt) => wt.work_order_id !== workOrderId));
-    if (techIds && techIds.length > 0) {
-      const rows = techIds.map((technician_id) => ({ company_id: companyId, work_order_id: workOrderId, technician_id }));
+    const current = orderTechnicians.filter((wt) => wt.work_order_id === workOrderId);
+    const currentIds = current.map((wt) => wt.technician_id);
+    const wanted = techIds || [];
+    const toRemove = current.filter((wt) => !wanted.includes(wt.technician_id));
+    const toAdd = wanted.filter((id) => !currentIds.includes(id));
+    if (toRemove.length > 0) {
+      await supabase.from("work_order_technicians").delete().in("id", toRemove.map((wt) => wt.id));
+      const removeIds = new Set(toRemove.map((wt) => wt.id));
+      setOrderTechnicians((prev) => prev.filter((wt) => !removeIds.has(wt.id)));
+    }
+    if (toAdd.length > 0) {
+      const rows = toAdd.map((technician_id) => ({ company_id: companyId, work_order_id: workOrderId, technician_id }));
       const { data, error } = await supabase.from("work_order_technicians").insert(rows).select();
       if (!error && data) setOrderTechnicians((prev) => [...prev, ...data]);
     }
   };
 
+  const updateOrderTechnicianHours = async (row, hours) => {
+    const value = hours === "" || hours == null ? null : Number(hours);
+    const { data, error } = await supabase.from("work_order_technicians").update({ hours: value }).eq("id", row.id).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setOrderTechnicians((prev) => prev.map((wt) => (wt.id === data.id ? data : wt)));
+  };
+
+  // El código OT-000N ya no se calcula como "cantidad de órdenes + 1" (eso se duplica si se borra
+  // una orden o si dos personas crean una orden al mismo tiempo). En vez de eso se parte del número
+  // más alto ya usado y, si el insert choca con un código que ya existe (código repetido, error
+  // 23505 de Postgres — requiere el índice único que se agrega por SQL), se prueba con el siguiente.
+  const maxOrderCodeNum = () => orders.reduce((max, o) => {
+    const m = /^OT-(\d+)$/.exec(o.code || "");
+    return m ? Math.max(max, parseInt(m[1], 10)) : max;
+  }, 0);
+  const insertOrderWithCode = async (payloadWithoutCode, startAfter) => {
+    let n = startAfter ?? maxOrderCodeNum();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      n += 1;
+      const code = `OT-${String(n).padStart(4, "0")}`;
+      const { data, error } = await supabase.from("work_orders").insert({ ...payloadWithoutCode, code, company_id: companyId }).select().single();
+      if (!error) return { data, code, n };
+      if (error.code !== "23505") return { error };
+    }
+    return { error: { message: "No se pudo generar un código único para la orden. Intenta de nuevo." } };
+  };
+
   const createOrder = async (payload, files, extraTechIds, linkedIncidentId, linkedSalesOrderId) => {
     setSaving(true);
-    const code = `OT-${String(orders.length + 1).padStart(4, "0")}`;
-    const { data, error } = await supabase.from("work_orders").insert({ ...payload, code, company_id: companyId, status: "pendiente" }).select().single();
+    const { data, error } = await insertOrderWithCode({ ...payload, status: "pendiente" });
     if (error) { setSaving(false); setErrorMsg(error.message); return; }
     setOrders((prev) => [data, ...prev]);
     setShowOrderForm(false);
@@ -6654,8 +7344,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         const path = `support/${companyId}/${data.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
         const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
-        const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
-        const { error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: pub.publicUrl, file_name: file.name });
+        const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
+        if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
+        const { error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: file.name });
         if (attError) setErrorMsg(`Se subió ${file.name} pero no se pudo vincular a la orden: ${attError.message}`);
         else setOrderAttachmentIds((prev) => new Set(prev).add(data.id));
       }
@@ -6665,20 +7356,29 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const createBulkOrders = async (rows) => {
     setSaving(true);
-    let counter = orders.length;
+    let nextAfter = maxOrderCodeNum();
     const inserted = [];
     for (const row of rows) {
-      counter += 1;
-      const code = `OT-${String(counter).padStart(4, "0")}`;
-      const { data, error } = await supabase.from("work_orders").insert({
-        company_id: companyId, branch_id: row.branch_id, equipment_id: row.equipment_id || null,
+      const { data, error, n } = await insertOrderWithCode({
+        branch_id: row.branch_id, equipment_id: row.equipment_id || null,
         technician_id: row.technician_id || null, type: row.type, priority: row.priority,
-        title: row.title, scheduled: row.scheduled, code, status: "pendiente",
-      }).select().single();
+        title: row.title, scheduled: row.scheduled, status: "pendiente",
+      }, nextAfter);
       if (error) { setErrorMsg(`No se pudo crear la orden "${row.title}": ${error.message}`); continue; }
+      nextAfter = n;
       inserted.push(data);
     }
     setOrders((prev) => [...inserted, ...prev]);
+    const byTechnician = {};
+    for (const o of inserted) { if (o.technician_id) (byTechnician[o.technician_id] ||= []).push(o); }
+    for (const [techId, techOrders] of Object.entries(byTechnician)) {
+      await notifyManyTechnicians([techId], {
+        title: techOrders.length === 1 ? `Nueva orden asignada: ${techOrders[0].code}` : `${techOrders.length} nuevas órdenes asignadas`,
+        body: techOrders.map((o) => o.title).join(" · "),
+        link_view: "orders",
+        category: "order_assigned",
+      });
+    }
     setSaving(false);
     setShowBulkOrders(false);
   };
@@ -6728,8 +7428,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         const path = `support/${companyId}/${data.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
         const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
-        const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
-        const { data: attRow, error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: pub.publicUrl, file_name: file.name }).select().single();
+        const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
+        if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
+        const { data: attRow, error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: file.name }).select().single();
         if (attError) { setErrorMsg(`Se subió ${file.name} pero no se pudo vincular a la orden: ${attError.message}`); continue; }
         setOrderAttachmentIds((prev) => new Set(prev).add(data.id));
         setEditingOrderAttachments((prev) => [...prev, attRow]);
@@ -6740,9 +7441,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setEditingOrderAttachments([]);
   };
 
+  // Solo alterna pendiente <-> en_progreso. Pasar a "completada" exige checklist, nota y firma,
+  // así que eso se hace desde el detalle de la orden (botón "Cerrar orden"), no con este atajo.
+  // Reabrir una orden completada también es una acción deliberada aparte (botón "Reabrir orden").
   const cycleStatus = async (order) => {
-    const seq = ["pendiente", "en_progreso", "completada"];
-    const next = seq[(seq.indexOf(order.status) + 1) % seq.length];
+    if (order.status === "completada") return;
+    const next = order.status === "pendiente" ? "en_progreso" : "pendiente";
     setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, status: next } : o)));
     const { error } = await supabase.from("work_orders").update({ status: next }).eq("id", order.id);
     if (error) setErrorMsg(error.message);
@@ -6755,17 +7459,59 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (error) setErrorMsg(error.message);
   };
 
+  // El bucket "evidence" es privado (ver rls-storage-evidence.sql): las URLs guardadas
+  // en la base de datos son enlaces firmados con vencimiento, no URLs públicas fijas.
+  // Esta función regenera un enlace fresco a partir de la ruta guardada (file_path /
+  // photo_path / client_signature_path) cada vez que se abre el detalle de una orden,
+  // para que fotos y firmas de órdenes viejas no se vean rotas por un enlace vencido.
+  const refreshSignedUrls = async (rows, pathField, urlField) => {
+    const paths = (rows || []).map((r) => r[pathField]).filter(Boolean);
+    if (paths.length === 0) return rows || [];
+    const { data: signedList } = await supabase.storage.from("evidence").createSignedUrls(paths, 604800);
+    const urlByPath = Object.fromEntries((signedList || []).filter((s) => !s.error && s.signedUrl).map((s) => [s.path, s.signedUrl]));
+    return rows.map((r) => (r[pathField] && urlByPath[r[pathField]] ? { ...r, [urlField]: urlByPath[r[pathField]] } : r));
+  };
+
   const openOrderDetail = async (order) => {
     const { data: attachments } = await supabase.from("work_order_attachments").select("*").eq("work_order_id", order.id).order("uploaded_at");
     const { data: checklist } = await supabase.from("work_order_checklist_items").select("*").eq("work_order_id", order.id).order("position");
-    setDetailOrderAttachments(attachments || []);
+    const refreshedAttachments = await refreshSignedUrls(attachments || [], "file_path", "file_url");
+    const [refreshedOrder] = await refreshSignedUrls([order], "photo_path", "photo_url").then((rows) => refreshSignedUrls(rows, "client_signature_path", "client_signature_url"));
+    setDetailOrderAttachments(refreshedAttachments);
     setDetailOrderChecklist(checklist || []);
-    setDetailOrder(order);
+    setDetailOrder(refreshedOrder || order);
+  };
+
+  // Fotos "antes"/"después" del detalle de la orden (columna stage en work_order_attachments,
+  // ver SQL). Se pueden subir varias por lado, a diferencia de la vieja foto única de cierre.
+  const addOrderPhoto = async (order, file, stage) => {
+    const ext = file.name.split(".").pop();
+    const path = `evidence-multi/${companyId}/${order.id}-${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+    const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
+    if (upError) { setErrorMsg(`No se pudo subir la foto: ${upError.message}`); return; }
+    const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
+    if (signError) { setErrorMsg(`Se subió la foto pero no se pudo generar el enlace: ${signError.message}`); return; }
+    const { data: attRow, error: attError } = await supabase.from("work_order_attachments")
+      .insert({ work_order_id: order.id, file_url: signed.signedUrl, file_path: path, file_name: file.name, stage }).select().single();
+    if (attError) { setErrorMsg(`Se subió la foto pero no se pudo vincular a la orden: ${attError.message}`); return; }
+    setDetailOrderAttachments((prev) => [...prev, attRow]);
+    setOrderAttachmentIds((prev) => new Set(prev).add(order.id));
+  };
+
+  const deleteDetailAttachment = async (attachment) => {
+    if (!window.confirm("¿Quitar esta foto de la orden?")) return;
+    const { data, error } = await supabase.from("work_order_attachments").delete().eq("id", attachment.id).select();
+    if (error) { setErrorMsg(error.message); return; }
+    if (!data || data.length === 0) {
+      setErrorMsg("No se pudo quitar la foto: la base de datos no eliminó ningún registro (probablemente falta un permiso DELETE en work_order_attachments).");
+      return;
+    }
+    setDetailOrderAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
   };
 
   const loadChecklistFromTemplate = async (order, template) => {
     const sortedItems = (template.items || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
-    const rows = sortedItems.map((it, i) => ({ work_order_id: order.id, text: it.text, section: it.section || null, checked: false, position: i }));
+    const rows = sortedItems.map((it, i) => ({ work_order_id: order.id, text: it.text, section: it.section || null, checked: false, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
     const { data, error } = await supabase.from("work_order_checklist_items").insert(rows).select();
     if (error) { setErrorMsg(error.message); return; }
     setDetailOrderChecklist(data || []);
@@ -6801,16 +7547,30 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const saveOrderDetail = async (order, notes, photoFile, newStatus, laborHours, laborRate) => {
     setSaving(true);
     let photo_url = order.photo_url || null;
+    let photo_path = order.photo_path || null;
     if (photoFile) {
       const ext = photoFile.name.split(".").pop();
       const path = `${companyId}/${order.id}-${Date.now()}.${ext}`;
       const { error: uploadError } = await supabase.storage.from("evidence").upload(path, photoFile, { upsert: true });
       if (uploadError) { setSaving(false); setErrorMsg(uploadError.message); return; }
-      const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
-      photo_url = pub.publicUrl;
+      const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
+      if (signError) { setSaving(false); setErrorMsg(signError.message); return; }
+      photo_url = signed.signedUrl;
+      photo_path = path;
     }
-    const payload = { resolution_notes: notes, photo_url };
-    if (newStatus) payload.status = newStatus;
+    const payload = { resolution_notes: notes, photo_url, photo_path };
+    if (newStatus) {
+      payload.status = newStatus;
+      // completed_at alimenta el indicador de "tiempo promedio de reparación" en Informes.
+      // Se marca al cerrar y se limpia al reabrir, para que quede como la última vez que se cerró.
+      if (newStatus === "completada") payload.completed_at = new Date().toISOString();
+      else if (newStatus !== "completada" && order.status === "completada") {
+        payload.completed_at = null;
+        // reopened_count alimenta la "tasa de reapertura" en Informes — mide calidad del
+        // trabajo (cuántas órdenes hubo que volver a abrir después de darlas por cerradas).
+        payload.reopened_count = (order.reopened_count || 0) + 1;
+      }
+    }
     if (laborHours !== undefined) payload.labor_hours = laborHours === "" ? null : Number(laborHours);
     if (laborRate !== undefined) payload.labor_rate_used = laborRate === "" ? null : Number(laborRate);
     const { data, error } = await supabase.from("work_orders").update(payload).eq("id", order.id).select().single();
@@ -6825,9 +7585,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const path = `signatures/${companyId}/${order.id}-${Date.now()}.png`;
     const { error: upError } = await supabase.storage.from("evidence").upload(path, blob, { contentType: "image/png", upsert: true });
     if (upError) { setErrorMsg(upError.message); return; }
-    const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
+    const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
+    if (signError) { setErrorMsg(signError.message); return; }
     const { data, error } = await supabase.from("work_orders").update({
-      client_signature_url: pub.publicUrl,
+      client_signature_url: signed.signedUrl,
+      client_signature_path: path,
       client_signature_name: signerName,
       client_signature_at: new Date().toISOString(),
     }).eq("id", order.id).select().single();
@@ -6961,14 +7723,17 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   // ---- Mantenimiento preventivo recurrente ----
-  const generateMaintenanceOrder = async (source, sourceType, code) => {
+  const generateMaintenanceOrder = async (source, sourceType, startAfter) => {
     const isEquip = sourceType === "equipment";
     if (!source.branch_id) {
       setErrorMsg(`"${source.name}" no tiene sucursal responsable asignada. Edítalo primero para indicarla.`);
-      return false;
+      return { ok: false };
+    }
+    if (isEquip && source.operational_status === "fuera_servicio") {
+      setErrorMsg(`"${source.name}" está marcado como fuera de servicio — no se le puede generar una orden de mantenimiento preventivo mientras esté en ese estado.`);
+      return { ok: false };
     }
     const payload = {
-      company_id: companyId,
       branch_id: source.branch_id,
       equipment_id: isEquip ? source.id : null,
       client_asset_id: isEquip ? null : source.id,
@@ -6978,18 +7743,23 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       priority: "media",
       title: `Mantenimiento preventivo — ${source.name}`,
       scheduled: todayStr,
-      code,
       status: "pendiente",
     };
-    const { data, error } = await supabase.from("work_orders").insert(payload).select().single();
-    if (error) { setErrorMsg(error.message); return false; }
+    const { data, error, n } = await insertOrderWithCode(payload, startAfter);
+    if (error) { setErrorMsg(error.message); return { ok: false }; }
     setOrders((prev) => [data, ...prev]);
+    if (data.technician_id) {
+      await notifyManyTechnicians([data.technician_id], {
+        title: `Nueva orden asignada: ${data.code}`,
+        body: data.title,
+        link_view: "orders",
+        category: "order_assigned",
+      });
+    }
 
     const updatePayload = {};
     if (source.maintenance_frequency_days && source.next_maintenance_date) {
-      const nextDate = new Date(`${todayStr}T00:00:00`);
-      nextDate.setDate(nextDate.getDate() + Number(source.maintenance_frequency_days));
-      updatePayload.next_maintenance_date = nextDate.toISOString().slice(0, 10);
+      updatePayload.next_maintenance_date = addDaysToDateStr(todayStr, Number(source.maintenance_frequency_days));
     }
     if (source.usage_unit && source.usage_interval && source.current_usage != null) {
       updatePayload.usage_last_maintenance = source.current_usage;
@@ -7000,26 +7770,25 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       if (isEquip) setEquipment((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
       else setClientAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
     }
-    return true;
+    return { ok: true, n };
   };
 
   const generateOneMaintenanceOrder = async (source, sourceType) => {
     setSaving(true);
-    const code = `OT-${String(orders.length + 1).padStart(4, "0")}`;
-    await generateMaintenanceOrder(source, sourceType, code);
+    await generateMaintenanceOrder(source, sourceType);
     setSaving(false);
   };
 
   const generateAllDueMaintenance = async () => {
     setSaving(true);
-    let counter = orders.length;
+    let nextAfter = maxOrderCodeNum();
     for (const eq of dueEquipment) {
-      counter += 1;
-      await generateMaintenanceOrder(eq, "equipment", `OT-${String(counter).padStart(4, "0")}`);
+      const res = await generateMaintenanceOrder(eq, "equipment", nextAfter);
+      if (res.ok) nextAfter = res.n;
     }
     for (const asset of dueClientAssets) {
-      counter += 1;
-      await generateMaintenanceOrder(asset, "client_asset", `OT-${String(counter).padStart(4, "0")}`);
+      const res = await generateMaintenanceOrder(asset, "client_asset", nextAfter);
+      if (res.ok) nextAfter = res.n;
     }
     setSaving(false);
   };
@@ -7373,7 +8142,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (!mat) return;
     const qty = Number(quantity || 0);
     if (!qty || qty <= 0) { setErrorMsg("La cantidad debe ser mayor a cero."); return; }
-    if (qty > Number(mat.quantity || 0)) { setErrorMsg("No hay suficiente cantidad disponible en materiales sobrantes."); return; }
+    if (qty > Number(mat.quantity || 0)) { setErrorMsg("No hay suficiente cantidad disponible en el almacén."); return; }
     setSaving(true);
     const { data, error } = await supabase.from("project_materials").insert({ company_id: companyId, project_id: projectId, material_id: materialId, quantity: qty, notes: (notes || "").trim() || null }).select().single();
     if (error) { setSaving(false); setErrorMsg(error.message); return; }
@@ -7382,7 +8151,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setProjectMaterials((prev) => [data, ...prev]);
   };
   const removeProjectMaterial = async (pm) => {
-    if (!window.confirm("¿Quitar este material del proyecto? La cantidad regresará al inventario de materiales sobrantes.")) return;
+    if (!window.confirm("¿Quitar este material del proyecto? La cantidad regresará al almacén.")) return;
     const { error } = await supabase.from("project_materials").delete().eq("id", pm.id);
     if (error) { setErrorMsg(error.message); return; }
     const mat = materials.find((m) => m.id === pm.material_id);
@@ -7541,8 +8310,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
         continue;
       }
-      const newStock = Number(prod.stock_qty) + row.quantity;
-      await supabase.from("products").update({ stock_qty: newStock, cost_price: row.unit_cost }).eq("id", prod.id);
+      // El ajuste de stock se hace con una función de la base de datos (adjust_product_stock,
+      // ver SQL) que suma/resta de forma atómica en el propio UPDATE — evita que dos ventas o
+      // compras simultáneas del mismo producto se pisen entre sí usando un stock_qty ya viejo
+      // que cada una leyó por separado (lo que hacía este código antes).
+      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: row.quantity });
+      await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
     }
 
     setSaving(false);
@@ -7557,8 +8330,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     for (const it of items || []) {
       const prod = products.find((p) => p.id === it.product_id);
       if (!prod) continue;
-      const newStock = Math.max(0, Number(prod.stock_qty) - Number(it.quantity));
-      await supabase.from("products").update({ stock_qty: newStock }).eq("id", prod.id);
+      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity) });
     }
     const { error } = await supabase.from("purchases").delete().eq("id", purchase.id);
     if (error) { setErrorMsg(error.message); return; }
@@ -7572,33 +8344,33 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setPurchaseDetail({ purchase, items: withNames, payments: pays || [] });
   };
 
+  // register_purchase_payment / delete_purchase_payment: mismo respaldo del lado del
+  // servidor que ya se aplicó a los pagos de facturas de clientes — verifican permiso
+  // "purchases" y recalculan amount_paid/payment_status de forma atómica, en vez del
+  // patrón leer-calcular-escribir desde el cliente que tenían antes.
   const registerPurchasePayment = async (purchase, payload) => {
     setSaving(true);
-    const { error: payError } = await supabase.from("purchase_payments").insert({ ...payload, purchase_id: purchase.id });
-    if (payError) { setSaving(false); setErrorMsg(payError.message); return; }
-
-    const { data: allPayments } = await supabase.from("purchase_payments").select("*").eq("purchase_id", purchase.id).order("payment_date");
-    const totalPaid = (allPayments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const payment_status = totalPaid <= 0 ? "pendiente" : totalPaid >= Number(purchase.total) ? "pagada" : "parcial";
-    const { data: updated, error: updError } = await supabase.from("purchases").update({ amount_paid: totalPaid, payment_status }).eq("id", purchase.id).select().single();
+    const { data: updated, error: payError } = await supabase.rpc("register_purchase_payment", {
+      p_purchase_id: purchase.id,
+      p_amount: payload.amount,
+      p_method: payload.method,
+      p_payment_date: payload.payment_date,
+      p_notes: payload.notes,
+    });
     setSaving(false);
-    if (updError) { setErrorMsg(updError.message); return; }
-    setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    setPurchaseDetail((prev) => (prev ? { ...prev, purchase: updated, payments: allPayments || [] } : prev));
+    if (payError) { setErrorMsg(payError.message); return; }
+    const { data: allPayments } = await supabase.from("purchase_payments").select("*").eq("purchase_id", purchase.id).order("payment_date");
+    if (updated) setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setPurchaseDetail((prev) => (prev ? { ...prev, purchase: updated || prev.purchase, payments: allPayments || [] } : prev));
   };
 
   const deletePurchasePayment = async (payment, purchase) => {
     if (!window.confirm("¿Eliminar este pago registrado?")) return;
-    const { error: delError } = await supabase.from("purchase_payments").delete().eq("id", payment.id);
+    const { data: updated, error: delError } = await supabase.rpc("delete_purchase_payment", { p_payment_id: payment.id });
     if (delError) { setErrorMsg(delError.message); return; }
-
     const { data: allPayments } = await supabase.from("purchase_payments").select("*").eq("purchase_id", purchase.id).order("payment_date");
-    const totalPaid = (allPayments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const payment_status = totalPaid <= 0 ? "pendiente" : totalPaid >= Number(purchase.total) ? "pagada" : "parcial";
-    const { data: updated, error: updError } = await supabase.from("purchases").update({ amount_paid: totalPaid, payment_status }).eq("id", purchase.id).select().single();
-    if (updError) { setErrorMsg(updError.message); return; }
-    setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
-    setPurchaseDetail((prev) => (prev ? { ...prev, purchase: updated, payments: allPayments || [] } : prev));
+    if (updated) setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setPurchaseDetail((prev) => (prev ? { ...prev, purchase: updated || prev.purchase, payments: allPayments || [] } : prev));
   };
 
   // ---- Secuencias NCF ----
@@ -7616,7 +8388,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         setErrorMsg("No se pudieron borrar los puntos anteriores de este checklist (probablemente falta un permiso DELETE en checklist_template_items). No se guardaron los cambios para evitar duplicados.");
         return;
       }
-      const rows = itemTexts.map((it, i) => ({ template_id: editingChecklist.id, text: it.text, section: it.section || null, position: i }));
+      const rows = itemTexts.map((it, i) => ({ template_id: editingChecklist.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
       const { error: insError } = await supabase.from("checklist_template_items").insert(rows);
       if (insError) { setSaving(false); setErrorMsg(insError.message); return; }
       setSaving(false);
@@ -7625,7 +8397,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     } else {
       const { data: tpl, error: tplError } = await supabase.from("checklist_templates").insert({ ...payload, company_id: companyId }).select().single();
       if (tplError) { setSaving(false); setErrorMsg(tplError.message); return; }
-      const rows = itemTexts.map((it, i) => ({ template_id: tpl.id, text: it.text, section: it.section || null, position: i }));
+      const rows = itemTexts.map((it, i) => ({ template_id: tpl.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
       await supabase.from("checklist_template_items").insert(rows);
       setSaving(false);
       setShowAddChecklist(false);
@@ -7754,20 +8526,43 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // ---- Facturación ----
   const createInvoice = async (payload, items) => {
     setSaving(true);
-    const { data: freshSeq, error: seqError } = await supabase.from("ncf_sequences").select("*").eq("id", payload.ncf_sequence_id).single();
-    if (seqError || !freshSeq || freshSeq.next_number > freshSeq.range_end) {
+    // El NCF se asigna con una función de Postgres (allocate_ncf, ver SQL) que hace el
+    // "leer número + sumar 1" en un solo UPDATE atómico. Antes esto se hacía en dos pasos
+    // desde el cliente (leer next_number, y minutos después actualizarlo) — si dos facturas
+    // se creaban casi al mismo tiempo, las dos podían leer el mismo next_number y terminar
+    // con el mismo NCF duplicado, algo que la DGII no permite.
+    const { data: seqData, error: seqError } = await supabase.rpc("allocate_ncf", { p_sequence_id: payload.ncf_sequence_id });
+    const allocated = Array.isArray(seqData) ? seqData[0] : seqData;
+    if (seqError || !allocated) {
       setSaving(false);
       setErrorMsg("Esta secuencia NCF ya no tiene números disponibles.");
-      return;
+      return false;
     }
-    const ncf = `${freshSeq.prefix}${String(freshSeq.next_number).padStart(8, "0")}`;
+    const ncf = allocated.ncf;
     // Número de factura interno, propio de MantenPro — distinto del NCF (que es el
     // comprobante fiscal que exige la DGII). Sirve como referencia interna/para el
     // cliente sin depender del formato ni de la disponibilidad del NCF.
-    const invoice_number = `FAC-${String(invoices.length + 1).padStart(5, "0")}`;
+    // Se genera con next_document_number (contador atómico en base de datos) en vez de
+    // "invoices.length + 1" — ese conteo del cliente se podía duplicar con dos pestañas
+    // o dos usuarios facturando casi al mismo tiempo.
+    const { data: invNumData, error: invNumError } = await supabase.rpc("next_document_number", { p_doc_type: "invoice" });
+    if (invNumError) {
+      setSaving(false);
+      setErrorMsg(`No se pudo generar el número de factura interno: ${invNumError.message}. El NCF ${ncf} ya quedó reservado y no se reutilizará.`);
+      return false;
+    }
+    const invoice_number = `FAC-${String(invNumData).padStart(5, "0")}`;
 
     const { data: invoice, error: invError } = await supabase.from("invoices").insert({ ...payload, company_id: companyId, ncf, invoice_number, status: "emitida" }).select().single();
-    if (invError) { setSaving(false); setErrorMsg(invError.message); return; }
+    if (invError) {
+      setSaving(false);
+      // El número de NCF ya se consumió en la secuencia (no se puede "devolver" sin abrir
+      // otra condición de carrera) — si no vas a reintentar esta factura con los mismos
+      // datos, anúlalo manualmente desde Secuencias NCF para dejar constancia de por qué
+      // ese número no se usó.
+      setErrorMsg(`No se pudo crear la factura: ${invError.message}. El NCF ${ncf} ya quedó reservado en la secuencia y no se reutilizará.`);
+      return false;
+    }
 
     const itemRows = items.map((it) => ({
       invoice_id: invoice.id,
@@ -7780,9 +8575,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       chapter: it.chapter?.trim() || null,
     }));
     const { error: itemsError } = await supabase.from("invoice_items").insert(itemRows);
-    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
-
-    await supabase.from("ncf_sequences").update({ next_number: freshSeq.next_number + 1 }).eq("id", freshSeq.id);
+    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return false; }
 
     const assetRows = items.filter((it) => it.register_asset).map((it) => ({
       company_id: companyId,
@@ -7818,19 +8611,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         for (const part of parts) {
           const compProd = products.find((p) => p.id === part.component_product_id);
           if (!compProd) continue;
-          const newCompStock = Math.max(0, Number(compProd.stock_qty) - Number(part.quantity) * row.quantity);
-          await supabase.from("products").update({ stock_qty: newCompStock }).eq("id", compProd.id);
+          await supabase.rpc("adjust_product_stock", { p_product_id: compProd.id, p_delta: -Number(part.quantity) * row.quantity });
         }
         continue;
       }
-      const newStock = Math.max(0, Number(prod.stock_qty) - row.quantity);
-      await supabase.from("products").update({ stock_qty: newStock }).eq("id", prod.id);
+      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -row.quantity });
     }
 
     setSaving(false);
     setInvoicePrefill(null);
     setShowAddInvoice(false);
     loadAll();
+    return true;
   };
 
   // ---- Contratos recurrentes ----
@@ -7882,11 +8674,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       total: subtotal + itbis,
     };
     const items = [{ product_id: null, description: contract.description || contract.title, quantity: 1, unit_price: subtotal, is_taxable: contract.is_taxable, chapter: null }];
-    await createInvoice(payload, items);
-    const nextDate = new Date(`${todayStr}T00:00:00`);
-    nextDate.setDate(nextDate.getDate() + Number(contract.frequency_days));
-    const { data: updated, error: updError } = await supabase.from("recurring_contracts").update({ next_invoice_date: nextDate.toISOString().slice(0, 10) }).eq("id", contract.id).select().single();
-    if (!updError && updated) setRecurringContracts((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+
+    // Reclama este ciclo de facturación de forma atómica ANTES de crear la factura: si dos
+    // pestañas/usuarios disparan "Generar todas las vencidas" casi al mismo tiempo para el
+    // mismo contrato, solo uno gana la reclamación (avanza next_invoice_date en la base de
+    // datos con una condición que ya no se cumple para el segundo) y el otro no llega a
+    // facturar. Antes next_invoice_date se avanzaba DESPUÉS de facturar, así que ambas
+    // llamadas alcanzaban a crear su propia factura antes de que ninguna avanzara la fecha.
+    const oldNextDate = contract.next_invoice_date;
+    const { data: claimData, error: claimError } = await supabase.rpc("claim_contract_invoice_run", { p_contract_id: contract.id });
+    const claimed = Array.isArray(claimData) ? claimData[0] : claimData;
+    if (claimError || !claimed) {
+      setErrorMsg(`El contrato "${contract.title}" ya no está pendiente de facturar (probablemente otra sesión ya lo generó).`);
+      return false;
+    }
+    setRecurringContracts((prev) => prev.map((c) => (c.id === claimed.id ? claimed : c)));
+
+    const ok = await createInvoice(payload, items);
+    if (!ok) {
+      // No se pudo facturar — revierte la reclamación para no dejar el contrato "saltado"
+      // sin haber generado ninguna factura.
+      const { data: reverted } = await supabase.from("recurring_contracts").update({ next_invoice_date: oldNextDate }).eq("id", contract.id).select().single();
+      if (reverted) setRecurringContracts((prev) => prev.map((c) => (c.id === reverted.id ? reverted : c)));
+      setErrorMsg(`No se pudo generar la factura del contrato "${contract.title}"; se revirtió la fecha de próxima facturación para poder reintentar.`);
+      return false;
+    }
     return true;
   };
   const generateOneContractInvoice = async (contract) => {
@@ -7904,6 +8716,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const importBankStatement = async (file) => {
     setImportingBankStatement(true);
     setErrorMsg("");
+    setBankImportMsg("");
     try {
       const buffer = await file.arrayBuffer();
       const wb = XLSX.read(buffer, { type: "array" });
@@ -7927,16 +8740,40 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           const debit = Number(pick(row, ["Débito", "Debito", "Debit", "Retiro"])) || 0;
           amount = credit - debit;
         }
-        return { transaction_date: parseDate(dateVal), description: String(desc || "").trim() || null, amount: Number(amount) || 0 };
+        return { transaction_date: parseDate(dateVal), description: String(desc || "").trim(), amount: Number(amount) || 0 };
       }).filter((r) => r.transaction_date && r.amount !== 0);
 
       if (parsedRows.length === 0) {
         setErrorMsg("No se encontraron filas válidas. El archivo debe tener columnas de Fecha, Descripción y Monto (o Crédito/Débito por separado).");
         return;
       }
-      const { data, error } = await supabase.from("bank_transactions").insert(parsedRows.map((r) => ({ ...r, company_id: companyId }))).select();
+      // Deduplicar también dentro del propio archivo (mismo movimiento repetido dos veces
+      // en la misma hoja), además de contra lo que ya está en la base de datos (vía el
+      // índice único company_id+transaction_date+description+amount y el upsert de abajo).
+      const seen = new Set();
+      const uniqueRows = [];
+      for (const r of parsedRows) {
+        const key = `${r.transaction_date}|${r.description}|${r.amount}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uniqueRows.push(r);
+      }
+      const { data, error } = await supabase
+        .from("bank_transactions")
+        .upsert(uniqueRows.map((r) => ({ ...r, company_id: companyId })), {
+          onConflict: "company_id,transaction_date,description,amount",
+          ignoreDuplicates: true,
+        })
+        .select();
       if (error) { setErrorMsg(error.message); return; }
       setBankTransactions((prev) => [...(data || []), ...prev]);
+      const importedCount = data?.length || 0;
+      const skipped = parsedRows.length - importedCount;
+      if (skipped > 0) {
+        setBankImportMsg(`Se importaron ${importedCount} movimiento(s). Se omitieron ${skipped} por estar duplicados (misma fecha, descripción y monto que un movimiento ya importado).`);
+      } else {
+        setBankImportMsg(`Se importaron ${importedCount} movimiento(s).`);
+      }
     } catch (err) {
       setErrorMsg("No se pudo leer el archivo: " + err.message);
     } finally {
@@ -8000,13 +8837,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         for (const part of parts) {
           const compProd = products.find((p) => p.id === part.component_product_id);
           if (!compProd) continue;
-          await supabase.from("products").update({ stock_qty: Number(compProd.stock_qty) + Number(part.quantity) * Number(it.quantity) }).eq("id", compProd.id);
+          await supabase.rpc("adjust_product_stock", { p_product_id: compProd.id, p_delta: Number(part.quantity) * Number(it.quantity) });
         }
         continue;
       }
-      await supabase.from("products").update({ stock_qty: Number(prod.stock_qty) + Number(it.quantity) }).eq("id", prod.id);
+      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: Number(it.quantity) });
     }
-    const { error } = await supabase.from("invoices").update({ status: "anulada" }).eq("id", invoice.id);
+    // Respaldo del lado del servidor: void_invoice verifica que quien llama sea admin
+    // de la empresa dueña de la factura, en vez de confiar solo en el botón oculto en la UI.
+    const { error } = await supabase.rpc("void_invoice", { p_invoice_id: invoice.id });
     if (error) { setErrorMsg(error.message); return; }
     setInvoiceDetail(null);
     loadAll();
@@ -8015,8 +8854,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // Junta los comprobantes (invoice_payment_attachments) a cada pago, agrupados por payment_id
   const attachPaymentAttachments = async (paymentsList) => {
     if (!paymentsList || paymentsList.length === 0) return paymentsList || [];
-    const { data: atts, error } = await supabase.from("invoice_payment_attachments").select("*").in("payment_id", paymentsList.map((p) => p.id)).order("uploaded_at");
+    const { data: attsRaw, error } = await supabase.from("invoice_payment_attachments").select("*").in("payment_id", paymentsList.map((p) => p.id)).order("uploaded_at");
     if (error) { setErrorMsg(error.message); return paymentsList; }
+    const atts = await refreshSignedUrls(attsRaw || [], "file_path", "file_url");
     const byPayment = new Map();
     (atts || []).forEach((a) => {
       if (!byPayment.has(a.payment_id)) byPayment.set(a.payment_id, []);
@@ -8035,16 +8875,22 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // ---- Notas de crédito ----
   const createCreditNote = async (payload, items) => {
     setSaving(true);
-    const { data: freshSeq, error: seqError } = await supabase.from("ncf_sequences").select("*").eq("id", payload.ncf_sequence_id).single();
-    if (seqError || !freshSeq || freshSeq.next_number > freshSeq.range_end) {
+    // Mismo mecanismo atómico que en createInvoice — ver ese comentario.
+    const { data: seqData, error: seqError } = await supabase.rpc("allocate_ncf", { p_sequence_id: payload.ncf_sequence_id });
+    const allocated = Array.isArray(seqData) ? seqData[0] : seqData;
+    if (seqError || !allocated) {
       setSaving(false);
       setErrorMsg("Esta secuencia NCF ya no tiene números disponibles.");
       return;
     }
-    const ncf = `${freshSeq.prefix}${String(freshSeq.next_number).padStart(8, "0")}`;
+    const ncf = allocated.ncf;
 
     const { data: note, error: noteError } = await supabase.from("credit_notes").insert({ ...payload, company_id: companyId, ncf, status: "emitida" }).select().single();
-    if (noteError) { setSaving(false); setErrorMsg(noteError.message); return; }
+    if (noteError) {
+      setSaving(false);
+      setErrorMsg(`No se pudo crear la nota de crédito: ${noteError.message}. El NCF ${ncf} ya quedó reservado en la secuencia y no se reutilizará.`);
+      return;
+    }
 
     const itemRows = items.map((it) => ({
       credit_note_id: note.id,
@@ -8058,14 +8904,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const { error: itemsError } = await supabase.from("credit_note_items").insert(itemRows);
     if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
 
-    await supabase.from("ncf_sequences").update({ next_number: freshSeq.next_number + 1 }).eq("id", freshSeq.id);
-
+    // apply_credit_to_invoice bloquea la fila de la factura (evitando que dos notas de
+    // crédito simultáneas se pisen entre sí, igual que pasaba antes con el stock/NCF) y
+    // rechaza la operación si el crédito aplicado dejaría el saldo de la factura en negativo
+    // — antes esto se calculaba en el cliente sin ningún límite.
     const targetInvoice = invoices.find((i) => i.id === payload.invoice_id);
     if (targetInvoice) {
-      const newCreditApplied = Number(targetInvoice.credit_applied || 0) + payload.total;
-      const settled = Number(targetInvoice.amount_paid || 0) + newCreditApplied;
-      const payment_status = settled <= 0 ? "pendiente" : settled >= Number(targetInvoice.total) ? "cobrada" : "parcial";
-      const { data: updatedInvoice } = await supabase.from("invoices").update({ credit_applied: newCreditApplied, payment_status }).eq("id", targetInvoice.id).select().single();
+      const { data: updatedInvoice, error: creditError } = await supabase.rpc("apply_credit_to_invoice", { p_invoice_id: targetInvoice.id, p_amount: payload.total });
+      if (creditError) {
+        setSaving(false);
+        setErrorMsg(`La nota de crédito ${ncf} se creó, pero no se pudo aplicar a la factura: ${creditError.message}. Revísalo manualmente.`);
+        return;
+      }
       if (updatedInvoice) setInvoices((prev) => prev.map((i) => (i.id === updatedInvoice.id ? updatedInvoice : i)));
     }
 
@@ -8081,50 +8931,54 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const registerPayment = async (invoice, payload, files) => {
     setSaving(true);
-    let cashSessionId = null;
-    if (invoice.branch_id) {
-      const { data: openSession } = await supabase.from("cash_sessions").select("id").eq("branch_id", invoice.branch_id).eq("status", "abierta").maybeSingle();
-      cashSessionId = openSession?.id || null;
-    }
-    const { data: newPayment, error: payError } = await supabase.from("invoice_payments").insert({ ...payload, invoice_id: invoice.id, cash_session_id: cashSessionId }).select().single();
-    if (payError) { setSaving(false); setErrorMsg(payError.message); return; }
+    // register_invoice_payment hace, de forma atómica y verificando permiso del lado del servidor
+    // (en vez de confiar solo en el botón "Registrar pago" oculto por canEdit en la UI):
+    // 1) confirma que quien llama tiene permiso de "invoices", 2) inserta el pago,
+    // 3) recalcula amount_paid/payment_status de la factura. Esto también elimina la
+    // condición de carrera que había al leer-y-recalcular el total pagado desde el cliente.
+    const { data: result, error: payError } = await supabase.rpc("register_invoice_payment", {
+      p_invoice_id: invoice.id,
+      p_amount: payload.amount,
+      p_method: payload.method,
+      p_payment_date: payload.payment_date,
+      p_notes: payload.notes,
+    });
+    const resultRow = Array.isArray(result) ? result[0] : result;
+    if (payError || !resultRow) { setSaving(false); setErrorMsg(payError?.message || "No se pudo registrar el pago."); return; }
 
     if (files && files.length > 0) {
       for (const file of files) {
         const ext = file.name.split(".").pop();
-        const path = `payments/${companyId}/${newPayment.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+        const path = `payments/${companyId}/${resultRow.payment_id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
         const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
-        const { data: pub } = supabase.storage.from("evidence").getPublicUrl(path);
-        const { error: attError } = await supabase.from("invoice_payment_attachments").insert({ payment_id: newPayment.id, file_url: pub.publicUrl, file_name: file.name });
+        const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
+        if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
+        const { error: attError } = await supabase.from("invoice_payment_attachments").insert({ payment_id: resultRow.payment_id, file_url: signed.signedUrl, file_path: path, file_name: file.name });
         if (attError) setErrorMsg(`Se subió ${file.name} pero no se pudo vincular al pago: ${attError.message}`);
       }
     }
 
     const { data: allPayments } = await supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id).order("payment_date");
     const paymentsWithAttachments = await attachPaymentAttachments(allPayments || []);
-    const totalPaid = (allPayments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const payment_status = totalPaid <= 0 ? "pendiente" : totalPaid >= Number(invoice.total) ? "cobrada" : "parcial";
-    const { data: updated, error: updError } = await supabase.from("invoices").update({ amount_paid: totalPaid, payment_status }).eq("id", invoice.id).select().single();
+    const { data: updated, error: updError } = await supabase.from("invoices").select("*").eq("id", invoice.id).single();
     setSaving(false);
     if (updError) { setErrorMsg(updError.message); return; }
-    setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-    setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated, payments: paymentsWithAttachments } : prev));
+    if (updated) setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated || prev.invoice, payments: paymentsWithAttachments } : prev));
   };
 
   const deletePayment = async (payment, invoice) => {
     if (!window.confirm("¿Eliminar este pago registrado? También se quitarán sus comprobantes.")) return;
-    const { error: delError } = await supabase.from("invoice_payments").delete().eq("id", payment.id);
+    // Mismo respaldo del lado del servidor que register_invoice_payment — verifica permiso
+    // "invoices" y recalcula el saldo de la factura de forma atómica.
+    const { data: updated, error: delError } = await supabase.rpc("delete_invoice_payment", { p_payment_id: payment.id });
     if (delError) { setErrorMsg(delError.message); return; }
 
     const { data: allPayments } = await supabase.from("invoice_payments").select("*").eq("invoice_id", invoice.id).order("payment_date");
     const paymentsWithAttachments = await attachPaymentAttachments(allPayments || []);
-    const totalPaid = (allPayments || []).reduce((s, p) => s + Number(p.amount), 0);
-    const payment_status = totalPaid <= 0 ? "pendiente" : totalPaid >= Number(invoice.total) ? "cobrada" : "parcial";
-    const { data: updated, error: updError } = await supabase.from("invoices").update({ amount_paid: totalPaid, payment_status }).eq("id", invoice.id).select().single();
-    if (updError) { setErrorMsg(updError.message); return; }
-    setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-    setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated, payments: paymentsWithAttachments } : prev));
+    if (updated) setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated || prev.invoice, payments: paymentsWithAttachments } : prev));
   };
 
   const deletePaymentAttachment = async (attachment, payment) => {
@@ -8147,7 +9001,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // ---- Caja (apertura/cierre y cuadre por sucursal) ----
   const openCashSession = async (branchId, openingAmount) => {
     setSaving(true);
-    const { data, error } = await supabase.from("cash_sessions").insert({ company_id: companyId, branch_id: branchId, opened_by: profile.id, opening_amount: openingAmount, status: "abierta" }).select().single();
+    // open_cash_session verifica del lado del servidor que quien llama tenga permiso de "caja"
+    // y que no haya ya una caja abierta en esa sucursal, en vez de confiar solo en el botón
+    // deshabilitado (disabled={!canEdit("caja")}) de la interfaz.
+    const { data, error } = await supabase.rpc("open_cash_session", { p_branch_id: branchId, p_opening_amount: openingAmount });
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
     setCashSessions((prev) => [data, ...prev]);
@@ -8156,19 +9013,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const closeCashSession = async (session, declared) => {
     setSaving(true);
-    const { data: pays } = await supabase.from("invoice_payments").select("amount, method").eq("cash_session_id", session.id);
-    const sums = {};
-    (pays || []).forEach((p) => { sums[p.method] = (sums[p.method] || 0) + Number(p.amount); });
-    const expected_cash = Number(session.opening_amount) + (sums["Efectivo"] || 0);
-    const expected_card = sums["Tarjeta"] || 0;
-    const expected_transfer = (sums["Transferencia"] || 0) + (sums["Otro"] || 0);
-    const payload = {
-      status: "cerrada", closed_by: profile.id, closed_at: new Date().toISOString(),
-      expected_cash, expected_card, expected_transfer,
-      declared_cash: declared.cash, declared_card: declared.card, declared_transfer: declared.transfer,
-      notes: declared.notes || null,
-    };
-    const { data, error } = await supabase.from("cash_sessions").update(payload).eq("id", session.id).select().single();
+    // close_cash_session recalcula los montos esperados y verifica permiso de "caja" del lado
+    // del servidor (mismo respaldo que open_cash_session).
+    const { data, error } = await supabase.rpc("close_cash_session", {
+      p_session_id: session.id,
+      p_declared_cash: declared.cash,
+      p_declared_card: declared.card,
+      p_declared_transfer: declared.transfer,
+      p_notes: declared.notes || null,
+    });
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
     setCashSessions((prev) => prev.map((s) => (s.id === data.id ? data : s)));
@@ -8189,7 +9042,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // ---- Cotizaciones ----
   const createQuote = async (payload, items, linkedIncidentId) => {
     setSaving(true);
-    const quote_number = `COT-${String(quotes.length + 1).padStart(4, "0")}`;
+    // Contador atómico en base de datos — igual que en createInvoice — en vez de
+    // "quotes.length + 1", que se podía duplicar con dos pestañas/usuarios simultáneos.
+    const { data: quoteNumData, error: quoteNumError } = await supabase.rpc("next_document_number", { p_doc_type: "quote" });
+    if (quoteNumError) { setSaving(false); setErrorMsg(`No se pudo generar el número de cotización: ${quoteNumError.message}`); return; }
+    const quote_number = `COT-${String(quoteNumData).padStart(4, "0")}`;
     const { data: quote, error: quoteError } = await supabase.from("quotes").insert({ ...payload, company_id: companyId, quote_number, status: "pendiente" }).select().single();
     if (quoteError) { setSaving(false); setErrorMsg(quoteError.message); return; }
 
@@ -8240,9 +9097,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       loadAll();
       return;
     }
-    const order_number = `ORD-${String(salesOrders.length + 1).padStart(4, "0")}`;
+    // Mismo contador atómico que factura/cotización, en vez de "salesOrders.length + 1".
+    const { data: orderNumData, error: orderNumError } = await supabase.rpc("next_document_number", { p_doc_type: "sales_order" });
+    if (orderNumError) { setSaving(false); setErrorMsg(`No se pudo generar el número de orden de venta: ${orderNumError.message}`); return; }
+    const order_number = `ORD-${String(orderNumData).padStart(4, "0")}`;
     const { data: order, error: orderError } = await supabase.from("sales_orders").insert({
-      company_id: companyId, client_id: quote.client_id, quote_id: quote.id, order_number,
+      company_id: companyId, client_id: quote.client_id, quote_id: quote.id, order_number, branch_id: quote.branch_id || null,
       title: quote.title, subtotal: quote.subtotal, itbis: quote.itbis, total: quote.total, status: "en_proceso", notes: quote.notes || null,
     }).select().single();
     if (orderError) { setSaving(false); setErrorMsg(orderError.message); return; }
@@ -8279,6 +9139,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const generateInvoiceFromOrder = (order, items) => {
     setInvoicePrefill({
       client_id: order.client_id,
+      branch_id: order.branch_id || "",
       sourceOrderId: order.id,
       title: order.title,
       notes: order.notes || "",
@@ -8378,6 +9239,26 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       setIncidents((prev) => [data, ...prev]);
       setShowAddIncident(false);
     }
+  };
+
+  // Se crea desde un punto de checklist "No OK" o con una lectura numérica fuera del rango
+  // esperado, para que quede reportado sin que el técnico tenga que salir de la orden.
+  const createIncidentFromChecklist = async (order, item, valueText) => {
+    const rangeNote = (item.range_min != null || item.range_max != null)
+      ? ` (rango esperado ${item.range_min ?? "—"} a ${item.range_max ?? "—"})`
+      : "";
+    const payload = {
+      title: `Checklist — ${item.text}`.slice(0, 200),
+      description: `Orden ${order.code}: el punto "${item.text}" del checklist se registró como "${valueText}"${rangeNote}.`,
+      branch_id: order.branch_id || null,
+      equipment_id: order.equipment_id || null,
+      client_id: order.client_id || null,
+      technician_id: order.technician_id || null,
+      priority: "media",
+    };
+    const { data, error } = await supabase.from("incidents").insert({ ...payload, company_id: companyId, status: "abierto" }).select().single();
+    if (error) { setErrorMsg(error.message); return; }
+    setIncidents((prev) => [data, ...prev]);
   };
 
   const deleteIncident = async (id) => {
@@ -8508,6 +9389,33 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       const { data, error } = await supabase.from("technicians").update({ is_active: false }).eq("id", id).select().single();
       if (error) { setErrorMsg(error.message); return; }
       setTechnicians((prev) => prev.map((t) => (t.id === id ? data : t)));
+      // Las herramientas que tenía asignadas se liberan para que otro técnico las pueda tomar;
+      // no se tocan sus órdenes, incidentes ni el resto del historial.
+      const assignedTools = tools.filter((t) => t.technician_id === id);
+      if (assignedTools.length > 0) {
+        const { data: releasedTools, error: toolsError } = await supabase.from("tools")
+          .update({ technician_id: null, status: "disponible" })
+          .eq("technician_id", id)
+          .select();
+        if (toolsError) {
+          setErrorMsg(`El técnico se dio de baja, pero no se pudieron liberar sus herramientas: ${toolsError.message}`);
+        } else {
+          setTools((prev) => prev.map((t) => releasedTools.find((u) => u.id === t.id) || t));
+        }
+      }
+      // Si alguna de esas herramientas llegó por un préstamo aún no devuelto, se cierra ese
+      // préstamo también — si no, quedaría "abierto" para siempre en el historial aunque la
+      // herramienta ya se liberó arriba.
+      const openLoanIds = toolLoans.filter((l) => l.to_technician_id === id && !l.returned_at).map((l) => l.id);
+      if (openLoanIds.length > 0) {
+        const { data: closedLoans, error: loanError } = await supabase.from("tool_loans")
+          .update({ returned_at: new Date().toISOString() })
+          .in("id", openLoanIds)
+          .select();
+        if (!loanError && closedLoans) {
+          setToolLoans((prev) => prev.map((l) => closedLoans.find((u) => u.id === l.id) || l));
+        }
+      }
       return;
     }
 
@@ -8562,24 +9470,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   // ---- Usuarios / invitaciones ----
+  // Las 5 funciones de abajo ahora pasan por RPCs "admin_*" que verifican, del lado del
+  // servidor, que quien llama sea admin de la misma empresa del usuario objetivo — antes
+  // solo dependían del botón oculto en la UI (canManage) y de lo que permitiera la RLS de
+  // "profiles". Sin este respaldo, un usuario no-admin podía en teoría llamar
+  // supabase.from("profiles").update({ role: "admin" }) directo desde la consola del
+  // navegador y auto-asignarse privilegios (si la RLS le permite editar su propia fila,
+  // algo común para que cada quien edite su nombre/foto).
   const updateMaxDiscount = async (userId, value) => {
     const n = Math.max(0, Math.min(100, Number(value) || 0));
-    const { data, error } = await supabase.from("profiles").update({ max_discount_pct: n }).eq("id", userId).select().single();
+    const { data, error } = await supabase.rpc("admin_update_user_max_discount", { p_user_id: userId, p_value: n });
     if (error) { setErrorMsg(error.message); return; }
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
   };
 
   const updateUserBranch = async (userId, branchId, extraBranchIds) => {
-    const { data, error } = await supabase.from("profiles").update({ branch_id: branchId || null, extra_branch_ids: extraBranchIds || [] }).eq("id", userId).select().single();
+    const { data, error } = await supabase.rpc("admin_update_user_branch", { p_user_id: userId, p_branch_id: branchId || null, p_extra_branch_ids: extraBranchIds || [] });
     if (error) { setErrorMsg(error.message); return false; }
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
     return true;
   };
 
   const updateUserRole = async (userId, role) => {
-    const { data, error } = await supabase.from("profiles").update({ role }).eq("id", userId).select().single();
+    const { data, error } = await supabase.rpc("admin_update_user_role", { p_user_id: userId, p_role: role });
     if (error) return `${error.message}${error.code ? ` (código ${error.code})` : ""}`;
-    if (!data) return "la actualización no devolvió ninguna fila (probablemente RLS bloqueó el UPDATE en silencio).";
+    if (!data) return "la actualización no devolvió ninguna fila.";
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
     return true;
   };
@@ -8587,24 +9502,30 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const toggleUserActive = async (user) => {
     const nextActive = !(user.is_active ?? true);
     if (!window.confirm(nextActive ? `¿Reactivar a ${user.full_name || user.email}?` : `¿Desactivar a ${user.full_name || user.email}? No podrá volver a entrar hasta que lo reactives.`)) return;
-    const { data, error } = await supabase.from("profiles").update({ is_active: nextActive }).eq("id", user.id).select().single();
+    const { data, error } = await supabase.rpc("admin_toggle_user_active", { p_user_id: user.id, p_is_active: nextActive });
     if (error) { setErrorMsg(error.message); return; }
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
   };
 
   const updateUserPermissions = async (userId, permissions) => {
     setSaving(true);
-    const { data, error } = await supabase.from("profiles").update({ permissions }).eq("id", userId).select().single();
+    const { data, error } = await supabase.rpc("admin_update_user_permissions", { p_user_id: userId, p_permissions: permissions });
     setSaving(false);
     if (error) { setErrorMsg(error.message); return `${error.message}${error.code ? ` (código ${error.code})` : ""}`; }
-    if (!data) return "la actualización no devolvió ninguna fila (probablemente RLS bloqueó el UPDATE en silencio).";
+    if (!data) return "la actualización no devolvió ninguna fila.";
     setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
     return true;
   };
 
   const createInvite = async (email, role, technicianId, branchId, permissions) => {
     setSaving(true);
-    const { data, error } = await supabase.from("invites").insert({ company_id: companyId, email, role, technician_id: technicianId, branch_id: branchId, permissions }).select().single();
+    // admin_create_invite verifica en el servidor que quien llama sea admin, y toma el
+    // company_id de la empresa de quien llama (no del cliente) — antes esto era un insert
+    // directo que dependía enteramente de la política RLS de "invites" para impedir que
+    // alguien creara una invitación (incluso de admin) para otra empresa.
+    const { data, error } = await supabase.rpc("admin_create_invite", {
+      p_email: email, p_role: role, p_technician_id: technicianId || null, p_branch_id: branchId || null, p_permissions: permissions || null,
+    });
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
     setInvites((prev) => [...prev, data]);
@@ -9062,14 +9983,37 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   Tienes {overdueOrders.length} orden{overdueOrders.length !== 1 ? "es" : ""} vencida{overdueOrders.length !== 1 ? "s" : ""} — la fecha programada ya pasó y siguen sin completarse.
                 </div>
               )}
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setCalendarMonth((m) => { const d = new Date(m.year, m.month - 1, 1); return { year: d.getFullYear(), month: d.getMonth() }; })} className="p-2" style={{ border: `1px solid ${C.border}`, color: C.muted }}><ChevronLeft size={16} /></button>
-                  <div className="text-sm font-semibold" style={{ color: C.text, minWidth: 160, textAlign: "center" }}>
-                    {new Date(calendarMonth.year, calendarMonth.month, 1).toLocaleDateString("es-DO", { month: "long", year: "numeric" })}
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center" style={{ border: `1px solid ${C.border}` }}>
+                    <button onClick={() => setAgendaViewMode("month")} className="text-xs px-3 py-2 font-semibold" style={{ background: agendaViewMode === "month" ? C.amber : "transparent", color: agendaViewMode === "month" ? "#1A1500" : C.muted }}>Mes</button>
+                    <button onClick={() => setAgendaViewMode("week")} className="text-xs px-3 py-2 font-semibold" style={{ background: agendaViewMode === "week" ? C.amber : "transparent", color: agendaViewMode === "week" ? "#1A1500" : C.muted }}>Semana</button>
                   </div>
-                  <button onClick={() => setCalendarMonth((m) => { const d = new Date(m.year, m.month + 1, 1); return { year: d.getFullYear(), month: d.getMonth() }; })} className="p-2" style={{ border: `1px solid ${C.border}`, color: C.muted }}><ChevronRight size={16} /></button>
-                  <button onClick={() => { const d = new Date(); setCalendarMonth({ year: d.getFullYear(), month: d.getMonth() }); setSearchedDate(""); }} className="text-xs px-3 py-2" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Hoy</button>
+                  <button
+                    onClick={() => {
+                      if (agendaViewMode === "month") setCalendarMonth((m) => { const d = new Date(m.year, m.month - 1, 1); return { year: d.getFullYear(), month: d.getMonth() }; });
+                      else setAgendaWeekAnchor((a) => addDaysToDateStr(a, -7));
+                    }}
+                    className="p-2" style={{ border: `1px solid ${C.border}`, color: C.muted }}
+                  ><ChevronLeft size={16} /></button>
+                  <div className="text-sm font-semibold" style={{ color: C.text, minWidth: 160, textAlign: "center" }}>
+                    {agendaViewMode === "month"
+                      ? new Date(calendarMonth.year, calendarMonth.month, 1).toLocaleDateString("es-DO", { month: "long", year: "numeric" })
+                      : (() => {
+                          const base = new Date(agendaWeekAnchor + "T00:00:00");
+                          const monday = new Date(base); monday.setDate(base.getDate() - (base.getDay() === 0 ? 6 : base.getDay() - 1));
+                          const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+                          return `${monday.toLocaleDateString("es-DO", { day: "numeric", month: "short" })} – ${sunday.toLocaleDateString("es-DO", { day: "numeric", month: "short", year: "numeric" })}`;
+                        })()}
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (agendaViewMode === "month") setCalendarMonth((m) => { const d = new Date(m.year, m.month + 1, 1); return { year: d.getFullYear(), month: d.getMonth() }; });
+                      else setAgendaWeekAnchor((a) => addDaysToDateStr(a, 7));
+                    }}
+                    className="p-2" style={{ border: `1px solid ${C.border}`, color: C.muted }}
+                  ><ChevronRight size={16} /></button>
+                  <button onClick={() => { const t = todayStrRD(); const d = new Date(); setCalendarMonth({ year: d.getFullYear(), month: d.getMonth() }); setAgendaWeekAnchor(t); setSearchedDate(""); }} className="text-xs px-3 py-2" style={{ border: `1px solid ${C.border}`, color: C.amber }}>Hoy</button>
                   <div className="flex items-center gap-2 px-3 py-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                     <Search size={14} color={C.muted} />
                     <input
@@ -9081,6 +10025,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         if (val) {
                           const d = new Date(val + "T00:00:00");
                           setCalendarMonth({ year: d.getFullYear(), month: d.getMonth() });
+                          setAgendaWeekAnchor(val);
                         }
                       }}
                       className="bg-transparent outline-none text-sm"
@@ -9088,6 +10033,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     />
                     {searchedDate && <button onClick={() => setSearchedDate("")} style={iconBtnStyle}><X size={14} /></button>}
                   </div>
+                  {!isTecnico && (
+                    <select value={agendaTechFilter} onChange={(e) => setAgendaTechFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                      <option value="all">Todos los técnicos</option>
+                      {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  )}
                 </div>
                 <div className="flex items-center gap-3 text-xs" style={{ color: C.muted }}>
                   <span className="flex items-center gap-1"><Dot color={C.blue} /> Próxima</span>
@@ -9096,43 +10047,81 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   <span className="flex items-center gap-1"><Dot color={C.green} /> Completada</span>
                 </div>
               </div>
-              <div className="grid grid-cols-7 gap-1 mb-1 text-xs uppercase tracking-wide text-center" style={{ color: C.muted }}>
-                {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map((d) => <div key={d}>{d}</div>)}
-              </div>
-              <div className="grid grid-cols-7 gap-1">
-                {(() => {
-                  const { year, month } = calendarMonth;
-                  const firstWeekday = new Date(year, month, 1).getDay();
-                  const daysInMonth = new Date(year, month + 1, 0).getDate();
-                  const todayStr = new Date().toISOString().slice(0, 10);
-                  const cells = [];
-                  for (let i = 0; i < firstWeekday; i++) cells.push(null);
-                  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-                  return cells.map((d, i) => {
-                    if (!d) return <div key={i} style={{ minHeight: 96 }} />;
-                    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-                    const dayOrders = ordersByDate[dateStr] || [];
-                    const isToday = dateStr === todayStr;
-                    const isSearched = !!searchedDate && dateStr === searchedDate;
-                    return (
-                      <div key={i} className="p-1.5" style={{ minHeight: 96, background: isToday ? C.panelAlt : C.panel, border: `${isSearched ? "2px" : "1px"} solid ${isSearched ? C.blue : (isToday ? C.amber + "60" : C.border)}` }}>
-                        <div className="text-xs mb-1" style={{ color: isSearched ? C.blue : (isToday ? C.amber : C.muted) }}>{d}</div>
-                        <div className="space-y-1">
-                          {dayOrders.slice(0, 3).map((o) => {
-                            const clr = orderDayColor(o);
-                            return (
-                              <button key={o.id} onClick={() => openOrderDetail(o)} className="w-full text-left text-[10px] px-1.5 py-1 truncate" style={{ background: clr + "1A", borderLeft: `2px solid ${clr}`, color: C.text }} title={o.title}>
-                                {o.code} · {o.title}
-                              </button>
-                            );
-                          })}
-                          {dayOrders.length > 3 && <div className="text-[10px]" style={{ color: C.muted }}>+{dayOrders.length - 3} más</div>}
+              {agendaViewMode === "month" ? (
+                <>
+                  <div className="grid grid-cols-7 gap-1 mb-1 text-xs uppercase tracking-wide text-center" style={{ color: C.muted }}>
+                    {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map((d) => <div key={d}>{d}</div>)}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {(() => {
+                      const { year, month } = calendarMonth;
+                      const firstWeekday = new Date(year, month, 1).getDay();
+                      const daysInMonth = new Date(year, month + 1, 0).getDate();
+                      const todayStr = todayStrRD();
+                      const cells = [];
+                      for (let i = 0; i < firstWeekday; i++) cells.push(null);
+                      for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+                      return cells.map((d, i) => {
+                        if (!d) return <div key={i} style={{ minHeight: 96 }} />;
+                        const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+                        const dayOrders = ordersByDate[dateStr] || [];
+                        const isToday = dateStr === todayStr;
+                        const isSearched = !!searchedDate && dateStr === searchedDate;
+                        return (
+                          <div key={i} className="p-1.5" style={{ minHeight: 96, background: isToday ? C.panelAlt : C.panel, border: `${isSearched ? "2px" : "1px"} solid ${isSearched ? C.blue : (isToday ? C.amber + "60" : C.border)}` }}>
+                            <div className="text-xs mb-1" style={{ color: isSearched ? C.blue : (isToday ? C.amber : C.muted) }}>{d}</div>
+                            <div className="space-y-1">
+                              {dayOrders.slice(0, 3).map((o) => {
+                                const clr = orderDayColor(o);
+                                return (
+                                  <button key={o.id} onClick={() => openOrderDetail(o)} className="w-full text-left text-[10px] px-1.5 py-1 truncate" style={{ background: clr + "1A", borderLeft: `2px solid ${clr}`, color: C.text }} title={o.title}>
+                                    {o.code} · {o.title}
+                                  </button>
+                                );
+                              })}
+                              {dayOrders.length > 3 && <div className="text-[10px]" style={{ color: C.muted }}>+{dayOrders.length - 3} más</div>}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-7 gap-1">
+                  {(() => {
+                    const todayStr = todayStrRD();
+                    const base = new Date(agendaWeekAnchor + "T00:00:00");
+                    const monday = new Date(base); monday.setDate(base.getDate() - (base.getDay() === 0 ? 6 : base.getDay() - 1));
+                    const weekDayLabels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+                    return Array.from({ length: 7 }, (_, i) => {
+                      const d = new Date(monday); d.setDate(monday.getDate() + i);
+                      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                      const dayOrders = (ordersByDate[dateStr] || []).slice().sort((a, b) => (a.title || "").localeCompare(b.title || ""));
+                      const isToday = dateStr === todayStr;
+                      const isSearched = !!searchedDate && dateStr === searchedDate;
+                      return (
+                        <div key={dateStr} className="p-1.5" style={{ minHeight: 320, background: isToday ? C.panelAlt : C.panel, border: `${isSearched ? "2px" : "1px"} solid ${isSearched ? C.blue : (isToday ? C.amber + "60" : C.border)}` }}>
+                          <div className="text-xs mb-1 font-semibold" style={{ color: isSearched ? C.blue : (isToday ? C.amber : C.muted) }}>{weekDayLabels[i]} {d.getDate()}</div>
+                          <div className="space-y-1 overflow-y-auto" style={{ maxHeight: 280 }}>
+                            {dayOrders.map((o) => {
+                              const clr = orderDayColor(o);
+                              return (
+                                <button key={o.id} onClick={() => openOrderDetail(o)} className="w-full text-left text-[10px] px-1.5 py-1" style={{ background: clr + "1A", borderLeft: `2px solid ${clr}`, color: C.text }} title={o.title}>
+                                  <div className="truncate font-mono" style={{ color: C.muted }}>{o.code}</div>
+                                  <div className="truncate">{o.title}</div>
+                                  {!isTecnico && <div className="truncate" style={{ color: C.muted }}>{techName(o.technician_id)}</div>}
+                                </button>
+                              );
+                            })}
+                            {dayOrders.length === 0 && <div className="text-[10px]" style={{ color: C.muted }}>Sin órdenes</div>}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
             </div>
           )}
 
@@ -9233,7 +10222,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="flex items-center justify-between gap-2 pt-2" style={{ borderTop: `1px solid ${C.border}` }} onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           <Pill label={p.label} color={p.color} />
-                          {isTecnico && o.status === "completada" ? (
+                          {o.status === "completada" ? (
                             <Pill label={s.label} color={s.color} />
                           ) : (
                             <button onClick={() => cycleStatus(o)} title="Avanzar estado" className="flex items-center gap-1 text-xs px-2 py-1" style={{ color: s.color, border: `1px solid ${s.color}40` }}>
@@ -9478,7 +10467,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                           {canDelete("equipment") && <button onClick={() => deleteEquipment(eq.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                         </div>
                       </div>
-                      {eq.type && <div className="text-xs mt-0.5" style={{ color: C.muted }}>{eq.type}</div>}
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        {eq.type && <div className="text-xs" style={{ color: C.muted }}>{eq.type}</div>}
+                        <Pill label={eq.operational_status === "fuera_servicio" ? "Fuera de servicio" : "Operativo"} color={eq.operational_status === "fuera_servicio" ? C.red : C.green} />
+                      </div>
                       <div className="text-xs mt-3 space-y-1" style={{ color: C.muted }}>
                         {eq.brand && <div>Marca: <span style={{ color: C.text }}>{eq.brand}</span></div>}
                         {eq.model && <div>Modelo: <span style={{ color: C.text }}>{eq.model}</span></div>}
@@ -9487,7 +10479,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         {locationName(eq.location_id) && <div>Ubicación: <span style={{ color: C.text }}>{locationName(eq.location_id)}</span></div>}
                         <div>Técnico: <span style={{ color: eq.default_technician_id ? C.text : C.muted }}>{eq.default_technician_id ? (technicians.find((t) => t.id === eq.default_technician_id)?.name || "—") : "Sin asignar"}</span></div>
                       </div>
-                      <div className="flex items-center gap-1 text-xs mt-3" style={{ color: C.muted }}><MapPin size={12} /> {branchName(eq.branch_id)}</div>
+                      <div className="flex items-center justify-between mt-3">
+                        <div className="flex items-center gap-1 text-xs" style={{ color: C.muted }}><MapPin size={12} /> {branchName(eq.branch_id)}</div>
+                        <button onClick={() => setHistoryFor({ title: `Historial de ${eq.name}`, orders: orders.filter((o) => o.equipment_id === eq.id) })} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}>
+                          <History size={13} /> Historial
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -9716,38 +10713,64 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
           {!loadingScope && hasPerm("materials") && view === "materials" && (
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{materials.length} material{materials.length !== 1 ? "es" : ""} en almacén</div>
-                {canEdit("materials") && (
-                  <button onClick={() => setShowAddMaterial(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
-                    <Plus size={14} /> Agregar material
-                  </button>
-                )}
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {materials.length} material{materials.length !== 1 ? "es" : ""} en almacén
+                  {lowStockMaterials.length > 0 && <span style={{ color: C.red }}> &middot; {lowStockMaterials.length} con stock bajo</span>}
+                </div>
+                <div className="flex items-center gap-3">
+                  {lowStockMaterials.length > 0 && (
+                    <button onClick={() => setMaterialsLowStockOnly((v) => !v)} className="flex items-center gap-1 text-xs font-semibold" style={{ color: materialsLowStockOnly ? "#1A1500" : C.red, background: materialsLowStockOnly ? C.red : "transparent", border: `1px solid ${C.red}`, padding: "6px 10px" }}>
+                      <AlertTriangle size={13} /> {materialsLowStockOnly ? "Ver todos" : `Ver solo bajo stock (${lowStockMaterials.length})`}
+                    </button>
+                  )}
+                  {canEdit("materials") && (
+                    <button onClick={() => setShowAddMaterial(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                      <Plus size={14} /> Agregar material
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-4">Material</div>
-                  <div className="col-span-2">Sucursal</div>
-                  <div className="col-span-2 text-right">Cantidad</div>
-                  <div className="col-span-2">Unidad</div>
+                <div className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-3">Material</div>
+                  <div className="col-span-2">Código / Nº parte</div>
+                  <div className="col-span-2">Ubicación</div>
+                  <div className="col-span-1">Sucursal</div>
+                  <div className="col-span-2 text-right">Stock (act. / mín. / máx.)</div>
                   <div className="col-span-2 text-right">Acciones</div>
                 </div>
-                {materials.map((m) => (
-                  <div key={m.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-4">
+                {(materialsLowStockOnly ? lowStockMaterials : materials).map((m) => {
+                  const isLow = m.min_quantity != null && Number(m.quantity || 0) <= Number(m.min_quantity);
+                  return (
+                  <div key={m.id} className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}`, background: isLow ? C.red + "15" : "transparent" }}>
+                    <div className="col-span-3">
                       <div className="font-medium">{m.name}</div>
+                      {m.description && <div className="text-xs" style={{ color: C.muted }}>{m.description}</div>}
                       {m.notes && <div className="text-xs" style={{ color: C.muted }}>{m.notes}</div>}
                     </div>
-                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{branchName(m.branch_id)}</div>
-                    <div className="col-span-2 text-right font-mono">{Number(m.quantity || 0).toLocaleString("es-DO")}</div>
-                    <div className="col-span-2" style={{ color: C.muted }}>{m.unit || "—"}</div>
+                    <div className="col-span-2 text-xs" style={{ color: C.muted }}>
+                      {m.part_code && <div>ID: {m.part_code}</div>}
+                      {m.part_number && <div>Parte: {m.part_number}</div>}
+                      {m.serial_number && <div>Serie: {m.serial_number}</div>}
+                      {!m.part_code && !m.part_number && !m.serial_number && "—"}
+                    </div>
+                    <div className="col-span-2 truncate" style={{ color: C.muted }}>{m.location || "—"}</div>
+                    <div className="col-span-1 truncate" style={{ color: C.muted }}>{branchName(m.branch_id)}</div>
+                    <div className="col-span-2 text-right font-mono" style={{ color: isLow ? C.red : C.text }}>
+                      {Number(m.quantity || 0).toLocaleString("es-DO")} {m.unit || ""}
+                      <span style={{ color: C.muted }}> / {m.min_quantity != null ? Number(m.min_quantity).toLocaleString("es-DO") : "—"} / {m.max_quantity != null ? Number(m.max_quantity).toLocaleString("es-DO") : "—"}</span>
+                      {isLow && <div className="text-xs font-sans" style={{ color: C.red }}>Stock bajo</div>}
+                    </div>
                     <div className="col-span-2 flex items-center justify-end gap-2">
                       {canEdit("materials") && <button onClick={() => setEditingMaterial(m)} style={iconBtnStyle}><Pencil size={14} /></button>}
                       {canDelete("materials") && <button onClick={() => deleteMaterial(m.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {materials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay materiales registrados en el almacén.</div>}
+                {materials.length > 0 && materialsLowStockOnly && lowStockMaterials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Ningún material está bajo su stock mínimo.</div>}
               </div>
             </div>
           )}
@@ -10001,13 +11024,86 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
           {!loadingScope && hasPerm("reports") && view === "reports" && (
             <div>
+              <div className="flex flex-wrap items-end gap-3 mb-4 p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+                <div className="text-xs" style={{ color: C.muted }}>
+                  Sucursal: <span style={{ color: C.text }}>{branchFilter === "all" ? "Todas" : branchName(branchFilter)}</span> (se cambia arriba, en el filtro general)
+                </div>
+                <Field label="Desde">
+                  <input type="date" className={inputClass} style={inputStyle} value={techReportDateFrom} onChange={(e) => setTechReportDateFrom(e.target.value)} />
+                </Field>
+                <Field label="Hasta">
+                  <input type="date" className={inputClass} style={inputStyle} value={techReportDateTo} onChange={(e) => setTechReportDateTo(e.target.value)} />
+                </Field>
+                {(techReportDateFrom || techReportDateTo) && (
+                  <button onClick={() => { setTechReportDateFrom(""); setTechReportDateTo(""); }} className="px-3 py-2 text-xs" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Quitar fechas</button>
+                )}
+              </div>
+
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Indicadores clave</div>
+              <div className="flex flex-wrap gap-3 mb-6">
+                <KpiCard
+                  label="Cumplimiento del preventivo"
+                  value={preventiveCompliance.pct === null ? "—" : `${preventiveCompliance.pct.toFixed(0)}%`}
+                  accent={preventiveCompliance.pct === null ? C.muted : preventiveCompliance.pct >= 80 ? C.green : preventiveCompliance.pct >= 50 ? C.amber : C.red}
+                  sub={`${preventiveCompliance.done} completadas de ${preventiveCompliance.total} programadas`}
+                />
+                <KpiCard
+                  label="Tiempo promedio de reparación"
+                  value={avgRepairTime.label}
+                  accent={C.blue}
+                  sub={`Órdenes correctivas cerradas (${avgRepairTime.n})`}
+                />
+                <KpiCard
+                  label="Cumplimiento de fecha límite"
+                  value={deadlineCompliance.pct === null ? "—" : `${deadlineCompliance.pct.toFixed(0)}%`}
+                  accent={deadlineCompliance.pct === null ? C.muted : deadlineCompliance.pct >= 80 ? C.green : deadlineCompliance.pct >= 50 ? C.amber : C.red}
+                  sub={`${deadlineCompliance.onTime} a tiempo de ${deadlineCompliance.total} con fecha límite`}
+                />
+                <KpiCard
+                  label="Órdenes vencidas"
+                  value={overdueOpenOrders.length}
+                  accent={overdueOpenOrders.length === 0 ? C.green : overdueOpenOrders.length <= 3 ? C.amber : C.red}
+                  sub="Abiertas y ya pasaron su fecha límite"
+                />
+                <KpiCard
+                  label="Tasa de reapertura"
+                  value={reopenStats.pct === null ? "—" : `${reopenStats.pct.toFixed(0)}%`}
+                  accent={reopenStats.pct === null ? C.muted : reopenStats.pct <= 5 ? C.green : reopenStats.pct <= 15 ? C.amber : C.red}
+                  sub={`${reopenStats.reopened} reabiertas de ${reopenStats.everCompleted} completadas`}
+                />
+              </div>
+
+              {overdueOpenOrders.length > 0 && (
+                <>
+                  <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Órdenes vencidas — pendientes de cerrar</div>
+                  <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                      <div className="col-span-2">Orden</div>
+                      <div className="col-span-4">Título</div>
+                      <div className="col-span-2">Técnico</div>
+                      <div className="col-span-2">Fecha límite</div>
+                      <div className="col-span-2 text-right">Días vencida</div>
+                    </div>
+                    {overdueOpenOrders.map((o) => (
+                      <div key={o.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                        <div className="col-span-2 font-mono">{o.code}</div>
+                        <div className="col-span-4 truncate">{o.title}</div>
+                        <div className="col-span-2">{techName(o.technician_id)}</div>
+                        <div className="col-span-2">{fmtDate(o.deadline)}</div>
+                        <div className="col-span-2 text-right font-mono" style={{ color: o.daysOverdue > 7 ? C.red : C.amber }}>{o.daysOverdue} día{o.daysOverdue !== 1 ? "s" : ""}</div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Incidentes — resumen general</div>
               <div className="flex flex-wrap gap-3 mb-6">
-                <KpiCard label="Abiertos" value={incidents.filter((i) => i.status === "abierto").length} accent={C.red} sub="Sin atender aún" />
-                <KpiCard label="En revisión" value={incidents.filter((i) => i.status === "en_revision").length} accent={C.amber} sub="En proceso" />
-                <KpiCard label="Completados" value={incidents.filter((i) => i.status === "resuelto").length} accent={C.green} sub="Con hallazgos registrados" />
-                <KpiCard label="Descartados" value={incidents.filter((i) => i.status === "descartado").length} accent={C.muted} sub="No procedían" />
-                <KpiCard label="Total de incidentes" value={incidents.length} accent={C.blue} sub="Histórico completo" />
+                <KpiCard label="Abiertos" value={reportsIncidents.filter((i) => i.status === "abierto").length} accent={C.red} sub="Sin atender aún" />
+                <KpiCard label="En revisión" value={reportsIncidents.filter((i) => i.status === "en_revision").length} accent={C.amber} sub="En proceso" />
+                <KpiCard label="Completados" value={reportsIncidents.filter((i) => i.status === "resuelto").length} accent={C.green} sub="Con hallazgos registrados" />
+                <KpiCard label="Descartados" value={reportsIncidents.filter((i) => i.status === "descartado").length} accent={C.muted} sub="No procedían" />
+                <KpiCard label="Total de incidentes" value={reportsIncidents.length} accent={C.blue} sub="Histórico completo" />
               </div>
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>SLA — tiempos promedio por prioridad</div>
@@ -10045,17 +11141,19 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               </div>
               <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Técnico</div>
+                  <div className="col-span-2">Técnico</div>
                   <div className="col-span-1 text-center">Prev.</div>
                   <div className="col-span-1 text-center">Correc.</div>
                   <div className="col-span-1 text-center">Predic.</div>
                   <div className="col-span-2 text-center">Incidentes</div>
                   <div className="col-span-1 text-center">Total OT</div>
-                  <div className="col-span-3 text-right">Historial</div>
+                  <div className="col-span-1 text-center">Reabiertas</div>
+                  <div className="col-span-2 text-right">Costo M.O.</div>
+                  <div className="col-span-1 text-right">Historial</div>
                 </div>
                 {techStats.map((t) => (
                   <div key={t.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3">
+                    <div className="col-span-2">
                       <div>{t.name}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{t.specialty}</div>
                     </div>
@@ -10067,8 +11165,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       {t.incidentesAbiertos > 0 && <span style={{ color: C.amber }}> ({t.incidentesAbiertos} abiertos)</span>}
                     </div>
                     <div className="col-span-1 text-center font-mono">{t.total}</div>
-                    <div className="col-span-3 text-right">
-                      <button onClick={() => setHistoryFor({ title: `Historial de ${t.name}`, orders: orders.filter((o) => o.technician_id === t.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
+                    <div className="col-span-1 text-center font-mono" style={{ color: t.reopened > 0 ? C.amber : C.muted }}>{t.reopened}</div>
+                    <div className="col-span-2 text-right font-mono" style={{ color: C.muted }}>{fmtMoney(t.laborCost)}</div>
+                    <div className="col-span-1 text-right">
+                      <button onClick={() => setHistoryFor({ title: `Historial de ${t.name}`, orders: reportsOrders.filter((o) => o.technician_id === t.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
                         <History size={13} /> Ver
                       </button>
                     </div>
@@ -10110,9 +11210,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-3">Equipo</div>
                   <div className="col-span-2 text-center">Abiertas</div>
-                  <div className="col-span-2 text-center">Correctivas</div>
-                  <div className="col-span-2 text-center">Incidentes</div>
+                  <div className="col-span-1 text-center">Correctivas</div>
+                  <div className="col-span-1 text-center">Incidentes</div>
                   <div className="col-span-1 text-center">Total OT</div>
+                  <div className="col-span-2 text-right">Costo M.O.</div>
                   <div className="col-span-2 text-right">Historial</div>
                 </div>
                 {equipStats.map((eq) => (
@@ -10122,11 +11223,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="text-xs" style={{ color: C.muted }}>{branchName(eq.branch_id)}</div>
                     </div>
                     <div className="col-span-2 text-center font-mono" style={{ color: eq.open > 0 ? C.amber : C.muted }}>{eq.open}</div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: eq.correctivo > 0 ? C.red : C.muted }}>{eq.correctivo}</div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: eq.incidentesAbiertos > 0 ? C.amber : C.muted }}>{eq.incidentesTotal}</div>
+                    <div className="col-span-1 text-center font-mono" style={{ color: eq.correctivo > 0 ? C.red : C.muted }}>{eq.correctivo}</div>
+                    <div className="col-span-1 text-center font-mono" style={{ color: eq.incidentesAbiertos > 0 ? C.amber : C.muted }}>{eq.incidentesTotal}</div>
                     <div className="col-span-1 text-center font-mono">{eq.total}</div>
+                    <div className="col-span-2 text-right font-mono" style={{ color: C.muted }}>{fmtMoney(eq.laborCost)}</div>
                     <div className="col-span-2 text-right">
-                      <button onClick={() => setHistoryFor({ title: `Historial de ${eq.name}`, orders: orders.filter((o) => o.equipment_id === eq.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
+                      <button onClick={() => setHistoryFor({ title: `Historial de ${eq.name}`, orders: reportsOrders.filter((o) => o.equipment_id === eq.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
                         <History size={13} /> Ver
                       </button>
                     </div>
@@ -10798,8 +11900,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       {loadingFinancial && <div className="text-sm" style={{ color: C.muted }}>Buscando posibles coincidencias...</div>}
                     </div>
                     <div className="text-xs mb-4" style={{ color: C.muted }}>
-                      Sube el estado de cuenta exportado de tu banco (CSV o Excel) con columnas de Fecha, Descripción y Monto (o Crédito/Débito por separado). El sistema busca automáticamente un cobro, pago o gasto registrado con el mismo monto y una fecha cercana.
+                      Sube el estado de cuenta exportado de tu banco (CSV o Excel) con columnas de Fecha, Descripción y Monto (o Crédito/Débito por separado). El sistema busca automáticamente un cobro, pago o gasto registrado con el mismo monto y una fecha cercana. Si subes el mismo archivo (o rangos de fechas superpuestos) dos veces, los movimientos repetidos se detectan y no se duplican.
                     </div>
+                    {bankImportMsg && (
+                      <div className="text-xs mb-4" style={{ color: C.green }}>{bankImportMsg}</div>
+                    )}
 
                     <div className="flex gap-3 flex-wrap mb-6">
                       <KpiCard label="Movimientos del banco" value={txInRange.length} accent={C.blue} sub={fmtMoney(totalBank)} />
@@ -10923,7 +12028,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           {!loadingScope && hasPerm("receivables") && view === "receivables" && (
             <div>
               {(() => {
-                const pending = invoices.filter((inv) => inv.status !== "anulada" && (Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0)) > 0.009)
+                const pending = visibleInvoices.filter((inv) => inv.status !== "anulada" && (Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0)) > 0.009)
                   .map((inv) => ({ ...inv, balance: Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0), days: Math.max(0, Math.floor((Date.now() - new Date(inv.invoice_date).getTime()) / 86400000)) }))
                   .sort((a, b) => b.days - a.days);
                 const totalPending = pending.reduce((s, inv) => s + inv.balance, 0);
@@ -11115,7 +12220,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             <div>
               <div className="flex justify-between items-center mb-3">
                 <div className="text-sm" style={{ color: C.muted }}>
-                  {filteredQuotes.length}{filteredQuotes.length !== quotes.length ? ` de ${quotes.length}` : ""} cotizaciones{selectedQuotes.size > 0 ? ` · ${selectedQuotes.size} seleccionadas` : ""}
+                  {filteredQuotes.length}{filteredQuotes.length !== visibleQuotes.length ? ` de ${visibleQuotes.length}` : ""} cotizaciones{selectedQuotes.size > 0 ? ` · ${selectedQuotes.size} seleccionadas` : ""}
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -11242,7 +12347,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           {!loadingScope && hasPerm("invoices") && view === "invoices" && (
             <div>
               <div className="flex justify-between items-center mb-3">
-                <div className="text-sm" style={{ color: C.muted }}>{filteredInvoices.length}{filteredInvoices.length !== invoices.length ? ` de ${invoices.length}` : ""} facturas emitidas</div>
+                <div className="text-sm" style={{ color: C.muted }}>{filteredInvoices.length}{filteredInvoices.length !== visibleInvoices.length ? ` de ${visibleInvoices.length}` : ""} facturas emitidas</div>
                 <div className="flex gap-2">
                   <button onClick={() => setShowStatement(true)} disabled={clients.length === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
                     <FileText size={14} /> Estado de cuenta
@@ -11715,9 +12820,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           techName={techName}
           technicians={technicians}
           extraTechnicianIds={orderTechnicians.filter((wt) => wt.work_order_id === detailOrder.id).map((wt) => wt.technician_id)}
+          extraTechnicianRows={orderTechnicians.filter((wt) => wt.work_order_id === detailOrder.id)}
+          onUpdateTechnicianHours={updateOrderTechnicianHours}
           materials={materials}
           onConsumeMaterial={consumeMaterialStock}
           canManageWarehouse={canManage}
+          onAddPhoto={addOrderPhoto}
+          onDeletePhoto={deleteDetailAttachment}
+          clients={clients}
+          equipType={equipType}
+          onCreateIncidentFromChecklist={createIncidentFromChecklist}
           onSaveSignature={saveClientSignature}
           onClose={() => { setDetailOrder(null); setDetailOrderAttachments([]); setDetailOrderChecklist([]); }}
           onSave={saveOrderDetail}
@@ -11797,8 +12909,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {projectDetail && (
         <ProjectDetailModal
           project={projectDetail} clients={clients} branches={branches} technicians={technicians}
-          orders={orders} salesOrders={salesOrders} materials={materials} projectMaterials={projectMaterials}
-          canEditProjects={canEdit("projects")} canDeleteProjects={canDelete("projects")} saving={saving}
+          orders={orders} orderTechnicians={orderTechnicians} salesOrders={salesOrders} materials={materials} projectMaterials={projectMaterials}
+          canEditProjects={canEdit("projects")} canDeleteProjects={canDelete("projects")} canManageWarehouse={canManage} saving={saving}
           onClose={() => setProjectDetail(null)}
           onEdit={(p) => { setProjectDetail(null); setEditingProject(p); }}
           onDelete={deleteProject}
@@ -11850,7 +12962,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           clients={clients}
           products={products}
           ncfSequences={ncfSequences}
-          branches={branches}
+          branches={vendorScopedBranches}
           bankAccounts={companyBankAccounts}
           defaultBranchId={profile.branch_id}
           prefill={invoicePrefill}
@@ -11865,6 +12977,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         <QuoteFormModal
           clients={clients}
           products={products}
+          branches={vendorScopedBranches}
+          defaultBranchId={profile.branch_id}
           prefill={quotePrefill}
           maxDiscountPct={maxDiscountPct}
           onClose={() => { setShowAddQuote(false); setQuotePrefill(null); }}
@@ -11917,6 +13031,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         <QuoteFormModal
           clients={clients}
           products={products}
+          branches={vendorScopedBranches}
+          defaultBranchId={profile.branch_id}
           initial={editingQuote}
           initialItems={editingQuoteItems}
           maxDiscountPct={maxDiscountPct}
@@ -12086,10 +13202,18 @@ export default function MantenProApp() {
 
   const loadInvite = async () => {
     if (!inviteToken) { setInviteInfo(null); return; }
-    const { data, error } = await supabase.from("invites").select("*").eq("token", inviteToken).eq("used", false).maybeSingle();
-    if (error || !data) { setInviteInfo(null); return; }
-    const { data: comp } = await supabase.from("companies").select("name").eq("id", data.company_id).single();
-    setInviteInfo({ ...data, companyName: comp?.name || "tu nueva empresa" });
+    // get_invite_by_token reemplaza el "select * from invites where token = ..." directo.
+    // Antes la tabla "invites" tenía una política RLS que permitía leer TODAS las filas
+    // (de cualquier empresa) a cualquiera, autenticado o no — necesaria para que esta
+    // pantalla, que se carga antes de iniciar sesión, pudiera buscar por token. El problema
+    // es que esa misma política dejaba a cualquiera hacer un "select *" sin filtro y ver
+    // los correos, roles y tokens de TODAS las invitaciones pendientes de TODAS las
+    // empresas. Esta función solo devuelve la invitación puntual que coincide con el token,
+    // así que ya se puede (y se debe) quitar esa política abierta.
+    const { data, error } = await supabase.rpc("get_invite_by_token", { p_token: inviteToken });
+    const row = Array.isArray(data) ? data[0] : data;
+    if (error || !row) { setInviteInfo(null); return; }
+    setInviteInfo({ ...row, companyName: row.company_name || "tu nueva empresa" });
   };
 
   useEffect(() => {
@@ -12142,6 +13266,28 @@ export default function MantenProApp() {
         <div className="max-w-sm text-center p-6">
           <div className="text-lg font-bold mb-2">Cuenta desactivada</div>
           <div className="text-sm mb-5" style={{ color: "#8B92A0" }}>Tu acceso fue desactivado por un administrador de tu empresa. Si crees que es un error, contáctalo directamente.</div>
+          <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#F2A93B", color: "#1A1500" }}>Cerrar sesión</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Suspensión de la empresa por cobro (billing_status manual, gestionado desde
+  // Modo Soporte). Aplica a cualquier rol, incluido Admin: si un admin de empresa
+  // pudiera saltarse esto, no serviría como bloqueo real. El backend además impide
+  // que alguien que no sea platform_admin reactive la empresa por su cuenta
+  // (trigger protect_company_billing_status), así que este bloqueo no depende
+  // solo de que la UI lo respete.
+  if (company?.billing_status === "suspendida") {
+    return (
+      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: "#12151A", color: "#E7EAF0", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        <div className="max-w-sm text-center p-6">
+          <div className="text-lg font-bold mb-2">Acceso suspendido</div>
+          <div className="text-sm mb-3" style={{ color: "#8B92A0" }}>El acceso de tu empresa a MantenPro está suspendido por un tema de facturación.</div>
+          {company.billing_note && (
+            <div className="text-sm mb-5 p-3 text-left" style={{ background: "#1A1E26", border: "1px solid #2A2F3A", color: "#B8BECC" }}>{company.billing_note}</div>
+          )}
+          <div className="text-xs mb-5" style={{ color: "#8B92A0" }}>Contacta a quien administra tu suscripción de MantenPro para reactivar el acceso.</div>
           <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#F2A93B", color: "#1A1500" }}>Cerrar sesión</button>
         </div>
       </div>
