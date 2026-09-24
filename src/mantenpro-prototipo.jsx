@@ -14,6 +14,14 @@ import * as XLSX from "xlsx";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl;
 
+// Dominio real de producción. Los links que se le envían a alguien de FUERA de la app
+// (invitación a un usuario nuevo, correo de "olvidé mi contraseña") NO deben depender de
+// window.location.origin — si quien genera el link tenía la app abierta en localhost
+// (probando en su máquina), el link saldría apuntando a localhost y la otra persona no
+// podría abrirlo. Por eso estos dos casos siempre usan APP_URL a propósito, en vez del
+// origin actual.
+const APP_URL = "https://mantenpro-seven.vercel.app";
+
 // ---------------------------------------------------------------------------
 // Lee un PDF y devuelve un arreglo de líneas de texto (una por punto de checklist)
 // ---------------------------------------------------------------------------
@@ -750,7 +758,7 @@ function AuthScreen({ inviteInfo }) {
     setError("");
     if (!email.trim()) { setError("Escribe tu correo para poder enviarte el enlace."); return; }
     setLoading(true);
-    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: APP_URL });
     setLoading(false);
     if (error) { setError(error.message); return; }
     setResetSent(true);
@@ -1758,6 +1766,33 @@ const waLink = (phone, text) => {
   return `https://wa.me/${digits}?text=${encodeURIComponent(text)}`;
 };
 const mailtoLink = (email, subject, text) => `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
+
+// Comprime fotos en el navegador antes de subirlas a Supabase Storage (bucket "evidence"),
+// para no gastar el plan de storage/bandwidth con fotos de cámara sin redimensionar (4-8MB
+// cada una). Redimensiona al lado más largo a maxDimension y reconvierte a JPEG. Si el
+// archivo no es una imagen (PDF, Word, Excel), o ya es pequeño, o algo falla, devuelve el
+// archivo original tal cual — nunca bloquea la subida por un error de compresión.
+async function compressImage(file, { maxDimension = 1600, quality = 0.82 } = {}) {
+  if (!file || !file.type || !file.type.startsWith("image/") || file.type === "image/svg+xml") return file;
+  if (file.size <= 400 * 1024) return file; // ya es liviana, no vale la pena reprocesarla
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const targetW = Math.max(1, Math.round(bitmap.width * scale));
+    const targetH = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, targetW, targetH);
+    if (bitmap.close) bitmap.close();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (!blob || blob.size >= file.size) return file; // si no mejoró nada, sube la original
+    const newName = file.name.replace(/\.[^./]+$/, "") + ".jpg";
+    return new File([blob], newName, { type: "image/jpeg", lastModified: Date.now() });
+  } catch {
+    return file;
+  }
+}
 const invoiceReminderText = (companyName, clientName, inv, balance, days) =>
   `Hola ${clientName}, le saluda ${companyName}. Le recordamos que tiene un saldo pendiente de ${fmtMoney(balance)} correspondiente a la factura NCF ${inv.ncf || inv.id} con fecha ${fmtDate(inv.invoice_date)} (${days} días de emitida). Agradecemos su pronto pago. Cualquier duda, quedamos atentos.`;
 
@@ -6788,11 +6823,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const MODULE_OF_KEY = {
     orders: "tecnico", agenda: "tecnico", incidents: "tecnico", projects: "tecnico", equipment: "tecnico",
     checklists: "tecnico", technicians: "tecnico", tools: "tecnico", materials: "tecnico", maintenanceSchedule: "tecnico",
+    reports: "tecnico",
     suppliers: "comercial", purchaseOrders: "comercial", deliveryNotes: "comercial", purchases: "comercial",
     supplierReceipts: "comercial", otherExpenses: "comercial", purchaseLedger: "comercial", quotes: "comercial",
     salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
+    salesReports: "comercial",
     chartOfAccounts: "contable", receivables: "contable", payables: "contable", taxRates: "contable",
-    bankReconciliation: "contable", ncf: "contable", activityLog: "administracion",
+    bankReconciliation: "contable", ncf: "contable", financialReports: "contable", fiscalReports: "contable",
+    activityLog: "administracion",
   };
   const companyHasModule = (mod) => !mod || (company?.enabled_modules || []).includes(mod);
   const hasPerm = (key) => (isAdmin || !!effectivePermissions[key]) && companyHasModule(MODULE_OF_KEY[key]);
@@ -7607,6 +7645,37 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return { n: durations.length, avgHours: avg, label: avg === null ? "—" : avg < 48 ? `${avg.toFixed(1)} h` : `${(avg / 24).toFixed(1)} días` };
   }, [reportsOrders]);
 
+  // MTBF (tiempo medio entre fallas): por cada equipo con 2 o más órdenes correctivas en el
+  // rango filtrado, se mide el intervalo entre fallas consecutivas (por fecha de creación de
+  // la orden) y se promedian esos intervalos. El MTBF general que se muestra es el promedio de
+  // esos promedios entre los equipos que ya tienen suficiente historial — un equipo con solo
+  // 1 correctiva (o ninguna) todavía no aporta, porque no hay ningún intervalo que medir.
+  const mtbf = useMemo(() => {
+    const byEquip = new Map();
+    reportsOrders
+      .filter((o) => o.type === "correctivo" && o.equipment_id && o.created_at)
+      .forEach((o) => {
+        if (!byEquip.has(o.equipment_id)) byEquip.set(o.equipment_id, []);
+        byEquip.get(o.equipment_id).push(o.created_at);
+      });
+    const equipAverages = [];
+    byEquip.forEach((dates) => {
+      if (dates.length < 2) return;
+      const sorted = [...dates].sort();
+      const gaps = [];
+      for (let i = 1; i < sorted.length; i++) {
+        gaps.push((new Date(sorted[i]).getTime() - new Date(sorted[i - 1]).getTime()) / (1000 * 60 * 60));
+      }
+      equipAverages.push(gaps.reduce((a, b) => a + b, 0) / gaps.length);
+    });
+    const avg = equipAverages.length > 0 ? equipAverages.reduce((a, b) => a + b, 0) / equipAverages.length : null;
+    return {
+      nEquip: equipAverages.length,
+      avgHours: avg,
+      label: avg === null ? "—" : avg < 48 ? `${avg.toFixed(1)} h` : `${(avg / 24).toFixed(1)} días`,
+    };
+  }, [reportsOrders]);
+
   // Cumplimiento de fecha límite: de las órdenes con deadline ya cerradas, cuántas se
   // cerraron el mismo día del deadline o antes (a diferencia de "cumplimiento del
   // preventivo", que solo mira si se completó, sin importar si fue a tiempo).
@@ -7853,13 +7922,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }
     if (files && files.length > 0) {
       for (const file of files) {
-        const ext = file.name.split(".").pop();
+        const upFile = await compressImage(file);
+        const ext = upFile.name.split(".").pop();
         const path = `support/${companyId}/${data.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-        const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
+        const { error: upError } = await supabase.storage.from("evidence").upload(path, upFile);
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
         const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
         if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
-        const { error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: file.name });
+        const { error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: upFile.name });
         if (attError) setErrorMsg(`Se subió ${file.name} pero no se pudo vincular a la orden: ${attError.message}`);
         else setOrderAttachmentIds((prev) => new Set(prev).add(data.id));
       }
@@ -7937,13 +8007,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }
     if (files && files.length > 0) {
       for (const file of files) {
-        const ext = file.name.split(".").pop();
+        const upFile = await compressImage(file);
+        const ext = upFile.name.split(".").pop();
         const path = `support/${companyId}/${data.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-        const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
+        const { error: upError } = await supabase.storage.from("evidence").upload(path, upFile);
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
         const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
         if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
-        const { data: attRow, error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: file.name }).select().single();
+        const { data: attRow, error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: upFile.name }).select().single();
         if (attError) { setErrorMsg(`Se subió ${file.name} pero no se pudo vincular a la orden: ${attError.message}`); continue; }
         setOrderAttachmentIds((prev) => new Set(prev).add(data.id));
         setEditingOrderAttachments((prev) => [...prev, attRow]);
@@ -7957,11 +8028,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // Solo alterna pendiente <-> en_progreso. Pasar a "completada" exige checklist, nota y firma,
   // así que eso se hace desde el detalle de la orden (botón "Cerrar orden"), no con este atajo.
   // Reabrir una orden completada también es una acción deliberada aparte (botón "Reabrir orden").
-  const cycleStatus = async (order) => {
-    if (order.status === "completada") return;
-    const next = order.status === "pendiente" ? "en_progreso" : "pendiente";
-    setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, status: next } : o)));
-    const { error } = await supabase.from("work_orders").update({ status: next }).eq("id", order.id);
+  // Reemplaza al viejo cycleStatus (que solo alternaba pendiente↔en_progreso con un
+  // botón de "avanzar"): ahora la tarjeta de la orden muestra los estados como una
+  // barra de botones (estilo Odoo) y este helper deja saltar directo a cualquiera de
+  // los dos estados que no requieren nota de cierre. "Completada" sigue sin poder
+  // asignarse aquí — eso abre el detalle de la orden (openOrderDetail), porque cerrar
+  // una orden pide notas/foto y dispara la lógica de completed_at/reopened_count.
+  const setOrderStatus = async (order, nextStatus) => {
+    if (order.status === nextStatus || order.status === "completada") return;
+    setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, status: nextStatus } : o)));
+    const { error } = await supabase.from("work_orders").update({ status: nextStatus }).eq("id", order.id);
     if (error) setErrorMsg(error.message);
   };
 
@@ -7998,14 +8074,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // Fotos "antes"/"después" del detalle de la orden (columna stage en work_order_attachments,
   // ver SQL). Se pueden subir varias por lado, a diferencia de la vieja foto única de cierre.
   const addOrderPhoto = async (order, file, stage) => {
-    const ext = file.name.split(".").pop();
+    const upFile = await compressImage(file);
+    const ext = upFile.name.split(".").pop();
     const path = `evidence-multi/${companyId}/${order.id}-${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-    const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
+    const { error: upError } = await supabase.storage.from("evidence").upload(path, upFile);
     if (upError) { setErrorMsg(`No se pudo subir la foto: ${upError.message}`); return; }
     const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
     if (signError) { setErrorMsg(`Se subió la foto pero no se pudo generar el enlace: ${signError.message}`); return; }
     const { data: attRow, error: attError } = await supabase.from("work_order_attachments")
-      .insert({ work_order_id: order.id, file_url: signed.signedUrl, file_path: path, file_name: file.name, stage }).select().single();
+      .insert({ work_order_id: order.id, file_url: signed.signedUrl, file_path: path, file_name: upFile.name, stage }).select().single();
     if (attError) { setErrorMsg(`Se subió la foto pero no se pudo vincular a la orden: ${attError.message}`); return; }
     setDetailOrderAttachments((prev) => [...prev, attRow]);
     setOrderAttachmentIds((prev) => new Set(prev).add(order.id));
@@ -8062,9 +8139,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     let photo_url = order.photo_url || null;
     let photo_path = order.photo_path || null;
     if (photoFile) {
-      const ext = photoFile.name.split(".").pop();
+      const upPhotoFile = await compressImage(photoFile);
+      const ext = upPhotoFile.name.split(".").pop();
       const path = `${companyId}/${order.id}-${Date.now()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("evidence").upload(path, photoFile, { upsert: true });
+      const { error: uploadError } = await supabase.storage.from("evidence").upload(path, upPhotoFile, { upsert: true });
       if (uploadError) { setSaving(false); setErrorMsg(uploadError.message); return; }
       const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
       if (signError) { setSaving(false); setErrorMsg(signError.message); return; }
@@ -9623,13 +9701,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
     if (files && files.length > 0) {
       for (const file of files) {
-        const ext = file.name.split(".").pop();
+        const upFile = await compressImage(file);
+        const ext = upFile.name.split(".").pop();
         const path = `payments/${companyId}/${resultRow.payment_id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-        const { error: upError } = await supabase.storage.from("evidence").upload(path, file);
+        const { error: upError } = await supabase.storage.from("evidence").upload(path, upFile);
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
         const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
         if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
-        const { error: attError } = await supabase.from("invoice_payment_attachments").insert({ payment_id: resultRow.payment_id, file_url: signed.signedUrl, file_path: path, file_name: file.name });
+        const { error: attError } = await supabase.from("invoice_payment_attachments").insert({ payment_id: resultRow.payment_id, file_url: signed.signedUrl, file_path: path, file_name: upFile.name });
         if (attError) setErrorMsg(`Se subió ${file.name} pero no se pudo vincular al pago: ${attError.message}`);
       }
     }
@@ -10204,7 +10283,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
     setInvites((prev) => [...prev, data]);
-    setInviteLink(`${window.location.origin}${window.location.pathname}?invite=${data.token}`);
+    setInviteLink(`${APP_URL}/?invite=${data.token}`);
   };
 
   const cancelInvite = async (id) => {
@@ -10219,7 +10298,6 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const SALES_CHILD_KEYS = ["quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja"];
   const COMPRAS_CHILD_KEYS = ["suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger"];
   const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "payables", "chartOfAccounts", "taxRates", "bankReconciliation", "dgiiCatalog"];
-  const INFORMES_CHILD_KEYS = ["reports", "salesReports", "financialReports", "fiscalReports"];
   const _urlView = new URLSearchParams(window.location.search).get("view") || "dashboard";
   const [openSubmenus, setOpenSubmenus] = useState(() => ({
     inventoryMenu: INVENTORY_CHILD_KEYS.includes(_urlView),
@@ -10227,7 +10305,6 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     salesMenu: SALES_CHILD_KEYS.includes(_urlView),
     purchasesMenu: COMPRAS_CHILD_KEYS.includes(_urlView),
     accountingMenu: CONTABLE_CHILD_KEYS.includes(_urlView),
-    informesMenu: INFORMES_CHILD_KEYS.includes(_urlView),
   }));
   const toggleSubmenu = (key) => setOpenSubmenus((prev) => ({ ...prev, [key]: !prev[key] }));
   const [openSections, setOpenSections] = useState({ "Departamento Técnico": true, "Comercial": true, "Administración": true, "Gestión Contable": true });
@@ -10235,16 +10312,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const RAW_NAV = [
     { key: "dashboard", label: "Panel", Icon: LayoutDashboard },
-    {
-      key: "informesMenu", label: "Informes", Icon: BarChart3,
-      children: [
-        { key: "reports", label: "Departamento Técnico", Icon: Wrench },
-        { key: "salesReports", label: "Comercial / Ventas", Icon: Layers },
-        { key: "financialReports", label: "Financieros", Icon: Wallet },
-        { key: "fiscalReports", label: "Fiscales (DGII)", Icon: Hash },
-      ],
-    },
     { section: "Departamento Técnico" },
+    { key: "reports", label: "Reportes", Icon: BarChart3 },
     { key: "incidents", label: "Incidentes", Icon: AlertTriangle },
     { key: "agenda", label: "Agenda", Icon: CalendarDays },
     { key: "orders", label: "Órdenes de trabajo", Icon: ClipboardList },
@@ -10293,12 +10362,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         { key: "caja", label: "Caja", Icon: Wallet },
       ],
     },
-    { section: "Administración" },
-    { key: "branches", label: "Sucursales", Icon: Building2 },
-    { key: "users", label: "Usuarios", Icon: ShieldCheck },
-    { key: "companyProfile", label: "Perfil de la empresa", Icon: Building2 },
-    { key: "activityLog", label: "Historial de actividad", Icon: History },
+    { key: "salesReports", label: "Reportes de Ventas", Icon: BarChart3 },
     { section: "Gestión Contable" },
+    { key: "financialReports", label: "Reportes Financieros", Icon: BarChart3 },
+    { key: "fiscalReports", label: "Reportes Fiscales (DGII)", Icon: BarChart3 },
     {
       key: "accountingMenu", label: "Gestión Contable", Icon: Hash,
       children: [
@@ -10311,6 +10378,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         { key: "dgiiCatalog", label: "Catálogo RNC (DGII)", Icon: Search },
       ],
     },
+    { section: "Administración" },
+    { key: "branches", label: "Sucursales", Icon: Building2 },
+    { key: "users", label: "Usuarios", Icon: ShieldCheck },
+    { key: "companyProfile", label: "Perfil de la empresa", Icon: Building2 },
+    { key: "activityLog", label: "Historial de actividad", Icon: History },
   ];
   const NAV = [];
   {
@@ -10331,6 +10403,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   }
 
   const flattenNavKeys = (items) => items.flatMap((it) => (it.section ? [] : it.children ? it.children.map((c) => c.key) : [it.key]));
+
+  // Accesos rápidos del Panel (estilo "launcher de apps" de Odoo): cada ítem/subítem
+  // visible de NAV (ya filtrado por permisos y por módulo contratado) se ve como un
+  // icono grande de color en vez de tener que buscarlo en el menú lateral. El Panel
+  // mismo ("dashboard") se excluye porque ya es la pantalla donde se muestra esto.
+  const APP_TILE_COLORS = ["#7C6FE0", "#3E9BE0", "#4CAF6D", "#E0A83E", "#E0577C", "#8E5CE0", "#3EC7C2", "#E0733E", "#5C8FE0", "#C24CE0", "#4CC2A0", "#E0475C", "#6FA8E0", "#8FE04C", "#F2A93B", "#E05C9B"];
+  const quickAccessTiles = NAV.flatMap((it) =>
+    it.section || it.key === "dashboard" ? [] : it.children ? it.children.map((c) => ({ key: c.key, label: c.label, Icon: c.Icon })) : [{ key: it.key, label: it.label, Icon: it.Icon }]
+  ).map((it, i) => ({ ...it, color: APP_TILE_COLORS[i % APP_TILE_COLORS.length] }));
+
   useEffect(() => {
     if (hasPerm(view)) return;
     const firstAllowed = flattenNavKeys(NAV)[0];
@@ -10573,6 +10655,22 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
           {!loadingScope && hasPerm("dashboard") && view === "dashboard" && (
             <div>
+              <div className="text-sm font-semibold mb-3" style={{ color: C.muted }}>Accesos rápidos</div>
+              <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" }}>
+                {quickAccessTiles.map((it) => (
+                  <button
+                    key={it.key}
+                    onClick={() => changeView(it.key)}
+                    className="flex flex-col items-center gap-1.5 p-2 text-center"
+                    style={{ background: "transparent" }}
+                  >
+                    <div className="w-12 h-12 flex items-center justify-center" style={{ background: it.color, borderRadius: 10 }}>
+                      <it.Icon size={22} color="#fff" />
+                    </div>
+                    <div className="text-[11px] leading-tight" style={{ color: C.text }}>{it.label}</div>
+                  </button>
+                ))}
+              </div>
               {overdueOrders.length > 0 && (
                 <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2020", border: `1px solid ${C.red}40` }}>
                   <div className="flex items-center gap-2 text-sm" style={{ color: C.red }}>
@@ -10901,9 +10999,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                           {o.status === "completada" ? (
                             <Pill label={s.label} color={s.color} />
                           ) : (
-                            <button onClick={() => cycleStatus(o)} title="Avanzar estado" className="flex items-center gap-1 text-xs px-2 py-1" style={{ color: s.color, border: `1px solid ${s.color}40` }}>
-                              {s.label} <ArrowRight size={12} />
-                            </button>
+                            <div className="flex items-center overflow-hidden" style={{ border: `1px solid ${C.border}` }}>
+                              {["pendiente", "en_progreso"].map((st) => {
+                                const cfg = STATUS_CFG[st];
+                                const active = o.status === st;
+                                return (
+                                  <button
+                                    key={st}
+                                    onClick={() => setOrderStatus(o, st)}
+                                    title={`Marcar como ${cfg.label}`}
+                                    className="text-xs px-2 py-1 font-medium whitespace-nowrap"
+                                    style={{ color: active ? "#fff" : cfg.color, background: active ? cfg.color : "transparent" }}
+                                  >
+                                    {cfg.label}
+                                  </button>
+                                );
+                              })}
+                              <button
+                                onClick={() => openOrderDetail(o)}
+                                title="Completar orden (requiere nota de cierre)"
+                                className="text-xs px-2 py-1 font-medium whitespace-nowrap"
+                                style={{ color: C.muted, borderLeft: `1px solid ${C.border}` }}
+                              >
+                                {STATUS_CFG.completada.label}
+                              </button>
+                            </div>
                           )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -11724,10 +11844,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   sub={`${preventiveCompliance.done} completadas de ${preventiveCompliance.total} programadas`}
                 />
                 <KpiCard
-                  label="Tiempo promedio de reparación"
+                  label="MTTR (tiempo promedio de reparación)"
                   value={avgRepairTime.label}
                   accent={C.blue}
                   sub={`Órdenes correctivas cerradas (${avgRepairTime.n})`}
+                />
+                <KpiCard
+                  label="MTBF (tiempo medio entre fallas)"
+                  value={mtbf.label}
+                  accent={C.blue}
+                  sub={`Promedio entre correctivas de ${mtbf.nEquip} equipo${mtbf.nEquip !== 1 ? "s" : ""} con 2+ fallas`}
                 />
                 <KpiCard
                   label="Cumplimiento de fecha límite"
