@@ -113,7 +113,11 @@ const C = {
   border: "#2A2F3A",
   text: "#EDEBE6",
   muted: "#8B92A0",
-  amber: "#F2A93B",
+  // Color de marca/acento (botones primarios, portada, resaltados). Antes era
+  // naranja claro (#F2A93B); ahora es verde claro. Se deja la clave "amber" tal
+  // cual (se usa en más de 250 lugares del archivo) para no tener que renombrarla
+  // en todos lados — solo cambia el valor del color.
+  amber: "#8FD14F",
   green: "#4CAF6D",
   red: "#E8654F",
   blue: "#4FA8D8",
@@ -6943,12 +6947,39 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [agendaViewMode, setAgendaViewMode] = useState("month");
   const [agendaWeekAnchor, setAgendaWeekAnchor] = useState(() => todayStrRD());
   const [view, setView] = useState(() => new URLSearchParams(window.location.search).get("view") || "dashboard");
+
+  // Antes cada cambio de sección usaba history.replaceState, así que el botón
+  // "atrás" del navegador/celular no tenía ningún historial propio de la app que
+  // recorrer y sacaba a la persona de MantenPro de una vez. Ahora cada cambio de
+  // sección hace pushState (agrega una entrada), así que "atrás" retrocede por las
+  // secciones visitadas dentro de la app. Solo cuando ya se acaba ese historial
+  // (se llega a la primera pantalla que se abrió) "atrás" vuelve a comportarse
+  // normal y sale de la app — es el comportamiento nativo del navegador, no hay
+  // que simularlo.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", view);
+    window.history.replaceState({ view }, "", url);
+    // eslint-disable-next-line
+  }, []);
+
+  useEffect(() => {
+    const onPopState = (event) => {
+      const nextView = event.state?.view || new URLSearchParams(window.location.search).get("view") || "dashboard";
+      setView(nextView);
+      setShowMobileMenu(false);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   const changeView = (key) => {
+    if (key === view) return;
     setView(key);
     setShowMobileMenu(false);
     const url = new URL(window.location.href);
     url.searchParams.set("view", key);
-    window.history.replaceState(null, "", url);
+    window.history.pushState({ view: key }, "", url);
   };
 
   const [showOrderForm, setShowOrderForm] = useState(false);
@@ -10670,18 +10701,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           {!loadingScope && hasPerm("dashboard") && view === "dashboard" && (
             <div>
               <div className="text-sm font-semibold mb-3" style={{ color: C.muted }}>Accesos rápidos</div>
-              <div className="grid gap-3 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" }}>
+              <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
                 {quickAccessTiles.map((it) => (
                   <button
                     key={it.key}
                     onClick={() => changeView(it.key)}
-                    className="flex flex-col items-center gap-1.5 p-2 text-center"
+                    className="flex flex-col items-center gap-2 p-2 text-center"
                     style={{ background: "transparent" }}
                   >
-                    <div className="w-12 h-12 flex items-center justify-center" style={{ background: it.color, borderRadius: 10 }}>
-                      <it.Icon size={22} color="#fff" />
+                    <div className="w-16 h-16 flex items-center justify-center" style={{ background: it.color, borderRadius: 14 }}>
+                      <it.Icon size={30} color="#fff" />
                     </div>
-                    <div className="text-[11px] leading-tight" style={{ color: C.text }}>{it.label}</div>
+                    <div className="text-xs leading-tight" style={{ color: C.text }}>{it.label}</div>
                   </button>
                 ))}
               </div>
@@ -14178,7 +14209,7 @@ export default function MantenProApp() {
         <div className="max-w-sm text-center p-6">
           <div className="text-lg font-bold mb-2">Cuenta desactivada</div>
           <div className="text-sm mb-5" style={{ color: "#8B92A0" }}>Tu acceso fue desactivado por un administrador de tu empresa. Si crees que es un error, contáctalo directamente.</div>
-          <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#F2A93B", color: "#1A1500" }}>Cerrar sesión</button>
+          <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#8FD14F", color: "#1A1500" }}>Cerrar sesión</button>
         </div>
       </div>
     );
@@ -14200,7 +14231,7 @@ export default function MantenProApp() {
             <div className="text-sm mb-5 p-3 text-left" style={{ background: "#1A1E26", border: "1px solid #2A2F3A", color: "#B8BECC" }}>{company.billing_note}</div>
           )}
           <div className="text-xs mb-5" style={{ color: "#8B92A0" }}>Contacta a quien administra tu suscripción de MantenPro para reactivar el acceso.</div>
-          <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#F2A93B", color: "#1A1500" }}>Cerrar sesión</button>
+          <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#8FD14F", color: "#1A1500" }}>Cerrar sesión</button>
         </div>
       </div>
     );
