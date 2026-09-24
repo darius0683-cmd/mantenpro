@@ -6899,6 +6899,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  // Colapsar el menú lateral hacia la izquierda en escritorio (no afecta el menú
+  // móvil, que ya se esconde solo). Solo cambia visibilidad/ancho, no desmonta NAV
+  // ni pierde la sección abierta — al volver a expandir queda todo como estaba.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [quotes, setQuotes] = useState([]);
   const [salesOrders, setSalesOrders] = useState([]);
@@ -10483,7 +10487,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         <div className="fixed inset-0 z-40 md:hidden" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setShowMobileMenu(false)} />
       )}
       <div
-        className={`${showMobileMenu ? "flex" : "hidden"} md:flex fixed md:relative inset-y-0 left-0 z-50 md:z-auto w-64 md:w-56 flex-shrink-0 flex-col overflow-y-auto`}
+        className={`${showMobileMenu ? "flex" : "hidden"} ${sidebarCollapsed ? "md:hidden" : "md:flex"} fixed md:relative inset-y-0 left-0 z-50 md:z-auto w-64 md:w-56 flex-shrink-0 flex-col overflow-y-auto`}
         style={{ background: C.panel, borderRight: `1px solid ${C.border}` }}
       >
         <div className="px-5 py-5 flex items-center justify-between gap-2" style={{ borderBottom: `1px solid ${C.border}` }}>
@@ -10496,9 +10500,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               <div className="text-[10px] uppercase tracking-wide mt-0.5" style={{ color: C.muted }}>Multi-empresa</div>
             </div>
           </div>
-          <button onClick={() => setShowMobileMenu(false)} className="md:hidden p-1" style={{ color: C.muted }}>
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setSidebarCollapsed(true)} title="Ocultar menú" className="hidden md:block p-1" style={{ color: C.muted }}>
+              <ChevronLeft size={18} />
+            </button>
+            <button onClick={() => setShowMobileMenu(false)} className="md:hidden p-1" style={{ color: C.muted }}>
+              <X size={18} />
+            </button>
+          </div>
         </div>
         <nav className="flex-1 py-3">
           {(() => {
@@ -10581,6 +10590,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             <button onClick={() => setShowMobileMenu(true)} className="md:hidden p-2" style={{ color: C.text }}>
               <Menu size={20} />
             </button>
+            {sidebarCollapsed && (
+              <button onClick={() => setSidebarCollapsed(false)} title="Mostrar menú" className="hidden md:block p-2" style={{ color: C.text }}>
+                <ChevronRight size={20} />
+              </button>
+            )}
             <div className="flex items-center gap-2 px-3 py-2 text-sm font-medium" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
               <Building2 size={14} color={C.amber} />
               {companyName}
@@ -10670,81 +10684,6 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     <div className="text-[11px] leading-tight" style={{ color: C.text }}>{it.label}</div>
                   </button>
                 ))}
-              </div>
-              {overdueOrders.length > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2020", border: `1px solid ${C.red}40` }}>
-                  <div className="flex items-center gap-2 text-sm" style={{ color: C.red }}>
-                    <AlertTriangle size={16} />
-                    Tienes {overdueOrders.length} orden{overdueOrders.length !== 1 ? "es" : ""} vencida{overdueOrders.length !== 1 ? "s" : ""} — la fecha programada ya pasó.
-                  </div>
-                  <button onClick={() => changeView("agenda")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.red}40`, color: C.red }}>Ver en agenda</button>
-                </div>
-              )}
-              {pastDeadlineOrders.length > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2020", border: `1px solid ${C.red}40` }}>
-                  <div className="flex items-center gap-2 text-sm" style={{ color: C.red }}>
-                    <AlertTriangle size={16} />
-                    Tienes {pastDeadlineOrders.length} orden{pastDeadlineOrders.length !== 1 ? "es" : ""} que pasó{pastDeadlineOrders.length !== 1 ? "ron" : ""} su fecha límite (deadline) sin completarse.
-                  </div>
-                  <button onClick={() => changeView("orders")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.red}40`, color: C.red }}>Ver órdenes</button>
-                </div>
-              )}
-              {hasPerm("maintenanceSchedule") && (dueEquipment.length + dueClientAssets.length) > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2E14", border: `1px solid ${C.amber}40` }}>
-                  <div className="flex items-center gap-2 text-sm" style={{ color: C.amber }}>
-                    <CalendarDays size={16} />
-                    {dueEquipment.length + dueClientAssets.length} equipo{(dueEquipment.length + dueClientAssets.length) !== 1 ? "s/activos" : ""} con mantenimiento preventivo vencido, listo{(dueEquipment.length + dueClientAssets.length) !== 1 ? "s" : ""} para generar orden.
-                  </div>
-                  <button onClick={() => changeView("maintenanceSchedule")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.amber}40`, color: C.amber }}>Ver mantenimiento programado</button>
-                </div>
-              )}
-              {hasPerm("receivables") && overdueReceivables.count > 0 && (
-                <div className="flex items-center justify-between px-4 py-3 mb-4" style={{ background: "#3A2020", border: `1px solid ${C.red}40` }}>
-                  <div className="flex items-center gap-2 text-sm" style={{ color: C.red }}>
-                    <AlertTriangle size={16} />
-                    Tienes {overdueReceivables.count} factura{overdueReceivables.count !== 1 ? "s" : ""} vencida{overdueReceivables.count !== 1 ? "s" : ""} (+30 días) por {fmtMoney(overdueReceivables.total)}.
-                  </div>
-                  <button onClick={() => changeView("receivables")} className="text-xs px-3 py-1.5" style={{ border: `1px solid ${C.red}40`, color: C.red }}>Ver Cuentas por Cobrar</button>
-                </div>
-              )}
-              <div className="flex gap-3 flex-wrap mb-6">
-                <KpiCard label="Órdenes activas" value={kpi.pend + kpi.prog} accent={C.amber} sub={`${kpi.pend} pendientes · ${kpi.prog} en progreso`} />
-                <KpiCard label="Completadas" value={kpi.done} accent={C.green} sub="Histórico visible" />
-                <KpiCard label="Preventivos pendientes" value={kpi.prev} accent={C.blue} sub="Sin cerrar aún" />
-                <KpiCard label="Total de órdenes" value={kpi.total} accent={C.muted} sub={branchFilter === "all" ? "Todas las sucursales" : branchName(branchFilter)} />
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-                <div className="lg:col-span-2 p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                  <div className="text-sm font-semibold mb-3">Órdenes por tipo de mantenimiento</div>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={chartData} margin={{ left: -20 }}>
-                      <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 12 }} axisLine={{ stroke: C.border }} tickLine={false} />
-                      <YAxis allowDecimals={false} tick={{ fill: C.muted, fontSize: 12 }} axisLine={{ stroke: C.border }} tickLine={false} />
-                      <Tooltip contentStyle={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }} cursor={{ fill: C.panelAlt }} />
-                      <Bar dataKey="value" radius={[2, 2, 0, 0]}>
-                        {chartData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="lg:col-span-3 p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                  <div className="text-sm font-semibold mb-3">Órdenes recientes</div>
-                  <div className="space-y-2">
-                    {scopedOrders.slice(0, 6).map((o) => {
-                      const t = TYPE_CFG[o.type], s = STATUS_CFG[o.status];
-                      return (
-                        <div key={o.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt, borderLeft: `3px solid ${t.color}` }}>
-                          <div className="min-w-0">
-                            <div className="font-mono text-xs" style={{ color: C.muted }}>{o.code}</div>
-                            <div className="truncate" style={{ color: C.text }}>{o.title}</div>
-                          </div>
-                          <Pill label={s.label} color={s.color} />
-                        </div>
-                      );
-                    })}
-                    {scopedOrders.length === 0 && <div className="text-sm" style={{ color: C.muted }}>No hay órdenes registradas en este alcance.</div>}
-                  </div>
-                </div>
               </div>
             </div>
           )}
