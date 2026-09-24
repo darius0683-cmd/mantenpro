@@ -10682,7 +10682,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 </div>
               )}
             </div>
-            {canManage && (
+            {canManage && view === "orders" && (
               <>
                 <button onClick={() => setShowBulkOrders(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
                   <Layers size={16} /> Crear varias
