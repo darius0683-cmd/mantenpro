@@ -1685,6 +1685,12 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
   const [dgiiMatch, setDgiiMatch] = useState(null);
   const [dgiiLookupDismissed, setDgiiLookupDismissed] = useState(false);
   const [dgiiSearched, setDgiiSearched] = useState(false);
+  // Búsqueda por nombre en el catálogo DGII importado — para cuando el
+  // vendedor no tiene el RNC a mano y solo conoce el nombre de la empresa.
+  // Al elegir un resultado se llenan Nombre y RNC de una vez.
+  const [dgiiNameQuery, setDgiiNameQuery] = useState("");
+  const [dgiiNameResults, setDgiiNameResults] = useState([]);
+  const [dgiiNameSearching, setDgiiNameSearching] = useState(false);
 
   useEffect(() => {
     const digits = rnc.replace(/\D/g, "");
@@ -1699,6 +1705,26 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
     return () => { active = false; clearTimeout(t); };
   }, [rnc]);
 
+  useEffect(() => {
+    const q = dgiiNameQuery.trim();
+    if (q.length < 3) { setDgiiNameResults([]); setDgiiNameSearching(false); return; }
+    let active = true;
+    setDgiiNameSearching(true);
+    const t = setTimeout(async () => {
+      const { data } = await supabase.from("dgii_rnc_catalog").select("rnc, name, commercial_name")
+        .or(`name.ilike.%${q}%,commercial_name.ilike.%${q}%`).limit(8);
+      if (active) { setDgiiNameResults(data || []); setDgiiNameSearching(false); }
+    }, 400);
+    return () => { active = false; clearTimeout(t); };
+  }, [dgiiNameQuery]);
+
+  const pickDgiiResult = (r) => {
+    setName(r.name);
+    setRnc(r.rnc);
+    setDgiiNameQuery("");
+    setDgiiNameResults([]);
+  };
+
   const submit = () => {
     if (!name.trim()) return;
     onSave({ name: name.trim(), rnc_cedula: rnc.trim() || null, phone: phone.trim() || null, email: email.trim() || null, address: address.trim() || null });
@@ -1706,6 +1732,41 @@ function ClientFormModal({ initial, onClose, onSave, saving }) {
 
   return (
     <Modal title={initial ? "Editar cliente" : "Agregar cliente"} onClose={onClose} wide>
+      {!initial && (
+        <div className="relative mb-3">
+          <Field label="Buscar empresa en el catálogo DGII (opcional)">
+            <input
+              className={inputClass}
+              style={inputStyle}
+              value={dgiiNameQuery}
+              onChange={(e) => setDgiiNameQuery(e.target.value)}
+              placeholder="Escribe el nombre de la empresa (mín. 3 letras)..."
+            />
+          </Field>
+          {dgiiNameQuery.trim().length >= 3 && (
+            <div className="absolute left-0 right-0 z-10 max-h-56 overflow-y-auto" style={{ background: C.panel, border: `1px solid ${C.border}`, top: "100%" }}>
+              {dgiiNameSearching ? (
+                <div className="px-3 py-2 text-xs" style={{ color: C.muted }}>Buscando...</div>
+              ) : dgiiNameResults.length === 0 ? (
+                <div className="px-3 py-2 text-xs" style={{ color: C.muted }}>Sin coincidencias en tu catálogo DGII importado.</div>
+              ) : (
+                dgiiNameResults.map((r) => (
+                  <button
+                    key={r.rnc}
+                    type="button"
+                    onClick={() => pickDgiiResult(r)}
+                    className="w-full text-left px-3 py-2 text-sm"
+                    style={{ borderBottom: `1px solid ${C.border}`, background: "transparent" }}
+                  >
+                    <div style={{ color: C.text }}>{r.name}{r.commercial_name ? ` (${r.commercial_name})` : ""}</div>
+                    <div className="text-xs font-mono" style={{ color: C.muted }}>RNC {r.rnc}</div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Nombre / razón social">
           <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Supermercado La Ideal" />
@@ -1943,6 +2004,99 @@ function SearchSelect({ items, value, onChange, placeholder, getLabel, getSub })
   );
 }
 
+// Igual que SearchSelect pero, además de los clientes ya registrados,
+// mientras el vendedor escribe también busca en el catálogo DGII importado
+// (dgii_rnc_catalog). Si el vendedor no encuentra la empresa entre sus
+// clientes, puede elegirla directamente de ahí — onCreateFromDgii la crea en
+// Clientes al vuelo y la deja seleccionada, sin salir del formulario ni pasar
+// por el botón "+".
+function ClientSearchSelect({ clients, value, onChange, onCreateFromDgii, placeholder }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [dgiiResults, setDgiiResults] = useState([]);
+  const [dgiiSearching, setDgiiSearching] = useState(false);
+  const [creatingRnc, setCreatingRnc] = useState(null);
+  const selected = clients.find((c) => c.id === value);
+
+  const filteredClients = (query.trim()
+    ? clients.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()) || (c.rnc_cedula || "").includes(query.trim()))
+    : clients
+  ).slice(0, 30);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (!onCreateFromDgii || q.length < 3) { setDgiiResults([]); setDgiiSearching(false); return; }
+    let active = true;
+    setDgiiSearching(true);
+    const t = setTimeout(async () => {
+      const { data } = await supabase.from("dgii_rnc_catalog").select("rnc, name, commercial_name")
+        .or(`name.ilike.%${q}%,commercial_name.ilike.%${q}%`).limit(6);
+      if (active) {
+        const existingRncs = new Set(clients.map((c) => (c.rnc_cedula || "").replace(/\D/g, "")).filter(Boolean));
+        setDgiiResults((data || []).filter((r) => !existingRncs.has(r.rnc)));
+        setDgiiSearching(false);
+      }
+    }, 400);
+    return () => { active = false; clearTimeout(t); };
+  }, [query, onCreateFromDgii, clients]);
+
+  const pickDgii = async (row) => {
+    setCreatingRnc(row.rnc);
+    const created = await onCreateFromDgii(row);
+    setCreatingRnc(null);
+    if (created) { onChange(created.id); setOpen(false); setQuery(""); }
+  };
+
+  return (
+    <div className="relative">
+      <input
+        className={inputClass}
+        style={inputStyle}
+        value={open ? query : selected ? selected.name : ""}
+        onFocus={() => { setOpen(true); setQuery(""); }}
+        onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder || "Buscar cliente..."}
+      />
+      {open && (
+        <div className="absolute z-50 w-full mt-1 max-h-64 overflow-y-auto" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          {filteredClients.map((c) => (
+            <button key={c.id} type="button" onMouseDown={() => { onChange(c.id); setOpen(false); }} className="w-full text-left px-3 py-2 text-sm flex justify-between" style={{ color: C.text }}>
+              <span>{c.name}</span>
+              {c.rnc_cedula && <span className="text-xs" style={{ color: C.muted }}>{c.rnc_cedula}</span>}
+            </button>
+          ))}
+          {filteredClients.length === 0 && <div className="px-3 py-2 text-sm" style={{ color: C.muted }}>Sin resultados entre tus clientes</div>}
+          {onCreateFromDgii && query.trim().length >= 3 && (
+            <>
+              <div className="px-3 py-1 text-xs uppercase tracking-wide" style={{ color: C.muted, borderTop: `1px solid ${C.border}` }}>Catálogo DGII</div>
+              {dgiiSearching ? (
+                <div className="px-3 py-2 text-xs" style={{ color: C.muted }}>Buscando...</div>
+              ) : dgiiResults.length === 0 ? (
+                <div className="px-3 py-2 text-xs" style={{ color: C.muted }}>Sin coincidencias.</div>
+              ) : (
+                dgiiResults.map((r) => (
+                  <button
+                    key={r.rnc}
+                    type="button"
+                    onMouseDown={() => pickDgii(r)}
+                    disabled={creatingRnc === r.rnc}
+                    className="w-full text-left px-3 py-2 text-sm flex justify-between items-center gap-2 disabled:opacity-50"
+                    style={{ color: C.text }}
+                  >
+                    <span className="truncate">{r.name}{r.commercial_name ? ` (${r.commercial_name})` : ""}</span>
+                    <span className="text-xs flex-shrink-0" style={{ color: C.amber }}>{creatingRnc === r.rnc ? "Agregando..." : `+ Agregar (${r.rnc})`}</span>
+                  </button>
+                ))
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function printDocument(title, bodyHtml) {
   const win = window.open("", "_blank", "width=800,height=900");
   if (!win) { alert("Tu navegador bloqueó la ventana emergente. Permite las ventanas emergentes para poder imprimir."); return; }
@@ -2144,8 +2298,18 @@ const addMonths = (dateStr, months) => {
 };
 const daysBetween = (a, b) => Math.ceil((a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24));
 
-function ClientAssetFormModal({ clients, branches, technicians, initial, onClose, onSave, saving, onRequestNewClient }) {
+function ClientAssetFormModal({ clients, branches, technicians, initial, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
   const [clientId, setClientId] = useState(initial?.client_id || clients[0]?.id || "");
+  // Si desde este formulario se creó un cliente nuevo con el "+" (búsqueda en
+  // catálogo DGII o manual), lo selecciona solo en cuanto se guarda — sin
+  // aplicar tokens que ya existían antes de abrir este formulario.
+  const appliedAutoSelectTokenRef = useRef(autoSelectToken);
+  useEffect(() => {
+    if (autoSelectToken !== appliedAutoSelectTokenRef.current && autoSelectClientId) {
+      setClientId(autoSelectClientId);
+      appliedAutoSelectTokenRef.current = autoSelectToken;
+    }
+  }, [autoSelectToken, autoSelectClientId]);
   const [name, setName] = useState(initial?.name || "");
   const [brand, setBrand] = useState(initial?.brand || "");
   const [model, setModel] = useState(initial?.model || "");
@@ -4241,9 +4405,18 @@ function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
   );
 }
 
-function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccounts, defaultBranchId, prefill, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
+function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccounts, defaultBranchId, prefill, maxDiscountPct, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
   const [title, setTitle] = useState(prefill?.title || "");
   const [clientId, setClientId] = useState(prefill?.client_id || clients[0]?.id || "");
+  // Si desde este formulario se creó un cliente nuevo con el "+", lo selecciona
+  // solo en cuanto se guarda — ver nota en ClientAssetFormModal.
+  const appliedAutoSelectTokenRef = useRef(autoSelectToken);
+  useEffect(() => {
+    if (autoSelectToken !== appliedAutoSelectTokenRef.current && autoSelectClientId) {
+      setClientId(autoSelectClientId);
+      appliedAutoSelectTokenRef.current = autoSelectToken;
+    }
+  }, [autoSelectToken, autoSelectClientId]);
   const [sequenceId, setSequenceId] = useState("");
   const [branchId, setBranchId] = useState(prefill?.branch_id || defaultBranchId || branches?.[0]?.id || "");
   const [invoiceDate, setInvoiceDate] = useState(() => todayStrRD());
@@ -5035,9 +5208,18 @@ const SALES_ORDER_STATUS_CFG = {
   cancelada: { label: "Cancelada", color: "#E8654F" },
 };
 
-function QuoteFormModal({ clients, products, branches, defaultBranchId, prefill, initial, initialItems, maxDiscountPct, onClose, onSave, saving, onRequestNewClient }) {
+function QuoteFormModal({ clients, products, branches, defaultBranchId, prefill, initial, initialItems, maxDiscountPct, onClose, onSave, saving, onRequestNewClient, onCreateClientFromDgii, autoSelectClientId, autoSelectToken }) {
   const [title, setTitle] = useState(initial?.title || prefill?.title || "");
   const [clientId, setClientId] = useState(initial?.client_id || prefill?.client_id || clients[0]?.id || "");
+  // Si desde este formulario se creó un cliente nuevo con el "+", lo selecciona
+  // solo en cuanto se guarda — ver nota en ClientAssetFormModal.
+  const appliedAutoSelectTokenRef = useRef(autoSelectToken);
+  useEffect(() => {
+    if (autoSelectToken !== appliedAutoSelectTokenRef.current && autoSelectClientId) {
+      setClientId(autoSelectClientId);
+      appliedAutoSelectTokenRef.current = autoSelectToken;
+    }
+  }, [autoSelectToken, autoSelectClientId]);
   const [branchId, setBranchId] = useState(initial?.branch_id || prefill?.branch_id || defaultBranchId || branches?.[0]?.id || "");
   const [quoteDate, setQuoteDate] = useState(initial?.quote_date || (() => todayStrRD())());
   const [validUntil, setValidUntil] = useState(initial?.valid_until || "");
@@ -5123,7 +5305,7 @@ function QuoteFormModal({ clients, products, branches, defaultBranchId, prefill,
       <div className="grid grid-cols-3 gap-3">
         <Field label="Cliente">
           <div className="flex gap-2">
-            <div className="flex-1"><SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} /></div>
+            <div className="flex-1"><ClientSearchSelect clients={clients} value={clientId} onChange={setClientId} onCreateFromDgii={onCreateClientFromDgii} placeholder="Buscar cliente o empresa (DGII)..." /></div>
             <button type="button" onClick={onRequestNewClient} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
           </div>
         </Field>
@@ -5460,12 +5642,21 @@ const INCIDENT_STATUS_CFG = {
   convertido: { label: "Convertido", color: "#4FA8D8" },
 };
 
-function IncidentFormModal({ branches, equipment, clients, technicians, initial, onClose, onSave, saving, onRequestNewClient }) {
+function IncidentFormModal({ branches, equipment, clients, technicians, initial, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || "");
   const [equipmentId, setEquipmentId] = useState(initial?.equipment_id || "");
   const [clientId, setClientId] = useState(initial?.client_id || "");
+  // Si desde este formulario se creó un cliente nuevo con el "+", lo selecciona
+  // solo en cuanto se guarda — ver nota en ClientAssetFormModal.
+  const appliedAutoSelectTokenRef = useRef(autoSelectToken);
+  useEffect(() => {
+    if (autoSelectToken !== appliedAutoSelectTokenRef.current && autoSelectClientId) {
+      setClientId(autoSelectClientId);
+      appliedAutoSelectTokenRef.current = autoSelectToken;
+    }
+  }, [autoSelectToken, autoSelectClientId]);
   const [reportedBy, setReportedBy] = useState(initial?.reported_by || "");
   const [priority, setPriority] = useState(initial?.priority || "media");
   const [technicianId, setTechnicianId] = useState(initial?.technician_id || "");
@@ -6907,6 +7098,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // móvil, que ya se esconde solo). Solo cambia visibilidad/ancho, no desmonta NAV
   // ni pierde la sección abierta — al volver a expandir queda todo como estaba.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Departamento abierto dentro del Panel (null = mostrar los 4 departamentos).
+  // Se resetea a null cada vez que se ENTRA al Panel desde otra vista (ver efecto
+  // más abajo, cerca de "view"), para que siempre arranque mostrando los
+  // departamentos y no se quede "atorado" dentro de uno de una visita anterior.
+  const [dashboardDept, setDashboardDept] = useState(null);
+  // Ítem con submenú abierto dentro del departamento (null = mostrar las
+  // subsecciones del departamento). Tercer nivel del drill-down del Panel.
+  const [dashboardSubmenu, setDashboardSubmenu] = useState(null);
   const [pushSubscribed, setPushSubscribed] = useState(false);
   const [quotes, setQuotes] = useState([]);
   const [salesOrders, setSalesOrders] = useState([]);
@@ -6956,31 +7155,79 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // (se llega a la primera pantalla que se abrió) "atrás" vuelve a comportarse
   // normal y sale de la app — es el comportamiento nativo del navegador, no hay
   // que simularlo.
+  //
+  // El drill-down del Panel (departamentos → subsecciones) también entra en este
+  // mismo historial (guardamos "dept" junto con "view" en cada entrada). Antes solo
+  // "view" se empujaba, así que entrar a un departamento no dejaba rastro en el
+  // historial: al presionar "atrás" desde una subsección, saltaba directo al Panel
+  // sin pasar por la pantalla del departamento. Ahora cada paso (departamento
+  // abierto, subsección abierta) es su propia entrada.
   useEffect(() => {
     const url = new URL(window.location.href);
     url.searchParams.set("view", view);
-    window.history.replaceState({ view }, "", url);
+    if (dashboardDept) url.searchParams.set("dept", dashboardDept); else url.searchParams.delete("dept");
+    if (dashboardSubmenu) url.searchParams.set("sub", dashboardSubmenu); else url.searchParams.delete("sub");
+    window.history.replaceState({ view, dept: dashboardDept || null, sub: dashboardSubmenu || null }, "", url);
     // eslint-disable-next-line
   }, []);
 
   useEffect(() => {
     const onPopState = (event) => {
-      const nextView = event.state?.view || new URLSearchParams(window.location.search).get("view") || "dashboard";
+      const params = new URLSearchParams(window.location.search);
+      const nextView = event.state?.view ?? params.get("view") ?? "dashboard";
+      const nextDept = event.state?.dept ?? params.get("dept") ?? null;
+      const nextSub = event.state?.sub ?? params.get("sub") ?? null;
       setView(nextView);
+      setDashboardDept(nextDept);
+      setDashboardSubmenu(nextSub);
       setShowMobileMenu(false);
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
-  const changeView = (key) => {
-    if (key === view) return;
-    setView(key);
-    setShowMobileMenu(false);
+  const pushHistoryState = (key, dept, sub) => {
     const url = new URL(window.location.href);
     url.searchParams.set("view", key);
-    window.history.pushState({ view: key }, "", url);
+    if (dept) url.searchParams.set("dept", dept); else url.searchParams.delete("dept");
+    if (sub) url.searchParams.set("sub", sub); else url.searchParams.delete("sub");
+    window.history.pushState({ view: key, dept: dept || null, sub: sub || null }, "", url);
   };
+
+  const changeView = (key) => {
+    if (key === view && !dashboardDept) return;
+    setView(key);
+    setDashboardDept(null);
+    setDashboardSubmenu(null);
+    setShowMobileMenu(false);
+    pushHistoryState(key, null, null);
+  };
+
+  // Entrar a un departamento del Panel (primer nivel del drill-down). No usa
+  // changeView porque la vista sigue siendo "dashboard" — solo cambia qué se
+  // muestra dentro de ella — pero sí necesita su propia entrada de historial
+  // para que "atrás" regrese a la lista de departamentos en vez de saltarse ese paso.
+  const openDashboardDept = (deptName) => {
+    setDashboardDept(deptName);
+    setDashboardSubmenu(null);
+    pushHistoryState("dashboard", deptName, null);
+  };
+
+  // Entrar al submenú de un ítem con "children" dentro de un departamento
+  // (segundo nivel del drill-down, tercero contando el Panel). Mismo patrón:
+  // su propia entrada de historial para que "atrás" regrese a las subsecciones
+  // del departamento en vez de saltarse ese paso.
+  const openDashboardSubmenu = (menuKey) => {
+    setDashboardSubmenu(menuKey);
+    pushHistoryState("dashboard", dashboardDept, menuKey);
+  };
+
+  // El botón "‹ Departamentos"/"‹ <departamento>" usa el historial real
+  // (window.history.back()) en vez de poner el estado en null directamente,
+  // para que quede consistente con lo que hace el botón "atrás" nativo — un
+  // solo mecanismo, no dos que se puedan desincronizar.
+  const closeDashboardDept = () => window.history.back();
+  const closeDashboardSubmenu = () => window.history.back();
 
   const [showOrderForm, setShowOrderForm] = useState(false);
   const [showBulkOrders, setShowBulkOrders] = useState(false);
@@ -7005,6 +7252,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [inviteLink, setInviteLink] = useState("");
   const [historyFor, setHistoryFor] = useState(null);
   const [showAddClient, setShowAddClient] = useState(false);
+  // Último cliente creado desde el botón "+" de Cotizaciones/Facturación/
+  // Incidentes/Activos de cliente, para seleccionarlo solo en ese formulario
+  // en cuanto se guarda — sin tener que volver a buscarlo manualmente.
+  // autoSelectToken solo sube cuando se crea un cliente nuevo (no al editar),
+  // así cada formulario puede distinguir "ya lo aplico" de "esto es de antes,
+  // de otra sesión de creación, no me toca a mí".
+  const [autoSelectClientId, setAutoSelectClientId] = useState(null);
+  const [autoSelectToken, setAutoSelectToken] = useState(0);
   const [editingClient, setEditingClient] = useState(null);
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [editingAsset, setEditingAsset] = useState(null);
@@ -8313,7 +8568,21 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       if (error) { setErrorMsg(error.message); return; }
       setClients((prev) => [...prev, data]);
       setShowAddClient(false);
+      setAutoSelectClientId(data.id);
+      setAutoSelectToken((t) => t + 1);
     }
+  };
+
+  // Crea un cliente al vuelo desde un resultado del catálogo DGII, elegido
+  // directamente en el buscador de Cliente de Cotizaciones (sin pasar por el
+  // botón "+" ni por el formulario completo de "Agregar cliente").
+  const createClientFromDgii = async (dgiiRow) => {
+    setSaving(true);
+    const { data, error } = await supabase.from("clients").insert({ name: dgiiRow.name, rnc_cedula: dgiiRow.rnc, company_id: companyId }).select().single();
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return null; }
+    setClients((prev) => [...prev, data]);
+    return data;
   };
 
   const deleteClient = async (id) => {
@@ -10439,14 +10708,30 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const flattenNavKeys = (items) => items.flatMap((it) => (it.section ? [] : it.children ? it.children.map((c) => c.key) : [it.key]));
 
-  // Accesos rápidos del Panel (estilo "launcher de apps" de Odoo): cada ítem/subítem
-  // visible de NAV (ya filtrado por permisos y por módulo contratado) se ve como un
-  // icono grande de color en vez de tener que buscarlo en el menú lateral. El Panel
-  // mismo ("dashboard") se excluye porque ya es la pantalla donde se muestra esto.
+  // Accesos rápidos del Panel (estilo "launcher de apps" de Odoo), en dos niveles:
+  // primero los 4 departamentos (secciones de NAV), y al entrar a uno, sus
+  // subsecciones. "dashboard" ("Panel") no entra a ningún departamento porque
+  // en RAW_NAV aparece antes del primer marcador de sección.
   const APP_TILE_COLORS = ["#7C6FE0", "#3E9BE0", "#4CAF6D", "#E0A83E", "#E0577C", "#8E5CE0", "#3EC7C2", "#E0733E", "#5C8FE0", "#C24CE0", "#4CC2A0", "#E0475C", "#6FA8E0", "#8FE04C", "#F2A93B", "#E05C9B"];
-  const quickAccessTiles = NAV.flatMap((it) =>
-    it.section || it.key === "dashboard" ? [] : it.children ? it.children.map((c) => ({ key: c.key, label: c.label, Icon: c.Icon })) : [{ key: it.key, label: it.label, Icon: it.Icon }]
-  ).map((it, i) => ({ ...it, color: APP_TILE_COLORS[i % APP_TILE_COLORS.length] }));
+  const DEPARTMENT_CFG = {
+    "Departamento Técnico": { Icon: Wrench, color: "#3E9BE0" },
+    "Comercial": { Icon: ShoppingCart, color: "#4CAF6D" },
+    "Gestión Contable": { Icon: Hash, color: "#8E5CE0" },
+    "Administración": { Icon: Building2, color: "#E0733E" },
+  };
+  // Se conserva la jerarquía (items con "children" quedan como tal, no se
+  // aplanan) para que el Panel pueda mostrar un tercer nivel: los renglones de
+  // un ítem con submenú (ej. "Inventario" → Herramientas/Almacén) aparecen al
+  // entrar a ese ítem, igual que ya pasa en la columna de opciones lateral.
+  const navSections = [];
+  {
+    let current = null;
+    NAV.forEach((it) => {
+      if (it.section) { current = { name: it.section, items: [] }; navSections.push(current); return; }
+      if (!current) return;
+      current.items.push(it);
+    });
+  }
 
   useEffect(() => {
     if (hasPerm(view)) return;
@@ -10700,22 +10985,80 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
           {!loadingScope && hasPerm("dashboard") && view === "dashboard" && (
             <div>
-              <div className="text-sm font-semibold mb-3" style={{ color: C.muted }}>Accesos rápidos</div>
-              <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
-                {quickAccessTiles.map((it) => (
-                  <button
-                    key={it.key}
-                    onClick={() => changeView(it.key)}
-                    className="flex flex-col items-center gap-2 p-2 text-center"
-                    style={{ background: "transparent" }}
-                  >
-                    <div className="w-16 h-16 flex items-center justify-center" style={{ background: it.color, borderRadius: 14 }}>
-                      <it.Icon size={30} color="#fff" />
-                    </div>
-                    <div className="text-xs leading-tight" style={{ color: C.text }}>{it.label}</div>
+              {dashboardDept === null ? (
+                <>
+                  <div className="text-sm font-semibold mb-3" style={{ color: C.muted }}>Departamentos</div>
+                  <div className="grid gap-5 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
+                    {navSections.map((sec) => {
+                      const cfg = DEPARTMENT_CFG[sec.name] || { Icon: Layers, color: C.amber };
+                      return (
+                        <button
+                          key={sec.name}
+                          onClick={() => openDashboardDept(sec.name)}
+                          className="flex flex-col items-center gap-2 p-2 text-center"
+                          style={{ background: "transparent" }}
+                        >
+                          <div className="w-24 h-24 flex items-center justify-center" style={{ background: cfg.color, borderRadius: 20 }}>
+                            <cfg.Icon size={44} color="#fff" />
+                          </div>
+                          <div className="text-sm font-medium leading-tight" style={{ color: C.text }}>{sec.name}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : dashboardSubmenu === null ? (
+                <>
+                  <button onClick={closeDashboardDept} className="flex items-center gap-1 text-sm mb-4" style={{ color: C.muted }}>
+                    <ChevronLeft size={16} /> Departamentos
                   </button>
-                ))}
-              </div>
+                  <div className="text-sm font-semibold mb-3" style={{ color: C.muted }}>{dashboardDept}</div>
+                  <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
+                    {(navSections.find((s) => s.name === dashboardDept)?.items || []).map((it, i) => (
+                      <button
+                        key={it.key}
+                        onClick={() => (it.children ? openDashboardSubmenu(it.key) : changeView(it.key))}
+                        className="flex flex-col items-center gap-2 p-2 text-center"
+                        style={{ background: "transparent" }}
+                      >
+                        <div className="w-16 h-16 flex items-center justify-center" style={{ background: APP_TILE_COLORS[i % APP_TILE_COLORS.length], borderRadius: 14 }}>
+                          <it.Icon size={30} color="#fff" />
+                        </div>
+                        <div className="text-xs leading-tight" style={{ color: C.text }}>{it.label}</div>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <button onClick={closeDashboardSubmenu} className="flex items-center gap-1 text-sm mb-4" style={{ color: C.muted }}>
+                    <ChevronLeft size={16} /> {dashboardDept}
+                  </button>
+                  {(() => {
+                    const parentItem = (navSections.find((s) => s.name === dashboardDept)?.items || []).find((it) => it.key === dashboardSubmenu);
+                    return (
+                      <>
+                        <div className="text-sm font-semibold mb-3" style={{ color: C.muted }}>{parentItem?.label || dashboardSubmenu}</div>
+                        <div className="grid gap-4 mb-6" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(104px, 1fr))" }}>
+                          {(parentItem?.children || []).map((child, i) => (
+                            <button
+                              key={child.key}
+                              onClick={() => changeView(child.key)}
+                              className="flex flex-col items-center gap-2 p-2 text-center"
+                              style={{ background: "transparent" }}
+                            >
+                              <div className="w-16 h-16 flex items-center justify-center" style={{ background: APP_TILE_COLORS[i % APP_TILE_COLORS.length], borderRadius: 14 }}>
+                                <child.Icon size={30} color="#fff" />
+                              </div>
+                              <div className="text-xs leading-tight" style={{ color: C.text }}>{child.label}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </>
+              )}
             </div>
           )}
 
@@ -13733,8 +14076,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {historyFor && <HistoryModal title={historyFor.title} orders={historyFor.orders} branchName={branchName} equipName={equipName} techName={techName} onClose={() => setHistoryFor(null)} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
       {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
-      {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
-      {editingAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} initial={editingAsset} onClose={() => setEditingAsset(null)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} />}
+      {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
+      {editingAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} initial={editingAsset} onClose={() => setEditingAsset(null)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
       {showAddProduct && (
         <ProductFormModal
           existingProducts={products.filter((p) => (p.item_type || "producto") === (view === "services" ? "servicio" : "producto"))}
@@ -13906,6 +14249,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onSave={createInvoice}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}
+          autoSelectClientId={autoSelectClientId}
+          autoSelectToken={autoSelectToken}
         />
       )}
       {showAddQuote && (
@@ -13920,6 +14265,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onSave={(payload, items) => createQuote(payload, items, quotePrefill?.incidentId)}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}
+          onCreateClientFromDgii={createClientFromDgii}
+          autoSelectClientId={autoSelectClientId}
+          autoSelectToken={autoSelectToken}
         />
       )}
       {quoteDetail && (
@@ -13975,6 +14323,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onSave={updateQuote}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}
+          onCreateClientFromDgii={createClientFromDgii}
+          autoSelectClientId={autoSelectClientId}
+          autoSelectToken={autoSelectToken}
         />
       )}
       {showAddIncident && (
@@ -13987,6 +14338,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onSave={saveIncident}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}
+          autoSelectClientId={autoSelectClientId}
+          autoSelectToken={autoSelectToken}
         />
       )}
       {editingIncident && (
@@ -14000,6 +14353,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onSave={saveIncident}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}
+          autoSelectClientId={autoSelectClientId}
+          autoSelectToken={autoSelectToken}
         />
       )}
       {incidentDetail && (
