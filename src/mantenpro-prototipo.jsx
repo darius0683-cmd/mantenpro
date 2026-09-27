@@ -3,7 +3,7 @@ import { supabase } from "./supabaseClient";
 import {
   LayoutDashboard, ClipboardList, Users, Building2, Plus, X, Search,
   CheckCircle2, MapPin, Wrench, Trash2, ArrowRight, Loader2, LogOut,
-  Settings2, Pencil, ShieldCheck, Copy, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet, Package, UserCheck, MessageCircle, Bell, BellOff, Menu, FolderKanban, Link2, Unlink
+  Settings2, Pencil, ShieldCheck, Copy, Sun, Moon, Mail, FileText, Paperclip, ImageIcon, BarChart3, History, Users2, Boxes, Truck, ShoppingCart, Receipt, Hash, Ban, BadgeCheck, ClipboardCheck, AlertTriangle, Layers, RotateCcw, CalendarDays, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Upload, Wallet, Package, UserCheck, MessageCircle, Bell, BellOff, Menu, FolderKanban, Link2, Unlink
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, Legend
@@ -106,22 +106,72 @@ async function extractInvoiceDataFromPdf(file) {
 // Se amplió de 5 a 45 días porque hay créditos a clientes/proveedores de hasta 45 días
 // entre la fecha de la factura y la fecha real del pago.
 const BANK_MATCH_WINDOW_DAYS = 45;
-const C = {
-  bg: "#12151A",
-  panel: "#1B1F27",
-  panelAlt: "#20242D",
-  border: "#2A2F3A",
-  text: "#EDEBE6",
-  muted: "#8B92A0",
-  // Color de marca/acento (botones primarios, portada, resaltados). Antes era
-  // naranja claro (#F2A93B); ahora es verde claro. Se deja la clave "amber" tal
-  // cual (se usa en más de 250 lugares del archivo) para no tener que renombrarla
-  // en todos lados — solo cambia el valor del color.
-  amber: "#8FD14F",
-  green: "#4CAF6D",
-  red: "#E8654F",
-  blue: "#4FA8D8",
+// ---- Tema claro / oscuro ----
+// Los colores viven en el objeto C, que se usa en todo el archivo (incluyendo mezclas tipo
+// C.amber + "60" para transparencias, por eso todos los valores son hex de 6 dígitos).
+// El tema se elige por dispositivo (localStorage) y se aplica al cargar; al cambiarlo se
+// recarga la página — la sección abierta se conserva porque va en la URL (?view=).
+const THEMES = {
+  dark: {
+    bg: "#12151A",
+    panel: "#1B1F27",
+    panelAlt: "#20242D",
+    border: "#2A2F3A",
+    text: "#EDEBE6",
+    muted: "#8B92A0",
+    // Color de marca/acento (botones primarios, portada, resaltados). Se deja la clave
+    // "amber" (se usa en más de 250 lugares) aunque hoy el color es verde claro.
+    amber: "#8FD14F",
+    green: "#4CAF6D",
+    red: "#E8654F",
+    blue: "#4FA8D8",
+    orange: "#F2A93B",
+    redBg: "#3A2020",
+  },
+  light: {
+    bg: "#F3F5F8",
+    panel: "#FFFFFF",
+    panelAlt: "#EEF1F5",
+    border: "#D5DBE3",
+    text: "#1B2230",
+    muted: "#5C6878",
+    amber: "#3F8A14",
+    green: "#23804A",
+    red: "#C5412B",
+    blue: "#1F6FA3",
+    orange: "#B56A00",
+    redBg: "#FDECEA",
+  },
 };
+const THEME_KEY = "mantenpro-theme";
+const CURRENT_THEME = (() => {
+  try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch { return "dark"; }
+})();
+const C = { ...THEMES[CURRENT_THEME] };
+
+(() => {
+  try {
+    document.documentElement.style.colorScheme = CURRENT_THEME; // selects, calendarios y scrollbars nativos
+    document.body.style.background = C.bg;
+    document.body.style.color = C.text;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", C.bg);
+  } catch { /* sin DOM: no pasa nada */ }
+})();
+
+function toggleTheme() {
+  try { localStorage.setItem(THEME_KEY, CURRENT_THEME === "light" ? "dark" : "light"); } catch { /* sin almacenamiento: no se puede recordar */ }
+  window.location.reload();
+}
+
+function ThemeToggleButton() {
+  const isLight = CURRENT_THEME === "light";
+  return (
+    <button onClick={toggleTheme} className="flex items-center gap-2 text-xs mb-2" style={{ color: C.muted }}>
+      {isLight ? <Moon size={13} /> : <Sun size={13} />} {isLight ? "Tema oscuro" : "Tema claro"}
+    </button>
+  );
+}
 
 const TYPE_CFG = {
   preventivo: { label: "Preventivo", color: C.green },
@@ -165,7 +215,7 @@ const ACTIVITY_TABLE_LABELS = {
 };
 const ACTIVITY_ACTION_LABELS = {
   INSERT: { label: "Creado", color: "#4CAF6D" },
-  UPDATE: { label: "Actualizado", color: "#F2A93B" },
+  UPDATE: { label: "Actualizado", color: C.orange },
   DELETE: { label: "Eliminado", color: "#E8654F" },
 };
 
@@ -1128,6 +1178,7 @@ function SupportViewer({ onSignOut }) {
           ))}
         </nav>
         <div className="px-5 py-4" style={{ borderTop: `1px solid ${C.border}` }}>
+          <ThemeToggleButton />
           <button onClick={onSignOut} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}>
             <LogOut size={13} /> Cerrar sesión
           </button>
@@ -1136,7 +1187,7 @@ function SupportViewer({ onSignOut }) {
 
       <div className="flex-1 flex flex-col min-w-0">
         {error && (
-          <div className="px-4 py-2 text-xs" style={{ background: "#3A2020", color: C.red }}>Error: {error}</div>
+          <div className="px-4 py-2 text-xs" style={{ background: C.redBg, color: C.red }}>Error: {error}</div>
         )}
         <div className="flex-1 overflow-y-auto p-6">
           {!selectedCompany ? (
@@ -2718,6 +2769,60 @@ function CashOpenModal({ branchName, onClose, onSave, saving }) {
         </button>
       </div>
     </Modal>
+  );
+}
+
+function CardAcquirersPanel({ acquirers, canManage, onSave }) {
+  const [draft, setDraft] = useState({ name: "", commission_pct: "", retention_pct: "" });
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const save = async (row, after) => {
+    setBusy(true);
+    const ok = await onSave(row);
+    setBusy(false);
+    if (ok && after) after();
+  };
+  return (
+    <div className="p-4 space-y-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+      <div className="text-xs" style={{ color: C.muted }}>
+        Empresas que procesan tus cobros con tarjeta (el Verifone). La comisión y la retención se descuentan del monto cobrado para calcular el neto que te depositan — úsalo para cuadrar la conciliación bancaria. Confirma los porcentajes con tu contrato y tu contador.
+      </div>
+      {(acquirers || []).map((a) => editing?.id === a.id ? (
+        <div key={a.id} className="grid grid-cols-12 gap-2 items-center">
+          <input className={`${inputClass} col-span-4`} style={inputStyle} value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+          <input type="number" step="0.01" min="0" className={`${inputClass} col-span-2`} style={inputStyle} value={editing.commission_pct} onChange={(e) => setEditing({ ...editing, commission_pct: e.target.value })} title="Comisión %" />
+          <input type="number" step="0.01" min="0" className={`${inputClass} col-span-2`} style={inputStyle} value={editing.retention_pct} onChange={(e) => setEditing({ ...editing, retention_pct: e.target.value })} title="Retención %" />
+          <div className="col-span-4 flex justify-end gap-2">
+            <button onClick={() => setEditing(null)} className="px-2 py-1 text-xs" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+            <button disabled={busy} onClick={() => save(editing, () => setEditing(null))} className="px-2 py-1 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>Guardar</button>
+          </div>
+        </div>
+      ) : (
+        <div key={a.id} className="flex items-center justify-between text-sm px-3 py-2" style={{ background: C.panelAlt, opacity: a.active ? 1 : 0.5 }}>
+          <div>
+            <span style={{ color: C.text }}>{a.name}</span>
+            <span className="text-xs ml-2" style={{ color: C.muted }}>Comisión {Number(a.commission_pct)}%{Number(a.retention_pct) > 0 ? ` · Retención ${Number(a.retention_pct)}%` : ""}{a.active ? "" : " · Inactivo"}</span>
+          </div>
+          {canManage && (
+            <div className="flex gap-2">
+              <button onClick={() => setEditing({ ...a })} style={iconBtnStyle}><Pencil size={13} /></button>
+              <button disabled={busy} onClick={() => save({ ...a, active: !a.active })} className="text-xs" style={{ color: a.active ? C.red : C.green }}>{a.active ? "Desactivar" : "Activar"}</button>
+            </div>
+          )}
+        </div>
+      ))}
+      {(acquirers || []).length === 0 && <div className="text-sm" style={{ color: C.muted }}>Todavía no hay adquirentes configurados.</div>}
+      {canManage && (
+        <div className="grid grid-cols-12 gap-2 items-end pt-2">
+          <div className="col-span-4"><Field label="Nombre"><input className={inputClass} style={inputStyle} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Ej. Azul, CardNET" /></Field></div>
+          <div className="col-span-3"><Field label="Comisión %"><input type="number" step="0.01" min="0" className={inputClass} style={inputStyle} value={draft.commission_pct} onChange={(e) => setDraft({ ...draft, commission_pct: e.target.value })} placeholder="Ej. 3.5" /></Field></div>
+          <div className="col-span-3"><Field label="Retención % (opcional)"><input type="number" step="0.01" min="0" className={inputClass} style={inputStyle} value={draft.retention_pct} onChange={(e) => setDraft({ ...draft, retention_pct: e.target.value })} placeholder="0" /></Field></div>
+          <div className="col-span-2 pb-3">
+            <button disabled={busy || !draft.name.trim()} onClick={() => save(draft, () => setDraft({ name: "", commission_pct: "", retention_pct: "" }))} className="w-full flex items-center justify-center gap-1 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}><Plus size={14} /> Agregar</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -4687,7 +4792,20 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccou
   );
 }
 
-function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, canEdit, canDelete, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
+const CARD_BRANDS = ["Visa", "Mastercard", "American Express", "Discover", "Diners Club", "Otra"];
+
+// Resumen en una línea de los datos del voucher de un pago con tarjeta
+function cardDetailLine(card) {
+  if (!card) return "";
+  return [
+    card.acquirer_name,
+    [card.card_brand, card.last4 ? `••${card.last4}` : null].filter(Boolean).join(" "),
+    card.auth_code ? `Aprob. ${card.auth_code}` : null,
+    card.batch_number ? `Lote ${card.batch_number}` : null,
+  ].filter(Boolean).join(" · ");
+}
+
+function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, cardAcquirers, canEdit, canDelete, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
   const statusColor = invoice.status === "anulada" ? C.red : C.green;
   const payCfg = PAYMENT_STATUS_CFG[invoice.payment_status] || PAYMENT_STATUS_CFG.pendiente;
   const balance = Number(invoice.total) - Number(invoice.amount_paid || 0) - Number(invoice.credit_applied || 0);
@@ -4700,6 +4818,20 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
   const [payMethod, setPayMethod] = useState("");
   const [payNotes, setPayNotes] = useState("");
   const [paymentFiles, setPaymentFiles] = useState([]);
+  const activeAcquirers = (cardAcquirers || []).filter((a) => a.active);
+  const [cardAcquirerId, setCardAcquirerId] = useState("");
+  const [cardBrand, setCardBrand] = useState("");
+  const [cardLast4, setCardLast4] = useState("");
+  const [cardAuthCode, setCardAuthCode] = useState("");
+  const [cardBatch, setCardBatch] = useState("");
+  const [cardError, setCardError] = useState("");
+  const isCardPayment = payMethod === "Tarjeta";
+  const selectedAcquirer = activeAcquirers.find((a) => a.id === cardAcquirerId) || null;
+  const cardGross = Number(payAmount) || 0;
+  const cardCommission = selectedAcquirer ? Math.round(cardGross * Number(selectedAcquirer.commission_pct || 0)) / 100 : 0;
+  const cardRetention = selectedAcquirer ? Math.round(cardGross * Number(selectedAcquirer.retention_pct || 0)) / 100 : 0;
+  const cardNet = cardGross - cardCommission - cardRetention;
+  const resetCardFields = () => { setCardAcquirerId(""); setCardBrand(""); setCardLast4(""); setCardAuthCode(""); setCardBatch(""); setCardError(""); };
 
   const selectedBankAccount = (bankAccounts || []).find((a) => a.id === invoice.bank_account_id) || null;
   const doPrint = () => {
@@ -4719,10 +4851,30 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
   const submitPayment = () => {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) return;
-    onRegisterPayment(invoice, { amount: amt, payment_date: payDate, method: payMethod.trim() || null, notes: payNotes.trim() || null }, paymentFiles);
+    let card = null;
+    if (isCardPayment) {
+      if (!selectedAcquirer) { setCardError("Selecciona el adquirente (Azul, CardNET...) del voucher."); return; }
+      if (!cardAuthCode.trim()) { setCardError("Escribe el número de aprobación que aparece en el voucher."); return; }
+      if (cardLast4 && !/^\d{4}$/.test(cardLast4)) { setCardError("Los últimos dígitos de la tarjeta deben ser exactamente 4 números."); return; }
+      card = {
+        acquirer_id: selectedAcquirer.id,
+        acquirer_name: selectedAcquirer.name,
+        card_brand: cardBrand || null,
+        last4: cardLast4 || null,
+        auth_code: cardAuthCode.trim(),
+        batch_number: cardBatch.trim() || null,
+        commission_pct: Number(selectedAcquirer.commission_pct || 0),
+        commission_amount: cardCommission,
+        retention_pct: Number(selectedAcquirer.retention_pct || 0),
+        retention_amount: cardRetention,
+        net_amount: cardNet,
+      };
+    }
+    onRegisterPayment(invoice, { amount: amt, payment_date: payDate, method: payMethod.trim() || null, notes: payNotes.trim() || null, card }, paymentFiles);
     setShowPaymentForm(false);
     setPayNotes("");
     setPaymentFiles([]);
+    resetCardFields();
   };
 
   return (
@@ -4801,6 +4953,16 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
                     {canDelete && <button onClick={() => onDeletePayment(p, invoice)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                   </div>
                 </div>
+                {p.card && (
+                  <div className="text-xs mt-1" style={{ color: C.text }}>
+                    {cardDetailLine(p.card)}
+                    <div style={{ color: C.muted }}>
+                      Comisión {Number(p.card.commission_pct)}%: -{fmtMoney(p.card.commission_amount)}
+                      {Number(p.card.retention_amount) > 0 && <> · Retención {Number(p.card.retention_pct)}%: -{fmtMoney(p.card.retention_amount)}</>}
+                      {" · "}Neto a depositar: <span style={{ color: C.green }}>{fmtMoney(p.card.net_amount)}</span>
+                    </div>
+                  </div>
+                )}
                 {p.notes && <div className="text-xs mt-1" style={{ color: C.muted }}>{p.notes}</div>}
                 {p.attachments && p.attachments.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
@@ -4830,7 +4992,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
             </Field>
           </div>
           <Field label="Método (opcional)">
-            <select className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+            <select className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => { setPayMethod(e.target.value); setCardError(""); }}>
               <option value="">Selecciona un método</option>
               <option value="Efectivo">Efectivo</option>
               <option value="Tarjeta">Tarjeta</option>
@@ -4838,6 +5000,46 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
               <option value="Otro">Otro</option>
             </select>
           </Field>
+          {isCardPayment && (
+            <div className="p-3 space-y-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+              <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Datos del voucher</div>
+              {activeAcquirers.length === 0 && (
+                <div className="text-xs" style={{ color: C.red }}>No hay adquirentes configurados — un admin debe agregarlos en Caja → "Adquirentes de tarjeta".</div>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Adquirente">
+                  <select className={inputClass} style={inputStyle} value={cardAcquirerId} onChange={(e) => setCardAcquirerId(e.target.value)}>
+                    <option value="">Selecciona</option>
+                    {activeAcquirers.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </Field>
+                <Field label="Marca (opcional)">
+                  <select className={inputClass} style={inputStyle} value={cardBrand} onChange={(e) => setCardBrand(e.target.value)}>
+                    <option value="">—</option>
+                    {CARD_BRANDS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </Field>
+                <Field label="No. de aprobación">
+                  <input className={inputClass} style={inputStyle} value={cardAuthCode} onChange={(e) => setCardAuthCode(e.target.value)} placeholder="Ej. 045821" />
+                </Field>
+                <Field label="Últimos 4 dígitos (opcional)">
+                  <input inputMode="numeric" maxLength={4} className={inputClass} style={inputStyle} value={cardLast4} onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, "").slice(0, 4))} placeholder="1234" />
+                </Field>
+                <Field label="Lote / referencia (opcional)">
+                  <input className={inputClass} style={inputStyle} value={cardBatch} onChange={(e) => setCardBatch(e.target.value)} placeholder="Ej. 000123" />
+                </Field>
+              </div>
+              {selectedAcquirer && cardGross > 0 && (
+                <div className="text-xs space-y-0.5" style={{ color: C.muted }}>
+                  <div className="flex justify-between"><span>Comisión {Number(selectedAcquirer.commission_pct)}%</span><span className="font-mono">-{fmtMoney(cardCommission)}</span></div>
+                  {cardRetention > 0 && <div className="flex justify-between"><span>Retención {Number(selectedAcquirer.retention_pct)}%</span><span className="font-mono">-{fmtMoney(cardRetention)}</span></div>}
+                  <div className="flex justify-between font-semibold" style={{ color: C.green }}><span>Neto que depositará {selectedAcquirer.name}</span><span className="font-mono">{fmtMoney(cardNet)}</span></div>
+                </div>
+              )}
+              <div className="text-xs" style={{ color: C.muted }}>Puedes adjuntar la foto del voucher abajo en "Comprobantes de pago".</div>
+              {cardError && <div className="text-xs" style={{ color: C.red }}>{cardError}</div>}
+            </div>
+          )}
           <Field label="Notas (opcional)">
             <textarea rows={2} className={inputClass} style={inputStyle} value={payNotes} onChange={(e) => setPayNotes(e.target.value)} placeholder="Ej. Referencia de transferencia, banco, número de cheque..." />
           </Field>
@@ -4846,7 +5048,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
             {paymentFiles.length > 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>{paymentFiles.length} archivo{paymentFiles.length !== 1 ? "s" : ""} seleccionado{paymentFiles.length !== 1 ? "s" : ""} (se subirán al guardar)</div>}
           </Field>
           <div className="flex justify-end gap-2">
-            <button onClick={() => { setShowPaymentForm(false); setPayNotes(""); setPaymentFiles([]); }} className="px-3 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+            <button onClick={() => { setShowPaymentForm(false); setPayNotes(""); setPaymentFiles([]); resetCardFields(); }} className="px-3 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
             <button onClick={submitPayment} className="px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Guardar pago</button>
           </div>
         </div>
@@ -4880,13 +5082,13 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
 
 const PAYMENT_STATUS_CFG = {
   pendiente: { label: "Pendiente de cobro", color: "#E8654F" },
-  parcial: { label: "Parcialmente cobrada", color: "#F2A93B" },
+  parcial: { label: "Parcialmente cobrada", color: C.orange },
   cobrada: { label: "Cobrada", color: "#4CAF6D" },
 };
 
 const PAYABLE_STATUS_CFG = {
   pendiente: { label: "Pendiente de pago", color: "#E8654F" },
-  parcial: { label: "Parcialmente pagada", color: "#F2A93B" },
+  parcial: { label: "Parcialmente pagada", color: C.orange },
   pagada: { label: "Pagada", color: "#4CAF6D" },
 };
 
@@ -5194,12 +5396,12 @@ function CreditNoteDetailModal({ note, items, invoice, clientName, clientRnc, co
 }
 
 const QUOTE_STATUS_CFG = {
-  pendiente: { label: "Pendiente", color: "#8B92A0" },
+  pendiente: { label: "Pendiente", color: C.muted },
   aprobada: { label: "Aprobada", color: "#4CAF6D" },
   rechazada: { label: "Rechazada", color: "#E8654F" },
   en_orden: { label: "En orden de venta", color: "#4FA8D8" },
   parcial: { label: "Facturada parcialmente", color: "#4FA8D8" },
-  convertida: { label: "Convertida en factura", color: "#F2A93B" },
+  convertida: { label: "Convertida en factura", color: C.orange },
 };
 
 const SALES_ORDER_STATUS_CFG = {
@@ -5636,9 +5838,9 @@ function SalesOrderDetailModal({ order, items, clientName, clientRnc, companyNam
 
 const INCIDENT_STATUS_CFG = {
   abierto: { label: "Abierto", color: "#E8654F" },
-  en_revision: { label: "En revisión", color: "#F2A93B" },
+  en_revision: { label: "En revisión", color: C.orange },
   resuelto: { label: "Completado", color: "#4CAF6D" },
-  descartado: { label: "Descartado", color: "#8B92A0" },
+  descartado: { label: "Descartado", color: C.muted },
   convertido: { label: "Convertido", color: "#4FA8D8" },
 };
 
@@ -7309,6 +7511,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [editingPermissionsFor, setEditingPermissionsFor] = useState(null);
   const [showCloseCaja, setShowCloseCaja] = useState(false);
   const [sessionPayments, setSessionPayments] = useState([]);
+  const [cardAcquirers, setCardAcquirers] = useState([]);
+  const [showAcquirers, setShowAcquirers] = useState(false);
   const [editingTaxRate, setEditingTaxRate] = useState(null);
   const [showAddNcf, setShowAddNcf] = useState(false);
   const [editingNcf, setEditingNcf] = useState(null);
@@ -7448,6 +7652,34 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [companyId]);
+
+  // Adquirentes de tarjeta (Azul, CardNET, VisaNet...) con su % de comisión y retención —
+  // se cargan aparte de loadAll para no tocar ese Promise.all.
+  const loadCardAcquirers = async () => {
+    if (!companyId) return;
+    const { data, error } = await supabase.from("card_acquirers").select("*").eq("company_id", companyId).order("name");
+    if (error) { setErrorMsg(`No se pudieron cargar los adquirentes de tarjeta: ${error.message}`); return; }
+    setCardAcquirers(data || []);
+  };
+  useEffect(() => { loadCardAcquirers(); /* eslint-disable-next-line */ }, [companyId]);
+
+  const saveCardAcquirer = async (acq) => {
+    const row = {
+      name: acq.name.trim(),
+      commission_pct: Number(acq.commission_pct) || 0,
+      retention_pct: Number(acq.retention_pct) || 0,
+      active: acq.active !== false,
+    };
+    if (!row.name) return false;
+    const q = acq.id
+      ? supabase.from("card_acquirers").update(row).eq("id", acq.id).select()
+      : supabase.from("card_acquirers").insert({ ...row, company_id: companyId }).select();
+    const { data, error } = await q;
+    if (error) { setErrorMsg(error.message); return false; }
+    if (!data || data.length === 0) { setErrorMsg("No se guardó el adquirente: la base de datos no aplicó el cambio (revisa que tu usuario sea admin)."); return false; }
+    await loadCardAcquirers();
+    return true;
+  };
 
   useEffect(() => {
     if (view === "dgiiCatalog") loadDgiiCatalogStats();
@@ -9919,7 +10151,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       if (!byPayment.has(a.payment_id)) byPayment.set(a.payment_id, []);
       byPayment.get(a.payment_id).push(a);
     });
-    return paymentsList.map((p) => ({ ...p, attachments: byPayment.get(p.id) || [] }));
+    const { data: cardRows } = await supabase.from("invoice_payment_card_details").select("*").in("payment_id", paymentsList.map((p) => p.id));
+    const cardByPayment = new Map((cardRows || []).map((c) => [c.payment_id, c]));
+    return paymentsList.map((p) => ({ ...p, attachments: byPayment.get(p.id) || [], card: cardByPayment.get(p.id) || null }));
   };
 
   const openInvoiceDetail = async (invoice) => {
@@ -10002,6 +10236,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     });
     const resultRow = Array.isArray(result) ? result[0] : result;
     if (payError || !resultRow) { setSaving(false); setErrorMsg(payError?.message || "No se pudo registrar el pago."); return; }
+
+    if (payload.card) {
+      const { error: cardError } = await supabase.from("invoice_payment_card_details").insert({ ...payload.card, payment_id: resultRow.payment_id, company_id: companyId });
+      if (cardError) setErrorMsg(`El pago se registró, pero no se guardaron los datos del voucher de tarjeta: ${cardError.message}`);
+    }
 
     if (files && files.length > 0) {
       for (const file of files) {
@@ -10092,8 +10331,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const openSession = cashSessions.find((s) => s.branch_id === activeBranchId && s.status === "abierta");
     if (!openSession) { setSessionPayments([]); return; }
     (async () => {
-      const { data } = await supabase.from("invoice_payments").select("amount, method, payment_date").eq("cash_session_id", openSession.id).order("payment_date", { ascending: false });
-      setSessionPayments(data || []);
+      const { data } = await supabase.from("invoice_payments").select("id, invoice_id, amount, method, payment_date").eq("cash_session_id", openSession.id).order("payment_date", { ascending: false });
+      const list = data || [];
+      const cardIds = list.filter((p) => p.method === "Tarjeta").map((p) => p.id);
+      let cardByPayment = new Map();
+      if (cardIds.length > 0) {
+        const { data: cardRows } = await supabase.from("invoice_payment_card_details").select("*").in("payment_id", cardIds);
+        cardByPayment = new Map((cardRows || []).map((c) => [c.payment_id, c]));
+      }
+      setSessionPayments(list.map((p) => ({ ...p, card: cardByPayment.get(p.id) || null })));
     })();
   }, [view, cajaBranch, cashSessions, branches, isVendedor, profile.branch_id]);
 
@@ -10880,6 +11126,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           <button onClick={() => { setShowChangePassword(true); setPasswordChanged(false); }} className="flex items-center gap-2 text-xs mb-2" style={{ color: C.muted }}>
             <ShieldCheck size={13} /> Cambiar contraseña
           </button>
+          <ThemeToggleButton />
           <button onClick={onSignOut} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}>
             <LogOut size={13} /> Cerrar sesión
           </button>
@@ -10895,7 +11142,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
       <div className="flex-1 flex flex-col min-w-0">
         {errorMsg && (
-          <div className="px-4 py-2 text-xs flex items-center justify-between" style={{ background: "#3A2020", color: C.red }}>
+          <div className="px-4 py-2 text-xs flex items-center justify-between" style={{ background: C.redBg, color: C.red }}>
             <span>Error: {errorMsg}</span>
             <button onClick={() => setErrorMsg("")}><X size={14} /></button>
           </div>
@@ -11065,7 +11312,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           {!loadingScope && hasPerm("agenda") && view === "agenda" && (
             <div>
               {overdueOrders.length > 0 && (
-                <div className="flex items-center gap-2 px-4 py-3 mb-4 text-sm" style={{ background: "#3A2020", border: `1px solid ${C.red}40`, color: C.red }}>
+                <div className="flex items-center gap-2 px-4 py-3 mb-4 text-sm" style={{ background: C.redBg, border: `1px solid ${C.red}40`, color: C.red }}>
                   <AlertTriangle size={16} />
                   Tienes {overdueOrders.length} orden{overdueOrders.length !== 1 ? "es" : ""} vencida{overdueOrders.length !== 1 ? "s" : ""} — la fecha programada ya pasó y siguen sin completarse.
                 </div>
@@ -13689,8 +13936,59 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         {sessionPayments.length > 0 && (
                           <div className="text-xs mt-3" style={{ color: C.muted }}>{sessionPayments.length} cobro{sessionPayments.length !== 1 ? "s" : ""} registrado{sessionPayments.length !== 1 ? "s" : ""} en esta caja.</div>
                         )}
+                        {(() => {
+                          const cardPays = sessionPayments.filter((p) => p.method === "Tarjeta");
+                          if (cardPays.length === 0) return null;
+                          const byAcq = {};
+                          cardPays.forEach((p) => {
+                            const k = p.card?.acquirer_name || "Sin datos de voucher";
+                            if (!byAcq[k]) byAcq[k] = { gross: 0, commission: 0, retention: 0, net: 0, count: 0 };
+                            const g = Number(p.amount) || 0;
+                            byAcq[k].gross += g;
+                            byAcq[k].commission += Number(p.card?.commission_amount || 0);
+                            byAcq[k].retention += Number(p.card?.retention_amount || 0);
+                            byAcq[k].net += p.card ? Number(p.card.net_amount || 0) : g;
+                            byAcq[k].count += 1;
+                          });
+                          return (
+                            <div className="mt-4">
+                              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Cobros con tarjeta en esta caja</div>
+                              <div className="overflow-x-auto" style={{ border: `1px solid ${C.border}` }}>
+                                <div className="grid grid-cols-12 gap-2 min-w-[720px] px-3 py-2 text-[10px] uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                                  <div className="col-span-4">Adquirente</div>
+                                  <div className="col-span-2 text-right">Bruto</div>
+                                  <div className="col-span-2 text-right">Comisión</div>
+                                  <div className="col-span-2 text-right">Retención</div>
+                                  <div className="col-span-2 text-right">Neto a depositar</div>
+                                </div>
+                                {Object.entries(byAcq).map(([name, t]) => (
+                                  <div key={name} className="grid grid-cols-12 gap-2 min-w-[720px] px-3 py-2 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                                    <div className="col-span-4" style={{ color: name === "Sin datos de voucher" ? C.red : C.text }}>{name} <span className="text-xs" style={{ color: C.muted }}>({t.count})</span></div>
+                                    <div className="col-span-2 text-right font-mono">{fmtMoney(t.gross)}</div>
+                                    <div className="col-span-2 text-right font-mono" style={{ color: C.red }}>-{fmtMoney(t.commission)}</div>
+                                    <div className="col-span-2 text-right font-mono" style={{ color: C.red }}>-{fmtMoney(t.retention)}</div>
+                                    <div className="col-span-2 text-right font-mono" style={{ color: C.green }}>{fmtMoney(t.net)}</div>
+                                  </div>
+                                ))}
+                                {cardPays.map((p) => (
+                                  <div key={p.id} className="grid grid-cols-12 gap-2 min-w-[720px] px-3 py-1.5 text-xs" style={{ color: C.muted, background: C.panelAlt }}>
+                                    <div className="col-span-8 truncate">{fmtDate(p.payment_date)} · {invoices.find((i) => i.id === p.invoice_id)?.invoice_number || invoices.find((i) => i.id === p.invoice_id)?.ncf || "Factura"} · {p.card ? cardDetailLine(p.card) : <span style={{ color: C.red }}>sin datos de voucher</span>}</div>
+                                    <div className="col-span-4 text-right font-mono">{fmtMoney(p.amount)}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
+
+                    <div className="mb-6">
+                      <button onClick={() => setShowAcquirers((v) => !v)} className="flex items-center gap-2 text-xs uppercase tracking-wide mb-2" style={{ color: C.amber }}>
+                        {showAcquirers ? "▾" : "▸"} Adquirentes de tarjeta ({cardAcquirers.filter((a) => a.active).length} activo{cardAcquirers.filter((a) => a.active).length !== 1 ? "s" : ""})
+                      </button>
+                      {showAcquirers && <CardAcquirersPanel acquirers={cardAcquirers} canManage={isAdmin} onSave={saveCardAcquirer} />}
+                    </div>
 
                     <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Historial de cuadres — {activeBranchName}</div>
                     <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -14394,6 +14692,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           companyName={companyName}
           company={company}
           bankAccounts={companyBankAccounts}
+          cardAcquirers={cardAcquirers}
           canEdit={canEdit("invoices")}
           canDelete={canDelete("invoices")}
           isAdmin={isAdmin}
@@ -14560,10 +14859,10 @@ export default function MantenProApp() {
 
   if (profile.is_active === false) {
     return (
-      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: "#12151A", color: "#E7EAF0", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
         <div className="max-w-sm text-center p-6">
           <div className="text-lg font-bold mb-2">Cuenta desactivada</div>
-          <div className="text-sm mb-5" style={{ color: "#8B92A0" }}>Tu acceso fue desactivado por un administrador de tu empresa. Si crees que es un error, contáctalo directamente.</div>
+          <div className="text-sm mb-5" style={{ color: C.muted }}>Tu acceso fue desactivado por un administrador de tu empresa. Si crees que es un error, contáctalo directamente.</div>
           <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#8FD14F", color: "#1A1500" }}>Cerrar sesión</button>
         </div>
       </div>
@@ -14578,14 +14877,14 @@ export default function MantenProApp() {
   // solo de que la UI lo respete.
   if (company?.billing_status === "suspendida") {
     return (
-      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: "#12151A", color: "#E7EAF0", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
         <div className="max-w-sm text-center p-6">
           <div className="text-lg font-bold mb-2">Acceso suspendido</div>
-          <div className="text-sm mb-3" style={{ color: "#8B92A0" }}>El acceso de tu empresa a MantenPro está suspendido por un tema de facturación.</div>
+          <div className="text-sm mb-3" style={{ color: C.muted }}>El acceso de tu empresa a MantenPro está suspendido por un tema de facturación.</div>
           {company.billing_note && (
-            <div className="text-sm mb-5 p-3 text-left" style={{ background: "#1A1E26", border: "1px solid #2A2F3A", color: "#B8BECC" }}>{company.billing_note}</div>
+            <div className="text-sm mb-5 p-3 text-left" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>{company.billing_note}</div>
           )}
-          <div className="text-xs mb-5" style={{ color: "#8B92A0" }}>Contacta a quien administra tu suscripción de MantenPro para reactivar el acceso.</div>
+          <div className="text-xs mb-5" style={{ color: C.muted }}>Contacta a quien administra tu suscripción de MantenPro para reactivar el acceso.</div>
           <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#8FD14F", color: "#1A1500" }}>Cerrar sesión</button>
         </div>
       </div>
