@@ -173,6 +173,35 @@ function ThemeToggleButton() {
   );
 }
 
+// ---- Consultas sin límite de filas ----
+// Supabase (PostgREST) devuelve como máximo 1,000 filas por consulta. Estas funciones piden los
+// datos por páginas hasta traerlos todos, para que listas y reportes no se queden cortos sin aviso.
+// Se agrega "id" como segundo orden para que la paginación sea estable (sin filas repetidas ni saltadas).
+const PAGE_SIZE = 1000;
+async function fetchAllRows(build) {
+  const all = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await build().order("id", { ascending: true }).range(from, from + PAGE_SIZE - 1);
+    if (error) return { data: all.length ? all : null, error };
+    all.push(...(data || []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return { data: all, error: null };
+}
+// Para filtros .in("columna", ids) con muchos ids: se parte en grupos (la URL tiene límite de largo)
+// y cada grupo se trae completo con fetchAllRows.
+async function fetchByIdChunks(ids, buildForChunk, chunkSize = 150) {
+  const unique = [...new Set((ids || []).filter(Boolean))];
+  const all = [];
+  for (let i = 0; i < unique.length; i += chunkSize) {
+    const chunk = unique.slice(i, i + chunkSize);
+    const { data, error } = await fetchAllRows(() => buildForChunk(chunk));
+    if (error) return { data: all.length ? all : null, error };
+    all.push(...(data || []));
+  }
+  return { data: all, error: null };
+}
+
 const TYPE_CFG = {
   preventivo: { label: "Preventivo", color: C.green },
   correctivo: { label: "Correctivo", color: C.red },
@@ -489,6 +518,7 @@ function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAccount, 
   const [phone, setPhone] = useState(company?.phone || "");
   const [email, setEmail] = useState(company?.email || "");
   const [website, setWebsite] = useState(company?.website || "");
+  const [acceptsUsd, setAcceptsUsd] = useState(!!company?.accepts_usd_payments);
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(company?.logo_url || "");
 
@@ -504,6 +534,7 @@ function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAccount, 
     onSave({
       name: name.trim(), rnc: rnc.trim() || null, address: address.trim() || null,
       phone: phone.trim() || null, email: email.trim() || null, website: website.trim() || null,
+      accepts_usd_payments: acceptsUsd,
     }, logoFile);
   };
 
@@ -548,6 +579,13 @@ function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAccount, 
             <input className={inputClass} style={inputStyle} value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="Ej. www.tuempresa.com" />
           </Field>
         </div>
+        <label className="flex items-start gap-2 text-sm mt-2 p-3 cursor-pointer" style={{ color: C.text, background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <input type="checkbox" className="mt-0.5" checked={acceptsUsd} onChange={(e) => setAcceptsUsd(e.target.checked)} />
+          <div>
+            <div>Recibe cobros en dólares (US$)</div>
+            <div className="text-xs" style={{ color: C.muted }}>Activa la opción de cobrar en US$ con tasa del día y diferencia cambiaria, y el fondo y conteo en dólares de la caja. Si tu empresa solo cobra en pesos, déjalo apagado.</div>
+          </div>
+        </label>
         <div className="flex justify-end mt-4">
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
             {saving ? "Guardando..." : "Guardar cambios"}
@@ -566,14 +604,15 @@ function BankAccountsManager({ accounts, onSave, onDelete, onSetDefault, saving 
   const [accountType, setAccountType] = useState("");
   const [accountNumber, setAccountNumber] = useState("");
   const [holderName, setHolderName] = useState("");
+  const [accCurrency, setAccCurrency] = useState("DOP");
   const [makeDefault, setMakeDefault] = useState(accounts.length === 0);
 
   const openNew = () => {
-    setEditingId(null); setBankName(""); setAccountType(""); setAccountNumber(""); setHolderName(""); setMakeDefault(accounts.length === 0);
+    setEditingId(null); setBankName(""); setAccountType(""); setAccountNumber(""); setHolderName(""); setAccCurrency("DOP"); setMakeDefault(accounts.length === 0);
     setShowForm(true);
   };
   const openEdit = (acc) => {
-    setEditingId(acc.id); setBankName(acc.bank_name || ""); setAccountType(acc.account_type || ""); setAccountNumber(acc.account_number || ""); setHolderName(acc.holder_name || ""); setMakeDefault(!!acc.is_default);
+    setEditingId(acc.id); setBankName(acc.bank_name || ""); setAccountType(acc.account_type || ""); setAccountNumber(acc.account_number || ""); setHolderName(acc.holder_name || ""); setAccCurrency(acc.currency || "DOP"); setMakeDefault(!!acc.is_default);
     setShowForm(true);
   };
 
@@ -582,6 +621,7 @@ function BankAccountsManager({ accounts, onSave, onDelete, onSetDefault, saving 
     await onSave({
       bank_name: bankName.trim(), account_type: accountType.trim() || null, account_number: accountNumber.trim(),
       holder_name: holderName.trim() || null, is_default: makeDefault || accounts.length === 0,
+      currency: accCurrency,
     }, editingId);
     setShowForm(false);
   };
@@ -607,6 +647,7 @@ function BankAccountsManager({ accounts, onSave, onDelete, onSetDefault, saving 
               <div className="flex items-center gap-2">
                 <span className="font-semibold truncate">{acc.bank_name}</span>
                 {acc.is_default && <Pill label="Predeterminada" color={C.green} />}
+                {acc.currency === "USD" && <Pill label="US$" color={C.blue} />}
               </div>
               <div className="text-xs truncate" style={{ color: C.muted }}>
                 {[acc.account_type, `Cuenta ${acc.account_number}`, acc.holder_name].filter(Boolean).join(" · ")}
@@ -639,6 +680,12 @@ function BankAccountsManager({ accounts, onSave, onDelete, onSetDefault, saving 
               <input className={inputClass} style={inputStyle} value={holderName} onChange={(e) => setHolderName(e.target.value)} placeholder="Ej. Mantic Mantenimiento SRL" />
             </Field>
           </div>
+          <Field label="Moneda de la cuenta">
+            <select className={inputClass} style={inputStyle} value={accCurrency} onChange={(e) => setAccCurrency(e.target.value)}>
+              <option value="DOP">Pesos (RD$)</option>
+              <option value="USD">Dólares (US$)</option>
+            </select>
+          </Field>
           <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
             <input type="checkbox" checked={makeDefault} disabled={accounts.length === 0 && !editingId} onChange={(e) => setMakeDefault(e.target.checked)} /> Usar como cuenta predeterminada al facturar
           </label>
@@ -1038,7 +1085,7 @@ function SupportViewer({ onSignOut }) {
 
   useEffect(() => {
     (async () => {
-      const { data: comps, error: err } = await supabase.from("companies").select("*").order("name");
+      const { data: comps, error: err } = await fetchAllRows(() => supabase.from("companies").select("*").order("name"));
       if (err) setError(err.message);
       setCompanies(comps || []);
       setLoadingCompanies(false);
@@ -1057,15 +1104,15 @@ function SupportViewer({ onSignOut }) {
     if (!companyId) return;
     setLoadingData(true);
     const [profs, cli, prod, ord, qts, sord, inv, purch, ncf, cash] = await Promise.all([
-      supabase.from("profiles").select("*").eq("company_id", companyId).order("created_at"),
-      supabase.from("clients").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("products").select("*").eq("company_id", companyId).order("name"),
+      fetchAllRows(() => supabase.from("profiles").select("*").eq("company_id", companyId).order("created_at")),
+      fetchAllRows(() => supabase.from("clients").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("products").select("*").eq("company_id", companyId).order("name")),
       supabase.from("work_orders").select("*").eq("company_id", companyId).order("created_at", { ascending: false }).limit(200),
       supabase.from("quotes").select("*").eq("company_id", companyId).order("quote_date", { ascending: false }).limit(200),
       supabase.from("sales_orders").select("*").eq("company_id", companyId).order("order_date", { ascending: false }).limit(200),
       supabase.from("invoices").select("*").eq("company_id", companyId).order("invoice_date", { ascending: false }).limit(200),
       supabase.from("purchases").select("*").eq("company_id", companyId).order("purchase_date", { ascending: false }).limit(200),
-      supabase.from("ncf_sequences").select("*").eq("company_id", companyId),
+      fetchAllRows(() => supabase.from("ncf_sequences").select("*").eq("company_id", companyId)),
       supabase.from("cash_sessions").select("*").eq("company_id", companyId).order("opened_at", { ascending: false }).limit(50),
     ]);
     setData({
@@ -2755,16 +2802,24 @@ function SupplierFormModal({ initial, onClose, onSave, saving }) {
   );
 }
 
-function CashOpenModal({ branchName, onClose, onSave, saving }) {
+function CashOpenModal({ branchName, allowUsd, onClose, onSave, saving }) {
   const [openingAmount, setOpeningAmount] = useState("");
+  const [openingUsd, setOpeningUsd] = useState("");
   return (
     <Modal title={`Abrir caja${branchName ? " — " + branchName : ""}`} onClose={onClose}>
-      <Field label="Monto inicial en efectivo (fondo de caja)">
-        <input type="number" step="0.01" className={inputClass} style={inputStyle} value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} placeholder="0.00" />
-      </Field>
+      <div className={`grid ${allowUsd ? "grid-cols-2" : "grid-cols-1"} gap-3`}>
+        <Field label="Fondo inicial en pesos (RD$)">
+          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} placeholder="0.00" />
+        </Field>
+        {allowUsd && (
+          <Field label="Fondo inicial en dólares (US$)">
+            <input type="number" step="0.01" className={inputClass} style={inputStyle} value={openingUsd} onChange={(e) => setOpeningUsd(e.target.value)} placeholder="0.00" />
+          </Field>
+        )}
+      </div>
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
-        <button onClick={() => onSave(Number(openingAmount) || 0)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+        <button onClick={() => onSave(Number(openingAmount) || 0, Number(openingUsd) || 0)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
           {saving ? "Abriendo..." : "Abrir caja"}
         </button>
       </div>
@@ -2830,11 +2885,14 @@ function CashCloseModal({ session, branchName, expected, onClose, onSave, saving
   const [declaredCash, setDeclaredCash] = useState(expected.cash.toFixed(2));
   const [declaredCard, setDeclaredCard] = useState(expected.card.toFixed(2));
   const [declaredTransfer, setDeclaredTransfer] = useState(expected.transfer.toFixed(2));
+  const [declaredCashUsd, setDeclaredCashUsd] = useState((expected.cashUsd || 0).toFixed(2));
   const [notes, setNotes] = useState("");
+  const diffCashUsd = Number(declaredCashUsd || 0) - (expected.cashUsd || 0);
+  const showUsd = (expected.cashUsd || 0) > 0 || Number(session.opening_amount_usd || 0) > 0;
   const diffCash = Number(declaredCash || 0) - expected.cash;
   const diffCard = Number(declaredCard || 0) - expected.card;
   const diffTransfer = Number(declaredTransfer || 0) - expected.transfer;
-  const hasDiff = Math.abs(diffCash) > 0.01 || Math.abs(diffCard) > 0.01 || Math.abs(diffTransfer) > 0.01;
+  const hasDiff = Math.abs(diffCash) > 0.01 || Math.abs(diffCard) > 0.01 || Math.abs(diffTransfer) > 0.01 || Math.abs(diffCashUsd) > 0.01;
   const diffRow = (label, diff) => (
     <div className="flex justify-between text-xs" style={{ color: Math.abs(diff) > 0.01 ? (diff > 0 ? C.blue : C.red) : C.muted }}>
       <span>Diferencia {label}</span><span className="font-mono">{diff > 0 ? "+" : ""}{fmtMoney(diff)}</span>
@@ -2860,13 +2918,22 @@ function CashCloseModal({ session, branchName, expected, onClose, onSave, saving
           {diffRow("", diffTransfer)}
         </Field>
       </div>
+      {showUsd && (
+        <Field label="Efectivo en dólares contado (US$)">
+          <input type="number" step="0.01" className={inputClass} style={inputStyle} value={declaredCashUsd} onChange={(e) => setDeclaredCashUsd(e.target.value)} />
+          <div className="text-xs mt-1" style={{ color: C.muted }}>Esperado: US$ {(expected.cashUsd || 0).toFixed(2)} (fondo US$ {Number(session.opening_amount_usd || 0).toFixed(2)})</div>
+          <div className="flex justify-between text-xs" style={{ color: Math.abs(diffCashUsd) > 0.01 ? (diffCashUsd > 0 ? C.blue : C.red) : C.muted }}>
+            <span>Diferencia</span><span className="font-mono">{diffCashUsd > 0 ? "+" : ""}US$ {diffCashUsd.toFixed(2)}</span>
+          </div>
+        </Field>
+      )}
       <Field label={`Notas${hasDiff ? " (explica el descuadre)" : " (opcional)"}`}>
         <textarea rows={2} className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej. Faltante por cambio mal dado, sobrante sin explicación..." />
       </Field>
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
         <button
-          onClick={() => onSave({ cash: Number(declaredCash) || 0, card: Number(declaredCard) || 0, transfer: Number(declaredTransfer) || 0, notes: notes.trim() || null })}
+          onClick={() => onSave({ cash: Number(declaredCash) || 0, cashUsd: Number(declaredCashUsd) || 0, card: Number(declaredCard) || 0, transfer: Number(declaredTransfer) || 0, notes: notes.trim() || null })}
           disabled={saving || (hasDiff && !notes.trim())}
           className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}
         >
@@ -2969,6 +3036,63 @@ function UserPermissionsModal({ user, branches, onClose, onSave, onUpdateBranch,
   );
 }
 
+// ---- Catálogos del formato 606 de la DGII ----
+const TIPOS_BIENES_SERVICIOS_606 = [
+  { code: "01", label: "01 · Gastos de personal" },
+  { code: "02", label: "02 · Gastos por trabajos, suministros y servicios" },
+  { code: "03", label: "03 · Arrendamientos" },
+  { code: "04", label: "04 · Gastos de activos fijos" },
+  { code: "05", label: "05 · Gastos de representación" },
+  { code: "06", label: "06 · Otras deducciones admitidas" },
+  { code: "07", label: "07 · Gastos financieros" },
+  { code: "08", label: "08 · Gastos extraordinarios" },
+  { code: "09", label: "09 · Compras y gastos que forman parte del costo de venta" },
+  { code: "10", label: "10 · Adquisiciones de activos" },
+  { code: "11", label: "11 · Gastos de seguros" },
+];
+const FORMAS_PAGO_606 = [
+  { code: "01", label: "01 · Efectivo" },
+  { code: "02", label: "02 · Cheque / transferencia / depósito" },
+  { code: "03", label: "03 · Tarjeta crédito / débito" },
+  { code: "04", label: "04 · Compra a crédito" },
+  { code: "05", label: "05 · Permuta" },
+  { code: "06", label: "06 · Nota de crédito" },
+  { code: "07", label: "07 · Mixto" },
+];
+const TIPOS_RETENCION_ISR_606 = [
+  { code: "01", label: "01 · Alquileres" },
+  { code: "02", label: "02 · Honorarios por servicios independientes" },
+  { code: "03", label: "03 · Otras rentas" },
+  { code: "04", label: "04 · Otras rentas (rentas presuntas)" },
+  { code: "05", label: "05 · Intereses pagados a personas jurídicas residentes" },
+  { code: "06", label: "06 · Intereses pagados a personas físicas residentes" },
+  { code: "07", label: "07 · Retención por proveedores del Estado" },
+  { code: "08", label: "08 · Juegos telefónicos de premios" },
+];
+const TIPOS_INGRESO_607 = [
+  { code: "01", label: "01 · Ingresos por operaciones (no financieros)" },
+  { code: "02", label: "02 · Ingresos financieros" },
+  { code: "03", label: "03 · Ingresos extraordinarios" },
+  { code: "04", label: "04 · Ingresos por arrendamientos" },
+  { code: "05", label: "05 · Ingresos por venta de activo depreciable" },
+  { code: "06", label: "06 · Otros ingresos" },
+];
+
+// Deducir la forma de pago del 606 a partir de los pagos registrados (texto libre en
+// purchase_payments.method): sin pagos = a crédito; varios métodos distintos = mixto.
+function formaPago606FromPayments(payments) {
+  if (!payments || payments.length === 0) return "04";
+  const codes = new Set(payments.map((p) => {
+    const m = (p.method || "").toLowerCase();
+    if (m.includes("efectivo")) return "01";
+    if (m.includes("tarjeta")) return "03";
+    if (m.includes("permuta")) return "05";
+    if (m.includes("nota de cr")) return "06";
+    return "02"; // transferencia, cheque, depósito u otro medio bancario
+  }));
+  return codes.size === 1 ? [...codes][0] : "07";
+}
+
 function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
   const [expenseDate, setExpenseDate] = useState(initial?.expense_date || (() => todayStrRD())());
   const [category, setCategory] = useState(initial?.category || "");
@@ -2976,9 +3100,34 @@ function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
   const [amount, setAmount] = useState(initial?.amount ?? "");
   const [supplierId, setSupplierId] = useState(initial?.supplier_id || "");
   const [notes, setNotes] = useState(initial?.notes || "");
+  const [ncf, setNcf] = useState(initial?.ncf || "");
+  const [itbisAmount, setItbisAmount] = useState(initial?.itbis_amount ? String(initial.itbis_amount) : "");
+  const [expenseKind, setExpenseKind] = useState(initial?.expense_kind || "servicios");
+  const [tipoBienServicio, setTipoBienServicio] = useState(initial?.tipo_bien_servicio || "02");
+  const [formaPago, setFormaPago] = useState(initial?.forma_pago || "");
+  const [paymentDate, setPaymentDate] = useState(initial?.payment_date || "");
+  const [formError, setFormError] = useState("");
+  const hasNcf = ncf.trim().length > 0;
+  const selectedSupplier = suppliers.find((s) => s.id === supplierId) || null;
+  const amountNum = Number(amount) || 0;
+  const itbisNum = Number(itbisAmount) || 0;
   const submit = () => {
     if (!description.trim() || !amount) return;
-    onSave({ expense_date: expenseDate, category: category.trim() || null, description: description.trim(), amount: Number(amount), supplier_id: supplierId || null, notes: notes.trim() || null });
+    if (itbisNum < 0 || itbisNum > amountNum) { setFormError("El ITBIS no puede ser negativo ni mayor que el monto total."); return; }
+    if (hasNcf) {
+      if (!selectedSupplier) { setFormError("Para que el gasto vaya al 606 hay que elegir el proveedor (se necesita su RNC)."); return; }
+      if (!(selectedSupplier.rnc || "").trim()) { setFormError(`El proveedor ${selectedSupplier.name} no tiene RNC registrado — agrégaselo en Proveedores.`); return; }
+      if (!formaPago) { setFormError("Selecciona la forma de pago (se exige en el 606)."); return; }
+    }
+    onSave({
+      expense_date: expenseDate, category: category.trim() || null, description: description.trim(), amount: amountNum, supplier_id: supplierId || null, notes: notes.trim() || null,
+      ncf: hasNcf ? ncf.trim().toUpperCase() : null,
+      itbis_amount: hasNcf ? itbisNum : 0,
+      expense_kind: expenseKind,
+      tipo_bien_servicio: hasNcf ? tipoBienServicio : null,
+      forma_pago: hasNcf ? formaPago : null,
+      payment_date: hasNcf ? (paymentDate || expenseDate) : null,
+    });
   };
   return (
     <Modal title={initial ? "Editar gasto" : "Registrar gasto"} onClose={onClose}>
@@ -2994,7 +3143,7 @@ function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
         <input className={inputClass} style={inputStyle} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Detalle del gasto" />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Monto (RD$)">
+        <Field label="Monto total pagado (RD$, ITBIS incluido)">
           <input type="number" step="0.01" className={inputClass} style={inputStyle} value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" />
         </Field>
         <Field label="Proveedor (opcional)">
@@ -3004,9 +3153,48 @@ function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
           </select>
         </Field>
       </div>
+      <div className="p-3 mb-3 space-y-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+        <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Comprobante fiscal (para el 606)</div>
+        <Field label="NCF del proveedor (déjalo vacío si el gasto no tiene comprobante)">
+          <input className={inputClass} style={inputStyle} value={ncf} onChange={(e) => setNcf(e.target.value)} placeholder="Ej. B0100000123" />
+        </Field>
+        {hasNcf && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="ITBIS facturado (RD$)">
+                <input type="number" step="0.01" min="0" className={inputClass} style={inputStyle} value={itbisAmount} onChange={(e) => setItbisAmount(e.target.value)} placeholder="0.00" />
+              </Field>
+              <Field label="Es">
+                <select className={inputClass} style={inputStyle} value={expenseKind} onChange={(e) => setExpenseKind(e.target.value)}>
+                  <option value="servicios">Servicio</option>
+                  <option value="bienes">Bien</option>
+                </select>
+              </Field>
+            </div>
+            <div className="text-xs" style={{ color: C.muted }}>Monto sin ITBIS: <span className="font-mono" style={{ color: C.text }}>{fmtMoney(Math.max(amountNum - itbisNum, 0))}</span>{selectedSupplier && <> · RNC del proveedor: <span className="font-mono" style={{ color: (selectedSupplier.rnc || "").trim() ? C.text : C.red }}>{selectedSupplier.rnc || "sin RNC"}</span></>}</div>
+            <Field label="Tipo de bien o servicio">
+              <select className={inputClass} style={inputStyle} value={tipoBienServicio} onChange={(e) => setTipoBienServicio(e.target.value)}>
+                {TIPOS_BIENES_SERVICIOS_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+              </select>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Forma de pago">
+                <select className={inputClass} style={inputStyle} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>
+                  <option value="">Selecciona</option>
+                  {FORMAS_PAGO_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+                </select>
+              </Field>
+              <Field label="Fecha de pago (si es distinta)">
+                <input type="date" className={inputClass} style={inputStyle} value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+              </Field>
+            </div>
+          </>
+        )}
+      </div>
       <Field label="Notas (opcional)">
         <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observaciones" />
       </Field>
+      {formError && <div className="text-xs mb-2" style={{ color: C.red }}>{formError}</div>}
       {initial && <ActivityHistorySection tableName="other_expenses" recordId={initial.id} title="Historial de este gasto" resolvers={{ supplier_id: (id) => suppliers.find((s) => s.id === id)?.name }} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
@@ -3825,6 +4013,9 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
     : [{ id: 0, kind: "item", product_id: "", quantity: 1, unit_cost: 0, is_taxable: true }]);
   const [retainItbis, setRetainItbis] = useState(false);
   const [retainIsr, setRetainIsr] = useState(false);
+  const [tipoBienServicio, setTipoBienServicio] = useState("09");
+  const [formaPago, setFormaPago] = useState("");
+  const [isrRetentionType, setIsrRetentionType] = useState("02");
   const [pdfDetectedTotal, setPdfDetectedTotal] = useState(null);
   const [readingPdf, setReadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState("");
@@ -3913,6 +4104,9 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
       applies_254_06: apply254_06, retains_itbis: retainItbis, retains_isr: retainIsr,
       service_value: serviceValue, itbis_amount: itbisAmount, isr_retained: isrRetained, itbis_retained: itbisRetained,
       total, goods_receipt_id: goodsReceiptId,
+      tipo_bien_servicio: tipoBienServicio || null,
+      forma_pago: formaPago || null,
+      isr_retention_type: retainIsr ? isrRetentionType : null,
     }, validItems);
   };
 
@@ -3947,8 +4141,8 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
             <button type="button" onClick={onRequestNewSupplier} className="px-3 flex-shrink-0" style={{ border: `1px solid ${C.border}`, color: C.amber }}><Plus size={14} /></button>
           </div>
         </Field>
-        <Field label="No. de factura del proveedor (opcional)">
-          <input className={inputClass} style={inputStyle} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="Ej. F-00123" />
+        <Field label="NCF del proveedor (va al 606)">
+          <input className={inputClass} style={inputStyle} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="Ej. B0100000123" />
         </Field>
         <Field label="Fecha de compra">
           <input type="date" className={inputClass} style={inputStyle} value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
@@ -4037,6 +4231,26 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
           <div className="text-xs" style={{ color: C.muted }}>Sobre el valor del servicio — Reglamento 254-06. Actívalo independientemente del ITBIS; hay casos donde no aplica retención de ISR.</div>
         </div>
       </label>
+      {retainIsr && (
+        <Field label="Tipo de retención de ISR (606)">
+          <select className={inputClass} style={inputStyle} value={isrRetentionType} onChange={(e) => setIsrRetentionType(e.target.value)}>
+            {TIPOS_RETENCION_ISR_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+          </select>
+        </Field>
+      )}
+      <div className="grid grid-cols-2 gap-3 mt-3">
+        <Field label="Tipo de bien o servicio (606)">
+          <select className={inputClass} style={inputStyle} value={tipoBienServicio} onChange={(e) => setTipoBienServicio(e.target.value)}>
+            {TIPOS_BIENES_SERVICIOS_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Forma de pago (606)">
+          <select className={inputClass} style={inputStyle} value={formaPago} onChange={(e) => setFormaPago(e.target.value)}>
+            <option value="">Según los pagos que registre</option>
+            {FORMAS_PAGO_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+          </select>
+        </Field>
+      </div>
 
       <Field label="Notas (opcional)">
         <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Observaciones de la compra" />
@@ -4060,7 +4274,21 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   );
 }
 
-function PurchaseDetailModal({ purchase, items, payments, supplierName, supplierRnc, companyName, company, canEdit, canDelete, onClose, onRegisterPayment, onDeletePayment }) {
+function PurchaseDetailModal({ purchase, items, payments, supplierName, supplierRnc, companyName, company, canEdit, canDelete, onClose, onRegisterPayment, onDeletePayment, onUpdate606 }) {
+  const [edit606, setEdit606] = useState(false);
+  const [f606, setF606] = useState({ tipo_bien_servicio: purchase.tipo_bien_servicio || "", forma_pago: purchase.forma_pago || "", isr_retention_type: purchase.isr_retention_type || (purchase.retains_isr ? "02" : "") });
+  const [saving606, setSaving606] = useState(false);
+  const label606 = (list, code) => list.find((t) => t.code === code)?.label || "—";
+  const save606 = async () => {
+    setSaving606(true);
+    const ok = await onUpdate606(purchase, {
+      tipo_bien_servicio: f606.tipo_bien_servicio || null,
+      forma_pago: f606.forma_pago || null,
+      isr_retention_type: purchase.retains_isr ? (f606.isr_retention_type || "02") : null,
+    });
+    setSaving606(false);
+    if (ok) setEdit606(false);
+  };
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const balance = Number(purchase.total) - Number(purchase.amount_paid || 0);
@@ -4132,6 +4360,47 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, supplier
         ))}
       </div>
       {purchase.notes && <div className="text-xs mt-3" style={{ color: C.muted }}>Notas: <span style={{ color: C.text }}>{purchase.notes}</span></div>}
+
+      <div className="mt-4 p-3" style={{ background: C.panelAlt, border: `1px solid ${purchase.tipo_bien_servicio ? C.border : C.orange + "80"}` }}>
+        <div className="flex items-center justify-between mb-1">
+          <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Datos para el 606</div>
+          {canEdit && !edit606 && onUpdate606 && <button onClick={() => setEdit606(true)} className="flex items-center gap-1 text-xs" style={{ color: C.amber }}><Pencil size={12} /> Editar</button>}
+        </div>
+        {!edit606 ? (
+          <div className="text-xs space-y-0.5" style={{ color: C.text }}>
+            <div>NCF: <span className="font-mono">{purchase.invoice_number || <span style={{ color: C.red }}>sin NCF</span>}</span></div>
+            <div>Tipo de bien o servicio: {purchase.tipo_bien_servicio ? label606(TIPOS_BIENES_SERVICIOS_606, purchase.tipo_bien_servicio) : <span style={{ color: C.orange }}>sin asignar</span>}</div>
+            <div>Forma de pago: {purchase.forma_pago ? label606(FORMAS_PAGO_606, purchase.forma_pago) : <span style={{ color: C.muted }}>según los pagos registrados ({label606(FORMAS_PAGO_606, formaPago606FromPayments(payments))})</span>}</div>
+            {purchase.retains_isr && <div>Tipo de retención ISR: {label606(TIPOS_RETENCION_ISR_606, purchase.isr_retention_type || "02")}</div>}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Field label="Tipo de bien o servicio">
+              <select className={inputClass} style={inputStyle} value={f606.tipo_bien_servicio} onChange={(e) => setF606({ ...f606, tipo_bien_servicio: e.target.value })}>
+                <option value="">Sin asignar</option>
+                {TIPOS_BIENES_SERVICIOS_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Forma de pago">
+              <select className={inputClass} style={inputStyle} value={f606.forma_pago} onChange={(e) => setF606({ ...f606, forma_pago: e.target.value })}>
+                <option value="">Según los pagos registrados</option>
+                {FORMAS_PAGO_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+              </select>
+            </Field>
+            {purchase.retains_isr && (
+              <Field label="Tipo de retención de ISR">
+                <select className={inputClass} style={inputStyle} value={f606.isr_retention_type} onChange={(e) => setF606({ ...f606, isr_retention_type: e.target.value })}>
+                  {TIPOS_RETENCION_ISR_606.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
+                </select>
+              </Field>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setEdit606(false)} className="px-3 py-1.5 text-xs" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+              <button onClick={save606} disabled={saving606} className="px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>{saving606 ? "Guardando..." : "Guardar"}</button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
         <div className="flex items-center justify-between mb-2">
@@ -4531,6 +4800,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccou
   const [currency, setCurrency] = useState(prefill?.currency || "DOP");
   const [exchangeRate, setExchangeRate] = useState(prefill?.exchange_rate ?? 1);
   const [paymentTerms, setPaymentTerms] = useState(prefill?.payment_terms || "");
+  const [incomeType, setIncomeType] = useState(prefill?.income_type || "01");
   const [bankAccountId, setBankAccountId] = useState(prefill?.bank_account_id || (bankAccounts || []).find((a) => a.is_default)?.id || "");
   const [notes, setNotes] = useState(prefill?.notes || "");
   const blankItem = { product_id: "", description: "", quantity: 1, unit_price: 0, is_taxable: true, register_asset: false, asset_serial: "", asset_warranty_months: 12 };
@@ -4540,7 +4810,9 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccou
   });
   const newBlockId = () => Date.now() + Math.random();
 
-  const usableSequences = ncfSequences.filter((s) => s.active && s.next_number <= s.range_end);
+  // Mismas reglas que create_invoice: activa, con números, no vencida a la fecha de la factura y
+  // nunca B04 (esas son solo para notas de crédito).
+  const usableSequences = ncfSequences.filter((s) => s.active && s.next_number <= s.range_end && s.ncf_type !== "B04" && (!s.expiration_date || s.expiration_date >= invoiceDate));
 
   const updateBlock = (id, patch) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
   const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", ...blankItem }]);
@@ -4598,6 +4870,7 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccou
       title: title.trim() || null, client_id: clientId, ncf_sequence_id: sequenceId, branch_id: branchId || null, invoice_date: invoiceDate, discount_pct: discountPct,
       subtotal: subtotal * rate, itbis: itbis * rate, exempt_itbis: exemptItbis, applies_norma_0205: applyNorma0205, itbis_retained: itbisRetained * rate, total: total * rate,
       currency, exchange_rate: rate, payment_terms: paymentTerms || null, bank_account_id: bankAccountId || null, notes: notes.trim() || null,
+      income_type: incomeType || "01",
       foreign_subtotal: currency === "USD" ? subtotal : null,
       foreign_itbis: currency === "USD" ? itbis : null,
       foreign_total: currency === "USD" ? total : null,
@@ -4646,6 +4919,11 @@ function InvoiceFormModal({ clients, products, ncfSequences, branches, bankAccou
           <option value="Crédito 30 días">Crédito 30 días</option>
           <option value="Crédito 45 días">Crédito 45 días</option>
           <option value="Crédito 60 días">Crédito 60 días</option>
+        </select>
+      </Field>
+      <Field label="Tipo de ingreso (607)">
+        <select className={inputClass} style={inputStyle} value={incomeType} onChange={(e) => setIncomeType(e.target.value)}>
+          {TIPOS_INGRESO_607.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
         </select>
       </Field>
       {bankAccounts && bankAccounts.length > 0 && (
@@ -4818,6 +5096,28 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
   const [payMethod, setPayMethod] = useState("");
   const [payNotes, setPayNotes] = useState("");
   const [paymentFiles, setPaymentFiles] = useState([]);
+  // Cobro en dólares: los US$ cancelan una factura en US$ a la tasa de la factura; la diferencia
+  // con la tasa del día se guarda como diferencia cambiaria (lo calcula register_invoice_payment).
+  const invIsUsd = invoice.currency === "USD";
+  const invRate = Number(invoice.exchange_rate) || 1;
+  const allowUsd = !!company?.accepts_usd_payments;
+  const [payCurrency, setPayCurrency] = useState("DOP");
+  const [payUsd, setPayUsd] = useState(() => (invIsUsd && balance > 0 ? (balance / invRate).toFixed(2) : ""));
+  const [payRate, setPayRate] = useState(invIsUsd ? String(invoice.exchange_rate || "") : "");
+  const usdNum = Number(payUsd) || 0;
+  const rateNum = Number(payRate) || 0;
+  const [payBankAccountId, setPayBankAccountId] = useState("");
+  const accountsForCurrency = (bankAccounts || []).filter((a) => (a.currency || "DOP") === payCurrency);
+  const needsBankAccount = payMethod === "Transferencia" && accountsForCurrency.length > 0;
+  // Si hay una sola cuenta de esa moneda, se elige sola; si la elegida ya no aplica, se limpia.
+  useEffect(() => {
+    if (payMethod !== "Transferencia") { if (payBankAccountId) setPayBankAccountId(""); return; }
+    if (accountsForCurrency.length === 1) { if (payBankAccountId !== accountsForCurrency[0].id) setPayBankAccountId(accountsForCurrency[0].id); return; }
+    if (payBankAccountId && !accountsForCurrency.some((a) => a.id === payBankAccountId)) setPayBankAccountId("");
+    // eslint-disable-next-line
+  }, [payMethod, payCurrency, bankAccounts]);
+  const usdApplied = payCurrency === "USD" ? Math.round(usdNum * (invIsUsd ? invRate : rateNum) * 100) / 100 : 0;
+  const usdFx = payCurrency === "USD" && invIsUsd ? Math.round(usdNum * (rateNum - invRate) * 100) / 100 : 0;
   const activeAcquirers = (cardAcquirers || []).filter((a) => a.active);
   const [cardAcquirerId, setCardAcquirerId] = useState("");
   const [cardBrand, setCardBrand] = useState("");
@@ -4827,7 +5127,8 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
   const [cardError, setCardError] = useState("");
   const isCardPayment = payMethod === "Tarjeta";
   const selectedAcquirer = activeAcquirers.find((a) => a.id === cardAcquirerId) || null;
-  const cardGross = Number(payAmount) || 0;
+  // Valor real en RD$ del cobro (en US$ = dólares × tasa del día), base de la comisión de tarjeta
+  const cardGross = payCurrency === "USD" ? Math.round(usdNum * rateNum * 100) / 100 : (Number(payAmount) || 0);
   const cardCommission = selectedAcquirer ? Math.round(cardGross * Number(selectedAcquirer.commission_pct || 0)) / 100 : 0;
   const cardRetention = selectedAcquirer ? Math.round(cardGross * Number(selectedAcquirer.retention_pct || 0)) / 100 : 0;
   const cardNet = cardGross - cardCommission - cardRetention;
@@ -4840,7 +5141,11 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
       companyLogo: company?.logo_url, companyRnc: company?.rnc, companyAddress: company?.address, companyPhone: company?.phone,
       companyBankName: selectedBankAccount?.bank_name, companyBankAccountType: selectedBankAccount?.account_type, companyBankAccountNumber: selectedBankAccount?.account_number,
       dateLabel: "Fecha", dateValue: fmtDate(invoice.invoice_date), extraMeta: `<br/>NCF: ${invoice.ncf}`, paymentTerms: invoice.payment_terms, notes: invoice.notes,
-      items, subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total, discountPct: invoice.discount_pct,
+      // En US$ se imprimen los precios en dólares de cada renglón (los totales siguen en RD$ con el ≈ US$).
+      items: invoice.currency === "USD"
+        ? items.map((it) => ({ ...it, unit_price: it.foreign_unit_price ?? it.unit_price, subtotal: it.foreign_subtotal ?? it.subtotal }))
+        : items,
+      subtotal: invoice.subtotal, itbis: invoice.itbis, total: invoice.total, discountPct: invoice.discount_pct,
       retainedLabel: "Retención ITBIS 30% (Norma 02-05)", retainedAmount: invoice.itbis_retained || 0,
       legalNote: [invoice.exempt_itbis ? "Factura exenta de ITBIS." : null, invoice.applies_norma_0205 ? "Aplica Norma 02-05 — Retención del 30% del ITBIS." : null].filter(Boolean).join(" ") || null,
       currency: invoice.currency, foreignTotal: invoice.foreign_total, exchangeRate: invoice.exchange_rate,
@@ -4848,9 +5153,18 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
     printDocument(`Factura ${invoice.invoice_number || invoice.ncf}`, html);
   };
 
+  const [payError, setPayError] = useState("");
   const submitPayment = () => {
-    const amt = Number(payAmount);
+    setPayError("");
+    let amt = Number(payAmount);
+    if (payCurrency === "USD") {
+      if (usdNum <= 0) { setPayError("Escribe el monto recibido en dólares."); return; }
+      if (rateNum <= 0) { setPayError("Escribe la tasa del día."); return; }
+      amt = usdApplied;
+    }
     if (!amt || amt <= 0) return;
+    if (amt > balance + 0.05) { setPayError(`El pago (${fmtMoney(amt)}) es mayor que el saldo pendiente (${fmtMoney(balance)}).`); return; }
+    if (needsBankAccount && !payBankAccountId) { setPayError("Elige la cuenta bancaria a la que llegó la transferencia."); return; }
     let card = null;
     if (isCardPayment) {
       if (!selectedAcquirer) { setCardError("Selecciona el adquirente (Azul, CardNET...) del voucher."); return; }
@@ -4870,7 +5184,11 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
         net_amount: cardNet,
       };
     }
-    onRegisterPayment(invoice, { amount: amt, payment_date: payDate, method: payMethod.trim() || null, notes: payNotes.trim() || null, card }, paymentFiles);
+    onRegisterPayment(invoice, {
+      amount: amt, payment_date: payDate, method: payMethod.trim() || null, notes: payNotes.trim() || null, card,
+      currency: payCurrency, foreign_amount: payCurrency === "USD" ? usdNum : null, payment_rate: payCurrency === "USD" ? rateNum : null,
+      bank_account_id: payMethod === "Transferencia" ? (payBankAccountId || null) : null,
+    }, paymentFiles);
     setShowPaymentForm(false);
     setPayNotes("");
     setPaymentFiles([]);
@@ -4953,6 +5271,12 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
                     {canDelete && <button onClick={() => onDeletePayment(p, invoice)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                   </div>
                 </div>
+                {p.currency === "USD" && (
+                  <div className="text-xs mt-1" style={{ color: C.blue }}>
+                    Recibido US$ {Number(p.foreign_amount || 0).toFixed(2)} · tasa del día RD$ {Number(p.payment_rate || 0)}
+                    {Math.abs(Number(p.fx_difference || 0)) >= 0.01 && <> · {Number(p.fx_difference) > 0 ? "ganancia" : "pérdida"} cambiaria <span className="font-mono">{Number(p.fx_difference) > 0 ? "+" : ""}{fmtMoney(p.fx_difference)}</span></>}
+                  </div>
+                )}
                 {p.card && (
                   <div className="text-xs mt-1" style={{ color: C.text }}>
                     {cardDetailLine(p.card)}
@@ -4984,13 +5308,43 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
       {showPaymentForm && invoice.status !== "anulada" && (
         <div className="mt-3 p-3 space-y-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Monto pagado">
-              <input type="number" step="0.01" className={inputClass} style={inputStyle} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
-            </Field>
+            {allowUsd ? (
+              <Field label="Moneda recibida">
+                <select className={inputClass} style={inputStyle} value={payCurrency} onChange={(e) => { setPayCurrency(e.target.value); setPayError(""); }}>
+                  <option value="DOP">Pesos (RD$)</option>
+                  <option value="USD">Dólares (US$)</option>
+                </select>
+              </Field>
+            ) : <div />}
             <Field label="Fecha del pago">
               <input type="date" className={inputClass} style={inputStyle} value={payDate} onChange={(e) => setPayDate(e.target.value)} />
             </Field>
           </div>
+          {payCurrency === "DOP" ? (
+            <Field label="Monto pagado (RD$)">
+              <input type="number" step="0.01" className={inputClass} style={inputStyle} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />
+            </Field>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Monto recibido (US$)">
+                  <input type="number" step="0.01" className={inputClass} style={inputStyle} value={payUsd} onChange={(e) => setPayUsd(e.target.value)} />
+                </Field>
+                <Field label="Tasa del día (RD$ por US$1)">
+                  <input type="number" step="0.01" className={inputClass} style={inputStyle} value={payRate} onChange={(e) => setPayRate(e.target.value)} placeholder="Ej. 61.25" />
+                </Field>
+              </div>
+              {usdNum > 0 && (invIsUsd || rateNum > 0) && (
+                <div className="text-xs space-y-0.5 px-1" style={{ color: C.muted }}>
+                  <div className="flex justify-between"><span>Se aplica a la factura{invIsUsd ? ` (tasa de la factura RD$ ${invoice.exchange_rate})` : ""}</span><span className="font-mono" style={{ color: C.text }}>{fmtMoney(usdApplied)}</span></div>
+                  {invIsUsd && rateNum > 0 && Math.abs(usdFx) >= 0.01 && (
+                    <div className="flex justify-between"><span>{usdFx > 0 ? "Ganancia" : "Pérdida"} cambiaria (tasa del día RD$ {rateNum})</span><span className="font-mono" style={{ color: usdFx > 0 ? C.green : C.red }}>{usdFx > 0 ? "+" : ""}{fmtMoney(usdFx)}</span></div>
+                  )}
+                  {!invIsUsd && <div>Factura en pesos: los dólares se convierten a la tasa del día, sin diferencia cambiaria.</div>}
+                </div>
+              )}
+            </>
+          )}
           <Field label="Método (opcional)">
             <select className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => { setPayMethod(e.target.value); setCardError(""); }}>
               <option value="">Selecciona un método</option>
@@ -5000,6 +5354,18 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
               <option value="Otro">Otro</option>
             </select>
           </Field>
+          {payMethod === "Transferencia" && accountsForCurrency.length > 0 && (
+            <Field label={`Cuenta a la que llegó (${payCurrency === "USD" ? "US$" : "RD$"})`}>
+              <select className={inputClass} style={inputStyle} value={payBankAccountId} onChange={(e) => setPayBankAccountId(e.target.value)}>
+                {accountsForCurrency.length > 1 && <option value="">Selecciona</option>}
+                {accountsForCurrency.map((a) => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_number}</option>)}
+              </select>
+            </Field>
+          )}
+          {payMethod === "Transferencia" && payCurrency === "USD" && accountsForCurrency.length === 0 && (
+            <div className="text-xs" style={{ color: C.orange }}>No hay cuentas en dólares registradas (Perfil de la empresa → Cuentas bancarias). El cobro se guarda igual, pero no se podrá conciliar por cuenta.</div>
+          )}
+          {payError && <div className="text-xs" style={{ color: C.red }}>{payError}</div>}
           {isCardPayment && (
             <div className="p-3 space-y-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
               <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Datos del voucher</div>
@@ -5080,6 +5446,52 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
   );
 }
 
+// Tipos de anulación del formato 608 de la DGII
+const MOTIVOS_ANULACION_608 = [
+  { code: "01", label: "01 · Deterioro de factura preimpresa" },
+  { code: "02", label: "02 · Errores de impresión (factura preimpresa)" },
+  { code: "03", label: "03 · Impresión defectuosa" },
+  { code: "04", label: "04 · Corrección de la información" },
+  { code: "05", label: "05 · Cambio de productos" },
+  { code: "06", label: "06 · Devolución de productos" },
+  { code: "07", label: "07 · Omisión de productos" },
+  { code: "08", label: "08 · Errores en secuencia de NCF" },
+  { code: "09", label: "09 · Por cese de operaciones" },
+  { code: "10", label: "10 · Pérdida o hurto de talonarios" },
+];
+
+function VoidInvoiceModal({ invoice, onClose, onConfirm, saving }) {
+  const [reasonCode, setReasonCode] = useState("04");
+  const [reason, setReason] = useState("");
+  const hasMoney = Number(invoice.amount_paid || 0) > 0 || Number(invoice.credit_applied || 0) > 0;
+  return (
+    <Modal title={`Anular factura ${invoice.invoice_number || invoice.ncf}`} onClose={onClose}>
+      <div className="text-sm mb-3" style={{ color: C.text }}>
+        El NCF <span className="font-mono">{invoice.ncf}</span> queda consumido y se reportará en el 608 con el motivo que elijas. El inventario de los productos se devuelve.
+      </div>
+      {hasMoney && (
+        <div className="text-xs mb-3 p-2" style={{ background: C.redBg, color: C.red }}>
+          Esta factura tiene cobros o notas de crédito aplicadas: el sistema no la dejará anular. Elimina los cobros primero, o emite una nota de crédito.
+        </div>
+      )}
+      <Field label="Motivo de anulación (608)">
+        <select className={inputClass} style={inputStyle} value={reasonCode} onChange={(e) => setReasonCode(e.target.value)}>
+          {MOTIVOS_ANULACION_608.map((m) => <option key={m.code} value={m.code}>{m.label}</option>)}
+        </select>
+      </Field>
+      <Field label="Detalle (opcional)">
+        <textarea rows={2} className={inputClass} style={inputStyle} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Ej. Se facturó al cliente equivocado" />
+      </Field>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={() => onConfirm(invoice, reasonCode, reason.trim())} disabled={saving} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.red, color: "#fff" }}>
+          <Ban size={14} /> {saving ? "Anulando..." : "Anular factura"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 const PAYMENT_STATUS_CFG = {
   pendiente: { label: "Pendiente de cobro", color: "#E8654F" },
   parcial: { label: "Parcialmente cobrada", color: C.orange },
@@ -5117,15 +5529,28 @@ function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, onSave,
 
   const itemAmount = (it) => (Number(it.quantity) || 0) * (Number(it.unit_price) || 0);
   const selectedItems = items.filter((it) => it.selected);
-  const subtotal = selectedItems.reduce((sum, it) => sum + itemAmount(it), 0);
-  const itbis = selectedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) * 0.18 : 0), 0);
+  // Los renglones de la factura están en RD$. Se aplica el mismo descuento de la factura para no
+  // acreditar (ni revertir ITBIS) por encima de lo que realmente se facturó.
+  const discountFactor = 1 - (Number(selectedInvoice?.discount_pct) || 0) / 100;
+  const subtotal = selectedItems.reduce((sum, it) => sum + itemAmount(it), 0) * discountFactor;
+  const itbis = selectedInvoice?.exempt_itbis ? 0 : selectedItems.reduce((sum, it) => sum + (it.is_taxable ? itemAmount(it) * 0.18 : 0), 0) * discountFactor;
   const total = subtotal + itbis;
+  // Factura en US$: la nota usa la tasa de la factura original (revierte exactamente lo reportado).
+  const isUsdNote = selectedInvoice?.currency === "USD";
+  const noteRate = isUsdNote ? (Number(selectedInvoice.exchange_rate) || 1) : 1;
 
   const submit = () => {
     if (!invoiceId || !sequenceId || selectedItems.length === 0) return;
     onSave(
-      { invoice_id: invoiceId, client_id: selectedInvoice.client_id, ncf_sequence_id: sequenceId, reason: reason.trim() || null, subtotal, itbis, total },
-      selectedItems
+      {
+        invoice_id: invoiceId, client_id: selectedInvoice.client_id, ncf_sequence_id: sequenceId, reason: reason.trim() || null, subtotal, itbis, total,
+        currency: isUsdNote ? "USD" : "DOP",
+        exchange_rate: noteRate,
+        foreign_subtotal: isUsdNote ? subtotal / noteRate : null,
+        foreign_itbis: isUsdNote ? itbis / noteRate : null,
+        foreign_total: isUsdNote ? total / noteRate : null,
+      },
+      selectedItems.map((it) => ({ ...it, noteRate: isUsdNote ? noteRate : null }))
     );
   };
 
@@ -5184,6 +5609,8 @@ function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, onSave,
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(subtotal)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS</span><span className="font-mono">{fmtMoney(itbis)}</span></div>
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total a acreditar</span><span className="font-mono">{fmtMoney(total)}</span></div>
+        {Number(selectedInvoice?.discount_pct) > 0 && <div className="text-xs" style={{ color: C.muted }}>Incluye el descuento de {selectedInvoice.discount_pct}% de la factura.</div>}
+        {isUsdNote && <div className="text-xs" style={{ color: C.blue }}>Factura en US$: montos en RD$ a la tasa de la factura (RD$ {noteRate}) · ≈ US$ {(total / noteRate).toFixed(2)}</div>}
       </div>
 
       <div className="flex justify-end gap-2 mt-4">
@@ -7293,6 +7720,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
   const [importingBankStatement, setImportingBankStatement] = useState(false);
   const [bankImportMsg, setBankImportMsg] = useState("");
+  const [bankAccountFilter, setBankAccountFilter] = useState(""); // "" = todas las cuentas
   const [notifications, setNotifications] = useState([]);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -7512,6 +7940,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [showCloseCaja, setShowCloseCaja] = useState(false);
   const [sessionPayments, setSessionPayments] = useState([]);
   const [cardAcquirers, setCardAcquirers] = useState([]);
+  const [voidingInvoice, setVoidingInvoice] = useState(null);
   const [showAcquirers, setShowAcquirers] = useState(false);
   const [editingTaxRate, setEditingTaxRate] = useState(null);
   const [showAddNcf, setShowAddNcf] = useState(false);
@@ -7553,47 +7982,47 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const loadAll = async () => {
     setLoadingScope(true);
     const [br, tech, eq, loc, ord, woa, wocki, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, tloans, mats, wot, rcon, banktx, cba, projs, projmats, pords, pordit, grcpts, grcptit] = await Promise.all([
-      supabase.from("branches").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("technicians").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("equipment").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("locations").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("work_orders").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
-      supabase.from("work_order_attachments").select("work_order_id"),
-      supabase.from("work_order_checklist_items").select("work_order_id, checked, respuesta, response_type"),
-      supabase.from("checklist_templates").select("*").eq("company_id", companyId).order("equipment_type"),
-      supabase.from("checklist_template_items").select("*").order("position"),
-      supabase.from("profiles").select("*").eq("company_id", companyId).order("created_at"),
+      fetchAllRows(() => supabase.from("branches").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("technicians").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("equipment").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("locations").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("work_orders").select("*").eq("company_id", companyId).order("created_at", { ascending: false })),
+      fetchAllRows(() => supabase.from("work_order_attachments").select("work_order_id")),
+      fetchAllRows(() => supabase.from("work_order_checklist_items").select("work_order_id, checked, respuesta, response_type")),
+      fetchAllRows(() => supabase.from("checklist_templates").select("*").eq("company_id", companyId).order("equipment_type")),
+      fetchAllRows(() => supabase.from("checklist_template_items").select("*").order("position")),
+      fetchAllRows(() => supabase.from("profiles").select("*").eq("company_id", companyId).order("created_at")),
       isAdmin ? supabase.from("invites").select("*").eq("company_id", companyId).eq("used", false).order("created_at") : Promise.resolve({ data: [] }),
-      supabase.from("clients").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("products").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("product_components").select("*").eq("company_id", companyId),
-      supabase.from("client_assets").select("*").eq("company_id", companyId).order("install_date"),
-      supabase.from("suppliers").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("purchases").select("*").eq("company_id", companyId).order("purchase_date", { ascending: false }),
-      supabase.from("ncf_sequences").select("*").eq("company_id", companyId).order("created_at"),
-      supabase.from("invoices").select("*").eq("company_id", companyId).order("invoice_date", { ascending: false }),
-      supabase.from("credit_notes").select("*").eq("company_id", companyId).order("note_date", { ascending: false }),
-      supabase.from("quotes").select("*").eq("company_id", companyId).order("quote_date", { ascending: false }),
-      supabase.from("sales_orders").select("*").eq("company_id", companyId).order("order_date", { ascending: false }),
-      supabase.from("incidents").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
-      supabase.from("other_expenses").select("*").eq("company_id", companyId).order("expense_date", { ascending: false }),
-      supabase.from("chart_of_accounts").select("*").eq("company_id", companyId).order("code"),
-      supabase.from("tax_rates").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("cash_sessions").select("*").eq("company_id", companyId).order("opened_at", { ascending: false }),
-      supabase.from("tools").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("tool_lists").select("*").eq("company_id", companyId).order("created_at"),
-      supabase.from("tool_loans").select("*").eq("company_id", companyId).order("loaned_at", { ascending: false }),
-      supabase.from("inventory_materials").select("*").eq("company_id", companyId).order("name"),
-      supabase.from("work_order_technicians").select("*").eq("company_id", companyId),
-      supabase.from("recurring_contracts").select("*").eq("company_id", companyId).order("next_invoice_date"),
-      supabase.from("bank_transactions").select("*").eq("company_id", companyId).order("transaction_date", { ascending: false }),
-      supabase.from("company_bank_accounts").select("*").eq("company_id", companyId).order("created_at"),
-      supabase.from("projects").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
-      supabase.from("project_materials").select("*").eq("company_id", companyId).order("created_at", { ascending: false }),
-      supabase.from("purchase_orders").select("*").eq("company_id", companyId).order("order_date", { ascending: false }),
-      supabase.from("purchase_order_items").select("*"),
-      supabase.from("goods_receipts").select("*").eq("company_id", companyId).order("receipt_date", { ascending: false }),
-      supabase.from("goods_receipt_items").select("*"),
+      fetchAllRows(() => supabase.from("clients").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("products").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("product_components").select("*").eq("company_id", companyId)),
+      fetchAllRows(() => supabase.from("client_assets").select("*").eq("company_id", companyId).order("install_date")),
+      fetchAllRows(() => supabase.from("suppliers").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("purchases").select("*").eq("company_id", companyId).order("purchase_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("ncf_sequences").select("*").eq("company_id", companyId).order("created_at")),
+      fetchAllRows(() => supabase.from("invoices").select("*").eq("company_id", companyId).order("invoice_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("credit_notes").select("*").eq("company_id", companyId).order("note_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("quotes").select("*").eq("company_id", companyId).order("quote_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("sales_orders").select("*").eq("company_id", companyId).order("order_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("incidents").select("*").eq("company_id", companyId).order("created_at", { ascending: false })),
+      fetchAllRows(() => supabase.from("other_expenses").select("*").eq("company_id", companyId).order("expense_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("chart_of_accounts").select("*").eq("company_id", companyId).order("code")),
+      fetchAllRows(() => supabase.from("tax_rates").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("cash_sessions").select("*").eq("company_id", companyId).order("opened_at", { ascending: false })),
+      fetchAllRows(() => supabase.from("tools").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("tool_lists").select("*").eq("company_id", companyId).order("created_at")),
+      fetchAllRows(() => supabase.from("tool_loans").select("*").eq("company_id", companyId).order("loaned_at", { ascending: false })),
+      fetchAllRows(() => supabase.from("inventory_materials").select("*").eq("company_id", companyId).order("name")),
+      fetchAllRows(() => supabase.from("work_order_technicians").select("*").eq("company_id", companyId)),
+      fetchAllRows(() => supabase.from("recurring_contracts").select("*").eq("company_id", companyId).order("next_invoice_date")),
+      fetchAllRows(() => supabase.from("bank_transactions").select("*").eq("company_id", companyId).order("transaction_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("company_bank_accounts").select("*").eq("company_id", companyId).order("created_at")),
+      fetchAllRows(() => supabase.from("projects").select("*").eq("company_id", companyId).order("created_at", { ascending: false })),
+      fetchAllRows(() => supabase.from("project_materials").select("*").eq("company_id", companyId).order("created_at", { ascending: false })),
+      fetchAllRows(() => supabase.from("purchase_orders").select("*").eq("company_id", companyId).order("order_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("purchase_order_items").select("*")),
+      fetchAllRows(() => supabase.from("goods_receipts").select("*").eq("company_id", companyId).order("receipt_date", { ascending: false })),
+      fetchAllRows(() => supabase.from("goods_receipt_items").select("*")),
     ]);
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
@@ -7829,8 +8258,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const fromIso = `${financialDateFrom}T00:00:00`;
     const toIso = `${financialDateTo}T23:59:59`;
     const [ip, pp] = await Promise.all([
-      supabase.from("invoice_payments").select("id, amount, method, payment_date, invoice_id").gte("payment_date", fromIso).lte("payment_date", toIso),
-      supabase.from("purchase_payments").select("id, amount, payment_date, purchase_id").gte("payment_date", fromIso).lte("payment_date", toIso),
+      fetchAllRows(() => supabase.from("invoice_payments").select("id, amount, method, payment_date, invoice_id, currency, foreign_amount, fx_difference, bank_account_id").gte("payment_date", fromIso).lte("payment_date", toIso)),
+      fetchAllRows(() => supabase.from("purchase_payments").select("id, amount, method, payment_date, purchase_id").gte("payment_date", fromIso).lte("payment_date", toIso)),
     ]);
     setLoadingFinancial(false);
     if (ip.error) { setErrorMsg(ip.error.message); return; }
@@ -7849,13 +8278,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const creditNotesTotal = creditNotes.filter((n) => inRange(n.note_date)).reduce((sum, n) => sum + Number(n.subtotal || 0), 0);
     const netRevenue = revenue - creditNotesTotal;
     const purchasesCost = purchases.filter((p) => inRange(p.purchase_date)).reduce((sum, p) => sum + (Number(p.total || 0) - Number(p.itbis_amount || 0)), 0);
-    const otherExpensesCost = otherExpenses.filter((e) => inRange(e.expense_date)).reduce((sum, e) => sum + Number(e.amount || 0), 0);
-    const netIncome = netRevenue - purchasesCost - otherExpensesCost;
-    return { revenue, creditNotesTotal, netRevenue, purchasesCost, otherExpensesCost, netIncome };
-  }, [invoices, creditNotes, purchases, otherExpenses, financialDateFrom, financialDateTo]);
+    // El ITBIS de un gasto con NCF se adelanta en el 606 — no es gasto.
+    const otherExpensesCost = otherExpenses.filter((e) => inRange(e.expense_date)).reduce((sum, e) => sum + Number(e.amount || 0) - Number(e.itbis_amount || 0), 0);
+    // Diferencia cambiaria de los cobros en US$ del período (+ ganancia / - pérdida)
+    const fxDifference = invoicePaymentsAll.reduce((sum, p) => sum + Number(p.fx_difference || 0), 0);
+    const netIncome = netRevenue - purchasesCost - otherExpensesCost + fxDifference;
+    return { revenue, creditNotesTotal, netRevenue, purchasesCost, otherExpensesCost, fxDifference, netIncome };
+  }, [invoices, creditNotes, purchases, otherExpenses, invoicePaymentsAll, financialDateFrom, financialDateTo]);
 
   const financialCashFlow = useMemo(() => {
-    const cashIn = invoicePaymentsAll.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+    const cashIn = invoicePaymentsAll.reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.fx_difference || 0), 0);
     const cashOutSuppliers = purchasePaymentsAll.reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const inRange = (dateStr) => dateStr && dateStr >= financialDateFrom && dateStr <= financialDateTo;
     const cashOutExpenses = otherExpenses.filter((e) => inRange(e.expense_date)).reduce((sum, e) => sum + Number(e.amount || 0), 0);
@@ -9395,8 +9827,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   useEffect(() => {
     if (view !== "supplierReceipts" || purchases.length === 0) { if (view !== "supplierReceipts") setAllPurchasePayments([]); return; }
     (async () => {
-      const { data } = await supabase.from("purchase_payments").select("*").in("purchase_id", purchases.map((p) => p.id)).order("payment_date", { ascending: false });
-      setAllPurchasePayments(data || []);
+      const { data } = await fetchByIdChunks(purchases.map((p) => p.id), (chunk) => supabase.from("purchase_payments").select("*").in("purchase_id", chunk));
+      setAllPurchasePayments((data || []).sort((a, b) => (b.payment_date || "").localeCompare(a.payment_date || "")));
     })();
   }, [view, purchases]);
 
@@ -9414,6 +9846,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   // ---- Compras (registrar suma stock; eliminar lo resta de vuelta) ----
+  // Solo los datos descriptivos del 606 (tipo de bien/servicio, forma de pago, tipo de
+  // retención ISR) — nunca montos. Sirve también para completar compras viejas.
+  const updatePurchase606 = async (purchase, fields) => {
+    const { data, error } = await supabase.from("purchases").update(fields).eq("id", purchase.id).select();
+    if (error) { setErrorMsg(error.message); return false; }
+    if (!data || data.length === 0) { setErrorMsg("No se guardaron los datos del 606: la base de datos no aplicó el cambio (revisa el permiso de edición de compras)."); return false; }
+    const updated = data[0];
+    setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setPurchaseDetail((prev) => (prev ? { ...prev, purchase: updated } : prev));
+    return true;
+  };
+
   const createPurchase = async (payload, items) => {
     setSaving(true);
     const { data: purchase, error: purchaseError } = await supabase.from("purchases").insert({ ...payload, company_id: companyId }).select().single();
@@ -9782,99 +10226,49 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // ---- Facturación ----
   const createInvoice = async (payload, items) => {
     setSaving(true);
-    // El NCF se asigna con una función de Postgres (allocate_ncf, ver SQL) que hace el
-    // "leer número + sumar 1" en un solo UPDATE atómico. Antes esto se hacía en dos pasos
-    // desde el cliente (leer next_number, y minutos después actualizarlo) — si dos facturas
-    // se creaban casi al mismo tiempo, las dos podían leer el mismo next_number y terminar
-    // con el mismo NCF duplicado, algo que la DGII no permite.
-    const { data: seqData, error: seqError } = await supabase.rpc("allocate_ncf", { p_sequence_id: payload.ncf_sequence_id });
-    const allocated = Array.isArray(seqData) ? seqData[0] : seqData;
-    if (seqError || !allocated) {
-      setSaving(false);
-      setErrorMsg("Esta secuencia NCF ya no tiene números disponibles.");
-      return false;
-    }
-    const ncf = allocated.ncf;
-    // Número de factura interno, propio de MantenPro — distinto del NCF (que es el
-    // comprobante fiscal que exige la DGII). Sirve como referencia interna/para el
-    // cliente sin depender del formato ni de la disponibilidad del NCF.
-    // Se genera con next_document_number (contador atómico en base de datos) en vez de
-    // "invoices.length + 1" — ese conteo del cliente se podía duplicar con dos pestañas
-    // o dos usuarios facturando casi al mismo tiempo.
-    const { data: invNumData, error: invNumError } = await supabase.rpc("next_document_number", { p_doc_type: "invoice" });
-    if (invNumError) {
-      setSaving(false);
-      setErrorMsg(`No se pudo generar el número de factura interno: ${invNumError.message}. El NCF ${ncf} ya quedó reservado y no se reutilizará.`);
-      return false;
-    }
-    const invoice_number = `FAC-${String(invNumData).padStart(5, "0")}`;
-
-    const { data: invoice, error: invError } = await supabase.from("invoices").insert({ ...payload, company_id: companyId, ncf, invoice_number, status: "emitida" }).select().single();
-    if (invError) {
-      setSaving(false);
-      // El número de NCF ya se consumió en la secuencia (no se puede "devolver" sin abrir
-      // otra condición de carrera) — si no vas a reintentar esta factura con los mismos
-      // datos, anúlalo manualmente desde Secuencias NCF para dejar constancia de por qué
-      // ese número no se usó.
-      setErrorMsg(`No se pudo crear la factura: ${invError.message}. El NCF ${ncf} ya quedó reservado en la secuencia y no se reutilizará.`);
-      return false;
-    }
-
+    // Todo ocurre en una sola función del servidor (create_invoice, ver crear-anular-factura-servidor.sql):
+    // valida permisos, cliente, secuencia NCF (activa, con números, no vencida, tipo correcto para el
+    // cliente) y descuento máximo; calcula subtotal/ITBIS/retención/total; reserva el NCF; inserta
+    // factura y renglones; descuenta inventario; registra activos en garantía y marca la orden de
+    // venta. Si algo falla no queda nada a medias y el NCF no se consume.
+    // Los precios de los renglones van en la moneda de la factura (US$ si es en dólares).
+    const header = {
+      title: payload.title || null,
+      client_id: payload.client_id,
+      ncf_sequence_id: payload.ncf_sequence_id,
+      branch_id: payload.branch_id || null,
+      bank_account_id: payload.bank_account_id || null,
+      invoice_date: payload.invoice_date,
+      discount_pct: Number(payload.discount_pct) || 0,
+      exempt_itbis: !!payload.exempt_itbis,
+      applies_norma_0205: !!payload.applies_norma_0205,
+      currency: payload.currency || "DOP",
+      exchange_rate: payload.currency === "USD" ? Number(payload.exchange_rate) || 0 : 1,
+      payment_terms: payload.payment_terms || null,
+      notes: payload.notes || null,
+      income_type: payload.income_type || "01",
+    };
     const itemRows = items.map((it) => ({
-      invoice_id: invoice.id,
       product_id: it.product_id || null,
       description: it.description,
       quantity: Number(it.quantity),
       unit_price: Number(it.unit_price),
-      is_taxable: it.is_taxable,
-      subtotal: Number(it.quantity) * Number(it.unit_price),
+      is_taxable: it.is_taxable !== false,
       chapter: it.chapter?.trim() || null,
+      register_asset: !!it.register_asset,
+      asset_serial: (it.asset_serial || "").trim() || null,
+      asset_warranty_months: Number(it.asset_warranty_months) || 0,
     }));
-    const { error: itemsError } = await supabase.from("invoice_items").insert(itemRows);
-    if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return false; }
-
-    const assetRows = items.filter((it) => it.register_asset).map((it) => ({
-      company_id: companyId,
-      client_id: payload.client_id,
-      name: it.description,
-      serial_number: (it.asset_serial || "").trim() || null,
-      install_date: payload.invoice_date,
-      warranty_months: Number(it.asset_warranty_months) || 0,
-      notes: `Generado desde factura ${ncf}`,
-    }));
-    if (assetRows.length > 0) {
-      const { error: assetError } = await supabase.from("client_assets").insert(assetRows);
-      if (assetError) setErrorMsg(`La factura se emitió, pero no se pudieron registrar todos los activos en garantía: ${assetError.message}`);
-    }
-
-    if (invoicePrefill?.sourceOrderId) {
-      const { data: updatedOrder, error: orderUpdateError } = await supabase.from("sales_orders").update({ status: "facturada", invoice_id: invoice.id }).eq("id", invoicePrefill.sourceOrderId).select().single();
-      if (orderUpdateError) {
-        setErrorMsg(`La factura se creó, pero no se pudo marcar la orden de venta como facturada: ${orderUpdateError.message}`);
-      } else if (updatedOrder) {
-        setSalesOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
-      }
-    }
-
-    for (const row of itemRows) {
-      if (!row.product_id) continue;
-      const prod = products.find((p) => p.id === row.product_id);
-      if (!prod) continue;
-      if (prod.is_composite) {
-        // Producto compuesto (kit): no tiene stock propio — se descuenta cada
-        // componente por separado, multiplicado por la cantidad vendida del kit.
-        const parts = productComponents.filter((c) => c.parent_product_id === prod.id);
-        for (const part of parts) {
-          const compProd = products.find((p) => p.id === part.component_product_id);
-          if (!compProd) continue;
-          await supabase.rpc("adjust_product_stock", { p_product_id: compProd.id, p_delta: -Number(part.quantity) * row.quantity });
-        }
-        continue;
-      }
-      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -row.quantity });
-    }
-
+    const { data: invoice, error } = await supabase.rpc("create_invoice", {
+      p_invoice: header,
+      p_items: itemRows,
+      p_source_order_id: invoicePrefill?.sourceOrderId || null,
+    });
     setSaving(false);
+    if (error || !invoice) {
+      setErrorMsg(`No se pudo emitir la factura: ${error?.message || "respuesta vacía del servidor"}. No se consumió ningún NCF.`);
+      return false;
+    }
     setInvoicePrefill(null);
     setShowAddInvoice(false);
     loadAll();
@@ -9944,7 +10338,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       foreign_itbis: foreignItbis,
       foreign_total: isUsdContract ? foreignSubtotal + foreignItbis : null,
     };
-    const items = [{ product_id: null, description: contract.description || contract.title, quantity: 1, unit_price: subtotal, is_taxable: contract.is_taxable, chapter: null }];
+    // Precio en la moneda de la factura (US$ si el contrato es en dólares): createInvoice lo
+    // convierte a RD$ con la misma tasa, igual que una factura manual.
+    const items = [{ product_id: null, description: contract.description || contract.title, quantity: 1, unit_price: isUsdContract ? foreignSubtotal : subtotal, is_taxable: contract.is_taxable, chapter: null }];
 
     // Reclama este ciclo de facturación de forma atómica ANTES de crear la factura: si dos
     // pestañas/usuarios disparan "Generar todas las vencidas" casi al mismo tiempo para el
@@ -10003,6 +10399,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   // ---- Conciliación bancaria ----
   const importBankStatement = async (file) => {
+    if (companyBankAccounts.length > 0 && !bankAccountFilter) {
+      setErrorMsg("Antes de importar, elige arriba de qué cuenta bancaria es el estado de cuenta.");
+      return;
+    }
     setImportingBankStatement(true);
     setErrorMsg("");
     setBankImportMsg("");
@@ -10049,7 +10449,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       }
       const { data, error } = await supabase
         .from("bank_transactions")
-        .upsert(uniqueRows.map((r) => ({ ...r, company_id: companyId })), {
+        .upsert(uniqueRows.map((r) => ({ ...r, company_id: companyId, bank_account_id: bankAccountFilter || null })), {
           onConflict: "company_id,transaction_date,description,amount",
           ignoreDuplicates: true,
         })
@@ -10074,23 +10474,41 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const txDate = new Date(`${tx.transaction_date}T00:00:00`).getTime();
     const withinDays = (dateStr, days) => Math.abs(new Date(dateStr).getTime() - txDate) <= days * 86400000;
     const closeAmount = (a, b) => Math.abs(Number(a) - Number(b)) < 1;
+    const byDateDistance = (dateKey) => (a, b) => Math.abs(new Date(a[dateKey]) - txDate) - Math.abs(new Date(b[dateKey]) - txDate);
+    // Lo que ya está conciliado con otro movimiento no se vuelve a sugerir
+    const taken = new Set(bankTransactions.filter((t) => t.is_reconciled && t.matched_id && t.id !== tx.id).map((t) => `${t.matched_type}:${t.matched_id}`));
+    const free = (type, id) => !taken.has(`${type}:${id}`);
+    const account = companyBankAccounts.find((a) => a.id === tx.bank_account_id) || null;
+    const accountCurrency = account?.currency || "DOP";
+    // Un cobro sirve si no fue en efectivo (el efectivo no pasa por el banco) y, si se indicó la
+    // cuenta de destino, es esta misma cuenta.
+    const paymentFitsAccount = (p) => p.method !== "Efectivo" && (!p.bank_account_id || !tx.bank_account_id || p.bank_account_id === tx.bank_account_id);
     if (tx.amount > 0) {
-      const candidates = invoicePaymentsAll.filter((p) => closeAmount(p.amount, tx.amount) && withinDays(p.payment_date, BANK_MATCH_WINDOW_DAYS));
+      const candidates = invoicePaymentsAll.filter((p) => {
+        if (!paymentFitsAccount(p) || !free("invoice_payment", p.id)) return false;
+        if (!withinDays(p.payment_date, BANK_MATCH_WINDOW_DAYS)) return false;
+        // Cuenta en US$: se compara contra los dólares recibidos. Cuenta en RD$: contra los pesos
+        // reales del día (monto aplicado + diferencia cambiaria).
+        if (accountCurrency === "USD") return p.currency === "USD" && closeAmount(p.foreign_amount, tx.amount);
+        return closeAmount(Number(p.amount || 0) + Number(p.fx_difference || 0), tx.amount);
+      });
       if (candidates.length === 0) return null;
       const inv = (id) => invoices.find((i) => i.id === id);
-      const best = candidates.sort((a, b) => Math.abs(new Date(a.payment_date) - txDate) - Math.abs(new Date(b.payment_date) - txDate))[0];
-      return { type: "invoice_payment", id: best.id, label: `Cobro factura ${inv(best.invoice_id)?.ncf || ""} — ${fmtMoney(best.amount)}` };
+      const best = candidates.sort(byDateDistance("payment_date"))[0];
+      const shown = accountCurrency === "USD" ? `US$ ${Number(best.foreign_amount || 0).toFixed(2)}` : fmtMoney(Number(best.amount || 0) + Number(best.fx_difference || 0));
+      return { type: "invoice_payment", id: best.id, label: `Cobro factura ${inv(best.invoice_id)?.ncf || ""} — ${shown}` };
     } else {
+      if (accountCurrency === "USD") return null; // los pagos a proveedores y gastos se registran en RD$
       const absAmt = Math.abs(tx.amount);
-      const ppCandidates = purchasePaymentsAll.filter((p) => closeAmount(p.amount, absAmt) && withinDays(p.payment_date, BANK_MATCH_WINDOW_DAYS));
+      const ppCandidates = purchasePaymentsAll.filter((p) => free("purchase_payment", p.id) && !/efectivo/i.test(p.method || "") && closeAmount(p.amount, absAmt) && withinDays(p.payment_date, BANK_MATCH_WINDOW_DAYS));
       if (ppCandidates.length > 0) {
-        const sup = (purchaseId) => { const pu = purchases.find((x) => x.id === purchaseId); return suppliers.find((s) => s.id === pu?.supplier_id)?.name || ""; };
-        const best = ppCandidates.sort((a, b) => Math.abs(new Date(a.payment_date) - txDate) - Math.abs(new Date(b.payment_date) - txDate))[0];
+        const sup = (purchaseId) => { const pu = purchases.find((x) => x.id === purchaseId); return suppliers.find((sp) => sp.id === pu?.supplier_id)?.name || ""; };
+        const best = ppCandidates.sort(byDateDistance("payment_date"))[0];
         return { type: "purchase_payment", id: best.id, label: `Pago a ${sup(best.purchase_id)} — ${fmtMoney(best.amount)}` };
       }
-      const expCandidates = otherExpenses.filter((e) => closeAmount(e.amount, absAmt) && withinDays(e.expense_date, BANK_MATCH_WINDOW_DAYS));
+      const expCandidates = otherExpenses.filter((e) => free("other_expense", e.id) && e.forma_pago !== "01" && closeAmount(e.amount, absAmt) && withinDays(e.expense_date, BANK_MATCH_WINDOW_DAYS));
       if (expCandidates.length > 0) {
-        const best = expCandidates.sort((a, b) => Math.abs(new Date(a.expense_date) - txDate) - Math.abs(new Date(b.expense_date) - txDate))[0];
+        const best = expCandidates.sort(byDateDistance("expense_date"))[0];
         return { type: "other_expense", id: best.id, label: `Gasto: ${best.description} — ${fmtMoney(best.amount)}` };
       }
       return null;
@@ -10114,28 +10532,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setBankTransactions((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const voidInvoice = async (invoice) => {
-    if (!window.confirm("¿Anular esta factura? El número de NCF queda consumido igual, pero se restaurará el inventario.")) return;
-    const { data: items } = await supabase.from("invoice_items").select("*").eq("invoice_id", invoice.id);
-    for (const it of items || []) {
-      if (!it.product_id) continue;
-      const prod = products.find((p) => p.id === it.product_id);
-      if (!prod) continue;
-      if (prod.is_composite) {
-        const parts = productComponents.filter((c) => c.parent_product_id === prod.id);
-        for (const part of parts) {
-          const compProd = products.find((p) => p.id === part.component_product_id);
-          if (!compProd) continue;
-          await supabase.rpc("adjust_product_stock", { p_product_id: compProd.id, p_delta: Number(part.quantity) * Number(it.quantity) });
-        }
-        continue;
-      }
-      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: Number(it.quantity) });
-    }
-    // Respaldo del lado del servidor: void_invoice verifica que quien llama sea admin
-    // de la empresa dueña de la factura, en vez de confiar solo en el botón oculto en la UI.
-    const { error } = await supabase.rpc("void_invoice", { p_invoice_id: invoice.id });
+  // La anulación pide el motivo (va al 608) y la hace void_invoice en el servidor: solo admin,
+  // devuelve el inventario en la misma transacción y no permite anular con cobros o notas de crédito.
+  const voidInvoice = (invoice) => setVoidingInvoice(invoice);
+  const confirmVoidInvoice = async (invoice, reasonCode, reason) => {
+    setSaving(true);
+    const { error } = await supabase.rpc("void_invoice", { p_invoice_id: invoice.id, p_reason_code: reasonCode, p_reason: reason || null });
+    setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
+    setVoidingInvoice(null);
     setInvoiceDetail(null);
     loadAll();
   };
@@ -10191,6 +10596,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       unit_price: Number(it.unit_price),
       is_taxable: it.is_taxable,
       subtotal: Number(it.quantity) * Number(it.unit_price),
+      foreign_unit_price: it.noteRate ? Number(it.unit_price) / it.noteRate : null,
+      foreign_subtotal: it.noteRate ? (Number(it.quantity) * Number(it.unit_price)) / it.noteRate : null,
     }));
     const { error: itemsError } = await supabase.from("credit_note_items").insert(itemRows);
     if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
@@ -10233,6 +10640,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       p_method: payload.method,
       p_payment_date: payload.payment_date,
       p_notes: payload.notes,
+      p_currency: payload.currency || "DOP",
+      p_foreign_amount: payload.currency === "USD" ? payload.foreign_amount : null,
+      p_payment_rate: payload.currency === "USD" ? payload.payment_rate : null,
+      p_bank_account_id: payload.bank_account_id || null,
     });
     const resultRow = Array.isArray(result) ? result[0] : result;
     if (payError || !resultRow) { setSaving(false); setErrorMsg(payError?.message || "No se pudo registrar el pago."); return; }
@@ -10296,12 +10707,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   // ---- Caja (apertura/cierre y cuadre por sucursal) ----
-  const openCashSession = async (branchId, openingAmount) => {
+  const openCashSession = async (branchId, openingAmount, openingUsd = 0) => {
     setSaving(true);
     // open_cash_session verifica del lado del servidor que quien llama tenga permiso de "caja"
     // y que no haya ya una caja abierta en esa sucursal, en vez de confiar solo en el botón
     // deshabilitado (disabled={!canEdit("caja")}) de la interfaz.
-    const { data, error } = await supabase.rpc("open_cash_session", { p_branch_id: branchId, p_opening_amount: openingAmount });
+    const { data, error } = await supabase.rpc("open_cash_session", { p_branch_id: branchId, p_opening_amount: openingAmount, p_opening_amount_usd: openingUsd });
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
     setCashSessions((prev) => [data, ...prev]);
@@ -10318,6 +10729,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       p_declared_card: declared.card,
       p_declared_transfer: declared.transfer,
       p_notes: declared.notes || null,
+      p_declared_cash_usd: declared.cashUsd || 0,
     });
     setSaving(false);
     if (error) { setErrorMsg(error.message); return; }
@@ -10331,7 +10743,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const openSession = cashSessions.find((s) => s.branch_id === activeBranchId && s.status === "abierta");
     if (!openSession) { setSessionPayments([]); return; }
     (async () => {
-      const { data } = await supabase.from("invoice_payments").select("id, invoice_id, amount, method, payment_date").eq("cash_session_id", openSession.id).order("payment_date", { ascending: false });
+      const { data } = await fetchAllRows(() => supabase.from("invoice_payments").select("id, invoice_id, amount, method, payment_date, currency, foreign_amount, fx_difference").eq("cash_session_id", openSession.id).order("payment_date", { ascending: false }));
       const list = data || [];
       const cardIds = list.filter((p) => p.method === "Tarjeta").map((p) => p.id);
       let cardByPayment = new Map();
@@ -12993,6 +13405,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
                     <div className="text-sm">{ex.description}</div>
                     <div className="text-xs mt-1" style={{ color: C.muted }}>{ex.category || "—"}{ex.supplier_id && <span> · {suppliers.find((s) => s.id === ex.supplier_id)?.name}</span>}</div>
+                    {ex.ncf && <div className="text-xs mt-1" style={{ color: C.muted }}>NCF <span className="font-mono" style={{ color: C.text }}>{ex.ncf}</span>{Number(ex.itbis_amount) > 0 && <> · ITBIS {fmtMoney(ex.itbis_amount)}</>} · <span style={{ color: C.green }}>va al 606</span></div>}
                     <div className="pt-2 mt-2 text-right font-mono font-semibold" style={{ borderTop: `1px solid ${C.border}` }}>{fmtMoney(ex.amount)}</div>
                   </div>
                 ))}
@@ -13070,10 +13483,40 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 <div className="text-sm font-semibold" style={{ color: C.text }}>Reportes DGII 606 (Compras) / 607 (Ventas)</div>
                 <input type="month" value={taxReportPeriod} onChange={(e) => setTaxReportPeriod(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
               </div>
-              <div className="text-xs mb-3" style={{ color: C.muted }}>Las columnas coinciden con las plantillas oficiales de la DGII (606 y 607). Algunas quedan en blanco porque el sistema no captura ese dato (Tipo de Bienes y Servicios, Tipo de Ingreso, Forma de Pago/Venta) — complétalas antes de subir el archivo a la Oficina Virtual.</div>
+              <div className="text-xs mb-3" style={{ color: C.muted }}>Las columnas coinciden con las plantillas oficiales de la DGII (606 y 607). El 606 incluye las compras y los otros gastos que tengan NCF; si falta algún dato, aparece la lista de lo que hay que completar. El 607 incluye las facturas y las notas de crédito del mes; la forma de venta sale de los cobros registrados hasta el cierre del mes (lo pendiente va a "Venta a Crédito").</div>
               {(() => {
                 const periodPurchases = purchases.filter((pu) => (pu.purchase_date || "").slice(0, 7) === taxReportPeriod);
+                // Otros gastos con NCF también van al 606 (luz, teléfono, combustible, alquiler...)
+                const periodExpenses = otherExpenses.filter((ex) => ex.ncf && (ex.expense_date || "").slice(0, 7) === taxReportPeriod);
+                const supplierOf = (id) => suppliers.find((sp) => sp.id === id);
+                const issues606 = [];
+                periodPurchases.forEach((pu) => {
+                  const sup = supplierOf(pu.supplier_id);
+                  const ref = `Compra ${pu.invoice_number || "sin NCF"} (${sup?.name || "sin proveedor"})`;
+                  if (!pu.invoice_number) issues606.push(`${ref}: falta el NCF del proveedor`);
+                  if (!(sup?.rnc || "").trim()) issues606.push(`${ref}: el proveedor no tiene RNC`);
+                  if (!pu.tipo_bien_servicio) issues606.push(`${ref}: falta el tipo de bien o servicio (ábrela y completa "Datos para el 606")`);
+                });
+                periodExpenses.forEach((ex) => {
+                  const sup = supplierOf(ex.supplier_id);
+                  const ref = `Gasto ${ex.ncf} (${ex.description})`;
+                  if (!(sup?.rnc || "").trim()) issues606.push(`${ref}: el proveedor no tiene RNC`);
+                  if (!ex.tipo_bien_servicio) issues606.push(`${ref}: falta el tipo de bien o servicio`);
+                  if (!ex.forma_pago) issues606.push(`${ref}: falta la forma de pago`);
+                });
                 const periodInvoices = invoices.filter((inv) => inv.status !== "anulada" && (inv.invoice_date || "").slice(0, 7) === taxReportPeriod);
+                // Notas de crédito (B04) del período: van al 607 con el NCF de la factura que modifican
+                const periodCreditNotes = creditNotes.filter((cn) => cn.status !== "anulada" && (cn.note_date || "").slice(0, 10).slice(0, 7) === taxReportPeriod);
+                const issues607 = [];
+                periodInvoices.forEach((inv) => {
+                  const cli = clients.find((c) => c.id === inv.client_id);
+                  if ((inv.ncf || "").toUpperCase().startsWith("B01") && !(cli?.rnc_cedula || "").replace(/\D/g, "")) {
+                    issues607.push(`Factura ${inv.ncf} (${cli?.name || "sin cliente"}): es B01 y el cliente no tiene RNC/cédula`);
+                  }
+                });
+                periodCreditNotes.forEach((cn) => {
+                  if (!invoices.find((i) => i.id === cn.invoice_id)?.ncf) issues607.push(`Nota de crédito ${cn.ncf}: no se encontró el NCF de la factura que modifica`);
+                });
                 const purchTotals = periodPurchases.reduce((acc, pu) => {
                   acc.subtotal += Number(pu.service_value ?? pu.total ?? 0);
                   acc.itbis += Number(pu.itbis_amount || 0);
@@ -13082,6 +13525,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   acc.total += Number(pu.total || 0);
                   return acc;
                 }, { subtotal: 0, itbis: 0, itbisRet: 0, isrRet: 0, total: 0 });
+                periodExpenses.forEach((ex) => {
+                  purchTotals.subtotal += Number(ex.amount || 0) - Number(ex.itbis_amount || 0);
+                  purchTotals.itbis += Number(ex.itbis_amount || 0);
+                  purchTotals.total += Number(ex.amount || 0);
+                });
                 const salesTotals = periodInvoices.reduce((acc, inv) => {
                   acc.subtotal += Number(inv.subtotal || 0);
                   acc.itbis += Number(inv.itbis || 0);
@@ -13089,6 +13537,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   acc.total += Number(inv.total || 0);
                   return acc;
                 }, { subtotal: 0, itbis: 0, itbisRet: 0, total: 0 });
+                periodCreditNotes.forEach((cn) => {
+                  salesTotals.subtotal -= Number(cn.subtotal || 0);
+                  salesTotals.itbis -= Number(cn.itbis || 0);
+                  salesTotals.total -= Number(cn.total || 0);
+                });
 
                 const downloadCsv = (filename, header, rows) => {
                   const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -13106,7 +13559,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   return "";
                 };
 
-                const download606 = () => {
+                const download606 = async () => {
                   const header = [
                     "Líneas", "RNC o Cédula", "Tipo Id", "Tipo Bienes y Servicios Comprados", "NCF", "NCF ó Documento Modificado",
                     "Fecha Comprobante", "Fecha Pago", "Monto Facturado en Servicios", "Monto Facturado en Bienes", "Total Monto Facturado",
@@ -13115,25 +13568,69 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     "ISR Percibido en compras", "Impuesto Selectivo al Consumo", "Otros Impuesto/Tasas", "Monto Propina Legal",
                     "Forma de Pago", "Estatus",
                   ];
-                  const rows = periodPurchases.map((pu, idx) => {
-                    const sup = suppliers.find((s) => s.id === pu.supplier_id);
+                  // Renglones (para separar bienes de servicios según el tipo de producto) y pagos
+                  // (para la fecha y la forma de pago) de las compras del período.
+                  const ids = periodPurchases.map((pu) => pu.id);
+                  let itemsByPurchase = new Map();
+                  let paysByPurchase = new Map();
+                  if (ids.length > 0) {
+                    const [{ data: itemRows, error: itErr }, { data: payRows, error: payErr }] = await Promise.all([
+                      fetchByIdChunks(ids, (chunk) => supabase.from("purchase_items").select("purchase_id, product_id, subtotal").in("purchase_id", chunk)),
+                      fetchByIdChunks(ids, (chunk) => supabase.from("purchase_payments").select("purchase_id, method, payment_date").in("purchase_id", chunk)),
+                    ]);
+                    if (itErr || payErr) { setErrorMsg(`No se pudo preparar el 606: ${(itErr || payErr).message}`); return; }
+                    (itemRows || []).forEach((r) => { if (!itemsByPurchase.has(r.purchase_id)) itemsByPurchase.set(r.purchase_id, []); itemsByPurchase.get(r.purchase_id).push(r); });
+                    (payRows || []).forEach((r) => { if (!paysByPurchase.has(r.purchase_id)) paysByPurchase.set(r.purchase_id, []); paysByPurchase.get(r.purchase_id).push(r); });
+                  }
+                  const ymd = (d) => (d || "").replaceAll("-", "");
+                  const rows = [];
+                  periodPurchases.forEach((pu) => {
+                    const sup = supplierOf(pu.supplier_id);
                     const itbisAmount = Number(pu.itbis_amount || 0);
                     const itbisRetained = Number(pu.itbis_retained || 0);
-                    const isServicio = !!pu.applies_254_06;
-                    const montoServicios = isServicio ? Number(pu.service_value || 0) : 0;
-                    const montoBienes = isServicio ? 0 : Number(pu.service_value ?? pu.total ?? 0);
-                    return [
-                      idx + 1, sup?.rnc || "", tipoId(sup?.rnc), "", pu.invoice_number || "", "",
-                      (pu.purchase_date || "").replaceAll("-", ""), "", montoServicios.toFixed(2), montoBienes.toFixed(2), (montoServicios + montoBienes).toFixed(2),
+                    const isrRetained = Number(pu.isr_retained || 0);
+                    const base = Number(pu.service_value ?? pu.total ?? 0);
+                    const its = itemsByPurchase.get(pu.id) || [];
+                    let montoServicios;
+                    if (its.length > 0) {
+                      montoServicios = its.reduce((sum, it) => {
+                        const prod = products.find((pr) => pr.id === it.product_id);
+                        return sum + ((prod?.item_type || "producto") === "servicio" ? Number(it.subtotal || 0) : 0);
+                      }, 0);
+                      montoServicios = Math.min(montoServicios, base);
+                    } else {
+                      montoServicios = pu.applies_254_06 ? base : 0;
+                    }
+                    const montoBienes = base - montoServicios;
+                    const pays = (paysByPurchase.get(pu.id) || []).slice().sort((a, b) => (a.payment_date || "").localeCompare(b.payment_date || ""));
+                    const lastPayDate = pays.length > 0 ? pays[pays.length - 1].payment_date : "";
+                    rows.push([
+                      "", sup?.rnc || "", tipoId(sup?.rnc), pu.tipo_bien_servicio || "", pu.invoice_number || "", "",
+                      ymd(pu.purchase_date), ymd(lastPayDate), montoServicios.toFixed(2), montoBienes.toFixed(2), base.toFixed(2),
                       itbisAmount.toFixed(2), itbisRetained.toFixed(2), "", "",
-                      Math.max(itbisAmount - itbisRetained, 0).toFixed(2), "", pu.retains_isr ? "02" : "", Number(pu.isr_retained || 0).toFixed(2),
+                      itbisAmount.toFixed(2), "", isrRetained > 0 ? (pu.isr_retention_type || "02") : "", isrRetained.toFixed(2),
                       "", "", "", "",
-                      "", "",
-                    ];
+                      pu.forma_pago || formaPago606FromPayments(pays), "",
+                    ]);
                   });
+                  periodExpenses.forEach((ex) => {
+                    const sup = supplierOf(ex.supplier_id);
+                    const itbisAmount = Number(ex.itbis_amount || 0);
+                    const base = Math.max(Number(ex.amount || 0) - itbisAmount, 0);
+                    const isService = (ex.expense_kind || "servicios") === "servicios";
+                    rows.push([
+                      "", sup?.rnc || "", tipoId(sup?.rnc), ex.tipo_bien_servicio || "", ex.ncf || "", "",
+                      ymd(ex.expense_date), ymd(ex.payment_date || ex.expense_date), (isService ? base : 0).toFixed(2), (isService ? 0 : base).toFixed(2), base.toFixed(2),
+                      itbisAmount.toFixed(2), "0.00", "", "",
+                      itbisAmount.toFixed(2), "", "", "0.00",
+                      "", "", "", "",
+                      ex.forma_pago || "", "",
+                    ]);
+                  });
+                  rows.forEach((r, idx) => { r[0] = idx + 1; });
                   downloadCsv(`606_${taxReportPeriod}.csv`, header, rows);
                 };
-                const download607 = () => {
+                const download607 = async () => {
                   const header = [
                     "No", "RNC/Cédula o Pasaporte", "Tipo Identificación", "Número Comprobante Fiscal", "Número Comprobante Fiscal Modificado",
                     "Tipo de Ingreso", "Fecha Comprobante", "Fecha de Retención", "Monto Facturado", "ITBIS Facturado", "ITBIS Retenido por Terceros",
@@ -13141,48 +13638,112 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     "Monto Propina Legal", "Efectivo", "Cheque/ Transferencia/ Depósito", "Tarjeta Débito/Crédito", "Venta a Crédito",
                     "Bonos o Certificados de Regalo", "Permuta", "Otras Formas de Ventas", "Estatus",
                   ];
-                  const rows = periodInvoices.map((inv, idx) => {
+                  // Cobros de las facturas del período para repartir la forma de venta. Solo cuentan los
+                  // cobros hechos hasta el cierre del mes; lo que falte por cobrar va a "Venta a Crédito".
+                  const ids = periodInvoices.map((inv) => inv.id);
+                  const paysByInvoice = new Map();
+                  if (ids.length > 0) {
+                    const { data: payRows, error: payErr } = await fetchByIdChunks(ids, (chunk) => supabase.from("invoice_payments").select("invoice_id, amount, method, payment_date").in("invoice_id", chunk));
+                    if (payErr) { setErrorMsg(`No se pudo preparar el 607: ${payErr.message}`); return; }
+                    (payRows || []).forEach((r) => { if (!paysByInvoice.has(r.invoice_id)) paysByInvoice.set(r.invoice_id, []); paysByInvoice.get(r.invoice_id).push(r); });
+                  }
+                  const [py, pm] = taxReportPeriod.split("-").map(Number);
+                  const periodEnd = `${taxReportPeriod}-${String(new Date(py, pm, 0).getDate()).padStart(2, "0")}`;
+                  const ymd = (d) => (d || "").slice(0, 10).replaceAll("-", "");
+                  const pendingRetentions = [];
+                  const rows = [];
+                  periodInvoices.forEach((inv) => {
                     const cli = clients.find((c) => c.id === inv.client_id);
-                    return [
-                      idx + 1, cli?.rnc_cedula || "", tipoId(cli?.rnc_cedula), inv.ncf || "", "",
-                      "", (inv.invoice_date || "").replaceAll("-", ""), inv.applies_norma_0205 ? (inv.invoice_date || "").replaceAll("-", "") : "", Number(inv.subtotal || 0).toFixed(2), Number(inv.itbis || 0).toFixed(2), Number(inv.itbis_retained || 0).toFixed(2),
+                    const subtotal = Number(inv.subtotal || 0);
+                    const itbis = Number(inv.itbis || 0);
+                    const retained = Number(inv.itbis_retained || 0);
+                    const pays = (paysByInvoice.get(inv.id) || []).slice().sort((a, b) => (a.payment_date || "").localeCompare(b.payment_date || ""));
+                    const paidInPeriod = pays.filter((p) => (p.payment_date || "") <= periodEnd);
+                    const sumBy = (fn) => paidInPeriod.filter(fn).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                    const efectivo = sumBy((p) => p.method === "Efectivo");
+                    const tarjeta = sumBy((p) => p.method === "Tarjeta");
+                    const banco = sumBy((p) => p.method !== "Efectivo" && p.method !== "Tarjeta");
+                    const credito = Math.max(Number(inv.total || 0) - efectivo - tarjeta - banco, 0);
+                    // La retención de la Norma 02-05 la hace el cliente al pagar: fecha = primer cobro.
+                    let fechaRetencion = "";
+                    let itbisRetenido = 0;
+                    if (inv.applies_norma_0205 && retained > 0) {
+                      if (pays.length > 0) { fechaRetencion = ymd(pays[0].payment_date); itbisRetenido = retained; }
+                      else pendingRetentions.push(inv.ncf);
+                    }
+                    rows.push([
+                      "", cli?.rnc_cedula || "", tipoId(cli?.rnc_cedula), inv.ncf || "", "",
+                      inv.income_type || "01", ymd(inv.invoice_date), fechaRetencion, subtotal.toFixed(2), itbis.toFixed(2), itbisRetenido.toFixed(2),
                       "", "", "", "", "",
-                      "", "", "", "", "",
+                      "", efectivo.toFixed(2), banco.toFixed(2), tarjeta.toFixed(2), credito.toFixed(2),
                       "", "", "", "",
-                    ];
+                    ]);
                   });
+                  periodCreditNotes.forEach((cn) => {
+                    const cli = clients.find((c) => c.id === cn.client_id);
+                    const inv = invoices.find((i) => i.id === cn.invoice_id);
+                    rows.push([
+                      "", cli?.rnc_cedula || "", tipoId(cli?.rnc_cedula), cn.ncf || "", inv?.ncf || "",
+                      inv?.income_type || "01", ymd(cn.note_date), "", Number(cn.subtotal || 0).toFixed(2), Number(cn.itbis || 0).toFixed(2), "0.00",
+                      "", "", "", "", "",
+                      "", "0.00", "0.00", "0.00", "0.00",
+                      "", "", "", "",
+                    ]);
+                  });
+                  rows.forEach((r, idx) => { r[0] = idx + 1; });
                   downloadCsv(`607_${taxReportPeriod}.csv`, header, rows);
+                  if (pendingRetentions.length > 0) {
+                    setErrorMsg(`607 descargado. Aviso: ${pendingRetentions.length} factura(s) con Norma 02-05 todavía sin cobrar (${pendingRetentions.slice(0, 5).join(", ")}${pendingRetentions.length > 5 ? "…" : ""}) — su ITBIS retenido salió en 0; cuando el cliente pague habrá que reenviar el 607 de este mes.`);
+                  }
                 };
 
                 return (
                   <>
                     <div className="grid grid-cols-2 gap-3 mb-4">
                       <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-                        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>606 · Compras ({periodPurchases.length})</div>
+                        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>606 · Compras ({periodPurchases.length}) y gastos con NCF ({periodExpenses.length})</div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(purchTotals.subtotal)}</span></div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado</span><span className="font-mono">{fmtMoney(purchTotals.itbis)}</span></div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS retenido</span><span className="font-mono">{fmtMoney(purchTotals.itbisRet)}</span></div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ISR retenido</span><span className="font-mono">{fmtMoney(purchTotals.isrRet)}</span></div>
                         <div className="flex justify-between text-sm font-semibold mt-1" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(purchTotals.total)}</span></div>
-                        <button onClick={download606} disabled={periodPurchases.length === 0} className="flex items-center gap-2 mt-3 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                        {issues606.length > 0 && (
+                          <details className="mt-2 text-xs" style={{ color: C.orange }}>
+                            <summary className="cursor-pointer">{issues606.length} dato{issues606.length !== 1 ? "s" : ""} por completar antes de enviar</summary>
+                            <ul className="mt-1 space-y-0.5 list-disc pl-4" style={{ color: C.text }}>
+                              {issues606.slice(0, 30).map((t, i) => <li key={i}>{t}</li>)}
+                              {issues606.length > 30 && <li>…y {issues606.length - 30} más</li>}
+                            </ul>
+                          </details>
+                        )}
+                        <button onClick={download606} disabled={periodPurchases.length === 0 && periodExpenses.length === 0} className="flex items-center gap-2 mt-3 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                           <FileText size={13} /> Descargar 606 (CSV)
                         </button>
                       </div>
                       <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-                        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>607 · Ventas ({periodInvoices.length})</div>
+                        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>607 · Ventas ({periodInvoices.length}) y notas de crédito ({periodCreditNotes.length})</div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(salesTotals.subtotal)}</span></div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado</span><span className="font-mono">{fmtMoney(salesTotals.itbis)}</span></div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS retenido</span><span className="font-mono">{fmtMoney(salesTotals.itbisRet)}</span></div>
                         <div className="flex justify-between text-sm font-semibold mt-1" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(salesTotals.total)}</span></div>
-                        <button onClick={download607} disabled={periodInvoices.length === 0} className="flex items-center gap-2 mt-3 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                        {issues607.length > 0 && (
+                          <details className="mt-2 text-xs" style={{ color: C.orange }}>
+                            <summary className="cursor-pointer">{issues607.length} dato{issues607.length !== 1 ? "s" : ""} por revisar antes de enviar</summary>
+                            <ul className="mt-1 space-y-0.5 list-disc pl-4" style={{ color: C.text }}>
+                              {issues607.slice(0, 30).map((t, i) => <li key={i}>{t}</li>)}
+                              {issues607.length > 30 && <li>…y {issues607.length - 30} más</li>}
+                            </ul>
+                          </details>
+                        )}
+                        <button onClick={download607} disabled={periodInvoices.length === 0 && periodCreditNotes.length === 0} className="flex items-center gap-2 mt-3 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                           <FileText size={13} /> Descargar 607 (CSV)
                         </button>
                       </div>
                     </div>
                     <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.amber}60` }}>
                       <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.amber }}>Cálculo general del período</div>
-                      <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado en ventas</span><span className="font-mono">{fmtMoney(salesTotals.itbis)}</span></div>
-                      <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado en compras (adelantado)</span><span className="font-mono">-{fmtMoney(purchTotals.itbis)}</span></div>
+                      <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado en ventas (menos notas de crédito)</span><span className="font-mono">{fmtMoney(salesTotals.itbis)}</span></div>
+                      <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado en compras y gastos (adelantado)</span><span className="font-mono">-{fmtMoney(purchTotals.itbis)}</span></div>
                       <div className="flex justify-between text-sm font-bold mt-1" style={{ color: C.text }}><span>ITBIS a pagar (o a favor si es negativo)</span><span className="font-mono">{fmtMoney(salesTotals.itbis - purchTotals.itbis)}</span></div>
                     </div>
                   </>
@@ -13297,6 +13858,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     <div className="flex justify-between font-semibold pt-1" style={{ borderTop: `1px solid ${C.border}` }}><span>Ingresos netos</span><span className="font-mono">{fmtMoney(financialPnl.netRevenue)}</span></div>
                     <div className="flex justify-between pt-2"><span style={{ color: C.muted }}>Compras a proveedores</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.purchasesCost)}</span></div>
                     <div className="flex justify-between"><span style={{ color: C.muted }}>Otros gastos</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.otherExpensesCost)}</span></div>
+                    {Math.abs(financialPnl.fxDifference) >= 0.01 && (
+                      <div className="flex justify-between"><span style={{ color: C.muted }}>Diferencia cambiaria ({financialPnl.fxDifference > 0 ? "ganancia" : "pérdida"})</span><span className="font-mono" style={{ color: financialPnl.fxDifference > 0 ? C.green : C.red }}>{financialPnl.fxDifference > 0 ? "+" : ""}{fmtMoney(financialPnl.fxDifference)}</span></div>
+                    )}
                     <div className="flex justify-between font-bold text-base pt-2" style={{ borderTop: `1px solid ${C.border}`, color: financialPnl.netIncome >= 0 ? C.green : C.red }}>
                       <span>Utilidad neta</span><span className="font-mono">{fmtMoney(financialPnl.netIncome)}</span>
                     </div>
@@ -13338,7 +13902,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             <div>
               {(() => {
                 const inRange = (d) => d >= financialDateFrom && d <= financialDateTo;
-                const txInRange = bankTransactions.filter((t) => inRange(t.transaction_date));
+                const selectedAccount = companyBankAccounts.find((a) => a.id === bankAccountFilter) || null;
+                const txInRange = bankTransactions.filter((t) => inRange(t.transaction_date) && (!bankAccountFilter || t.bank_account_id === bankAccountFilter));
+                const fmtTx = (amt, t) => {
+                  const cur = companyBankAccounts.find((a) => a.id === t.bank_account_id)?.currency || "DOP";
+                  return cur === "USD" ? `US$ ${Number(amt).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : fmtMoney(amt);
+                };
                 const reconciled = txInRange.filter((t) => t.is_reconciled);
                 const pending = txInRange.filter((t) => !t.is_reconciled);
                 const totalBank = txInRange.reduce((s, t) => s + Number(t.amount), 0);
@@ -13353,6 +13922,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Hasta</div>
                         <input type="date" value={financialDateTo} onChange={(e) => setFinancialDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
                       </div>
+                      {companyBankAccounts.length > 0 && (
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Cuenta bancaria</div>
+                          <select value={bankAccountFilter} onChange={(e) => setBankAccountFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+                            <option value="">Todas las cuentas</option>
+                            {companyBankAccounts.map((a) => <option key={a.id} value={a.id}>{a.bank_name} — {a.account_number}{a.currency === "USD" ? " (US$)" : ""}</option>)}
+                          </select>
+                        </div>
+                      )}
                       {canEdit("bankReconciliation") && (
                         <label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
                           <Upload size={14} /> {importingBankStatement ? "Importando..." : "Importar estado de cuenta"}
@@ -13362,14 +13940,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       {loadingFinancial && <div className="text-sm" style={{ color: C.muted }}>Buscando posibles coincidencias...</div>}
                     </div>
                     <div className="text-xs mb-4" style={{ color: C.muted }}>
-                      Sube el estado de cuenta exportado de tu banco (CSV o Excel) con columnas de Fecha, Descripción y Monto (o Crédito/Débito por separado). El sistema busca automáticamente un cobro, pago o gasto registrado con el mismo monto y una fecha cercana. Si subes el mismo archivo (o rangos de fechas superpuestos) dos veces, los movimientos repetidos se detectan y no se duplican.
+                      Elige la cuenta bancaria y sube su estado de cuenta exportado del banco (CSV o Excel) con columnas de Fecha, Descripción y Monto (o Crédito/Débito por separado). El sistema busca automáticamente un cobro, pago o gasto registrado con el mismo monto y una fecha cercana. Si subes el mismo archivo (o rangos de fechas superpuestos) dos veces, los movimientos repetidos se detectan y no se duplican.
                     </div>
                     {bankImportMsg && (
                       <div className="text-xs mb-4" style={{ color: C.green }}>{bankImportMsg}</div>
                     )}
 
                     <div className="flex gap-3 flex-wrap mb-6">
-                      <KpiCard label="Movimientos del banco" value={txInRange.length} accent={C.blue} sub={fmtMoney(totalBank)} />
+                      <KpiCard label="Movimientos del banco" value={txInRange.length} accent={C.blue} sub={selectedAccount?.currency === "USD" ? `US$ ${totalBank.toFixed(2)}` : (bankAccountFilter || !companyBankAccounts.some((a) => a.currency === "USD") ? fmtMoney(totalBank) : "Varias monedas — elige una cuenta")} />
                       <KpiCard label="Conciliados" value={reconciled.length} accent={C.green} sub="Ya vinculados al sistema" />
                       <KpiCard label="Pendientes" value={pending.length} accent={C.amber} sub="Necesitan revisión" />
                     </div>
@@ -13388,7 +13966,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                           <div key={tx.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                             <div className="col-span-2" style={{ color: C.muted }}>{fmtDate(tx.transaction_date)}</div>
                             <div className="col-span-3 truncate">{tx.description || "—"}</div>
-                            <div className="col-span-2 text-right font-mono" style={{ color: tx.amount >= 0 ? C.green : C.red }}>{fmtMoney(tx.amount)}</div>
+                            <div className="col-span-2 text-right font-mono" style={{ color: tx.amount >= 0 ? C.green : C.red }}>{fmtTx(tx.amount, tx)}</div>
                             <div className="col-span-3">
                               {tx.is_reconciled ? (
                                 <Pill label="Conciliado" color={C.green} />
@@ -13876,13 +14454,17 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                 const openSession = cashSessions.find((s) => s.branch_id === activeBranchId && s.status === "abierta");
                 const closedSessions = cashSessions.filter((s) => s.branch_id === activeBranchId && s.status === "cerrada").slice(0, 15);
 
-                const sums = {};
-                sessionPayments.forEach((p) => { sums[p.method] = (sums[p.method] || 0) + Number(p.amount); });
-                const cashSoFar = sums["Efectivo"] || 0;
-                const cardSoFar = sums["Tarjeta"] || 0;
-                const transferSoFar = (sums["Transferencia"] || 0) + (sums["Otro"] || 0);
+                // Misma regla que close_cash_session: efectivo en RD$ y en US$ por separado; tarjeta y
+                // transferencia al valor real del día (monto aplicado + diferencia cambiaria).
+                const sumPays = (fn, val) => sessionPayments.filter(fn).reduce((acc, p) => acc + val(p), 0);
+                const realRd = (p) => Number(p.amount || 0) + Number(p.fx_difference || 0);
+                const cashSoFar = sumPays((p) => p.method === "Efectivo" && (p.currency || "DOP") === "DOP", (p) => Number(p.amount || 0));
+                const cashUsdSoFar = sumPays((p) => p.method === "Efectivo" && p.currency === "USD", (p) => Number(p.foreign_amount || 0));
+                const cardSoFar = sumPays((p) => p.method === "Tarjeta", realRd);
+                const transferSoFar = sumPays((p) => p.method === "Transferencia" || p.method === "Otro", realRd);
                 const expected = {
                   cash: Number(openSession?.opening_amount || 0) + cashSoFar,
+                  cashUsd: Number(openSession?.opening_amount_usd || 0) + cashUsdSoFar,
                   card: cardSoFar,
                   transfer: transferSoFar,
                 };
@@ -13913,7 +14495,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <div className="text-sm font-semibold" style={{ color: C.text }}>Caja abierta — {activeBranchName}</div>
-                            <div className="text-xs" style={{ color: C.muted }}>Desde {new Date(openSession.opened_at).toLocaleString("es-DO")} · Fondo inicial {fmtMoney(openSession.opening_amount)}</div>
+                            <div className="text-xs" style={{ color: C.muted }}>Desde {new Date(openSession.opened_at).toLocaleString("es-DO")} · Fondo inicial {fmtMoney(openSession.opening_amount)}{Number(openSession.opening_amount_usd || 0) > 0 ? ` + US$ ${Number(openSession.opening_amount_usd).toFixed(2)}` : ""}</div>
                           </div>
                           <button onClick={() => setShowCloseCaja(true)} disabled={!canEdit("caja")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.red, color: "#fff" }}>
                             <Wallet size={14} /> Cerrar caja
@@ -13933,6 +14515,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                             <div className="text-lg font-mono" style={{ color: C.text }}>{fmtMoney(expected.transfer)}</div>
                           </div>
                         </div>
+                        {expected.cashUsd > 0 && (
+                          <div className="mt-3 p-3" style={{ background: C.panelAlt, border: `1px solid ${C.blue}60` }}>
+                            <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Efectivo en dólares esperado</div>
+                            <div className="text-lg font-mono" style={{ color: C.text }}>US$ {expected.cashUsd.toFixed(2)}</div>
+                            {Number(openSession.opening_amount_usd || 0) > 0 && <div className="text-xs" style={{ color: C.muted }}>Incluye fondo inicial de US$ {Number(openSession.opening_amount_usd).toFixed(2)}</div>}
+                          </div>
+                        )}
                         {sessionPayments.length > 0 && (
                           <div className="text-xs mt-3" style={{ color: C.muted }}>{sessionPayments.length} cobro{sessionPayments.length !== 1 ? "s" : ""} registrado{sessionPayments.length !== 1 ? "s" : ""} en esta caja.</div>
                         )}
@@ -14009,7 +14598,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                             <div className="col-span-2 text-right font-mono">{fmtMoney(s.declared_cash)}</div>
                             <div className="col-span-2 text-right font-mono">{fmtMoney(s.declared_card)}</div>
                             <div className="col-span-2 text-right font-mono">{fmtMoney(s.declared_transfer)}</div>
-                            <div className="col-span-3 text-right font-mono font-semibold" style={{ color: Math.abs(diff) > 0.01 ? (diff > 0 ? C.blue : C.red) : C.green }}>{diff > 0 ? "+" : ""}{fmtMoney(diff)}</div>
+                            <div className="col-span-3 text-right font-mono font-semibold" style={{ color: Math.abs(diff) > 0.01 ? (diff > 0 ? C.blue : C.red) : C.green }}>
+                              {diff > 0 ? "+" : ""}{fmtMoney(diff)}
+                              {(s.expected_cash_usd != null && (Number(s.expected_cash_usd) > 0 || Number(s.declared_cash_usd) > 0)) && (() => {
+                                const du = Number(s.declared_cash_usd || 0) - Number(s.expected_cash_usd || 0);
+                                return <div className="text-xs font-normal" style={{ color: Math.abs(du) > 0.01 ? (du > 0 ? C.blue : C.red) : C.muted }}>US$ {Number(s.declared_cash_usd || 0).toFixed(2)} ({du > 0 ? "+" : ""}{du.toFixed(2)})</div>;
+                              })()}
+                            </div>
                           </div>
                         );
                       })}
@@ -14017,7 +14612,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     </div>
 
                     {showOpenCaja && (
-                      <CashOpenModal branchName={activeBranchName} saving={saving} onClose={() => setShowOpenCaja(false)} onSave={(amt) => openCashSession(activeBranchId, amt)} />
+                      <CashOpenModal branchName={activeBranchName} allowUsd={!!company?.accepts_usd_payments} saving={saving} onClose={() => setShowOpenCaja(false)} onSave={(amt, usd) => openCashSession(activeBranchId, amt, usd)} />
                     )}
                     {showCloseCaja && openSession && (
                       <CashCloseModal session={openSession} branchName={activeBranchName} expected={expected} saving={saving} onClose={() => setShowCloseCaja(false)} onSave={(declared) => closeCashSession(openSession, declared)} />
@@ -14478,6 +15073,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onClose={() => setPurchaseDetail(null)}
           onRegisterPayment={registerPurchasePayment}
           onDeletePayment={deletePurchasePayment}
+          onUpdate606={updatePurchase606}
         />
       )}
       {showAddPurchaseOrder && (
@@ -14702,6 +15298,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onDeletePayment={deletePayment}
           onDeletePaymentAttachment={deletePaymentAttachment}
         />
+      )}
+      {voidingInvoice && (
+        <VoidInvoiceModal invoice={voidingInvoice} saving={saving} onClose={() => setVoidingInvoice(null)} onConfirm={confirmVoidInvoice} />
       )}
       {showAddCreditNote && (
         <CreditNoteFormModal
