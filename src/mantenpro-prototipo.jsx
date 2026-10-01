@@ -2364,6 +2364,47 @@ function listHtml(title, companyName, headers, rows) {
     <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
+const isRetentionMethod = (m) => /^Retención/.test(m || "");
+
+// Recibo de ingreso de un cobro (se imprime desde el detalle de la factura)
+function receiptHtml({ company, companyName, clientName, clientRnc, invoice, payment, balanceAfter }) {
+  const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const number = payment.receipt_number || `REC-${String(payment.id || "").slice(0, 8).toUpperCase()}`;
+  const companyMeta = [company?.rnc ? `RNC: ${company.rnc}` : null, company?.address || null, company?.phone ? `Tel: ${company.phone}` : null].filter(Boolean).map(esc).join(" · ");
+  const usd = payment.currency === "USD"
+    ? `<div><span>Recibido en dólares</span><span>US$ ${Number(payment.foreign_amount || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (tasa RD$ ${esc(payment.payment_rate)})</span></div>`
+    : "";
+  const card = payment.card ? `<div class="muted" style="margin-top:4px">Tarjeta: ${esc(cardDetailLine(payment.card))}</div>` : "";
+  return `
+    <div class="header-row">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        ${company?.logo_url ? `<img src="${esc(company.logo_url)}" style="width:56px;height:56px;object-fit:contain;flex-shrink:0" />` : ""}
+        <div>
+          <h1>${esc(companyName)}</h1>
+          ${companyMeta ? `<div class="muted" style="font-size:11px">${companyMeta}</div>` : ""}
+          <div class="muted">Recibo de ingreso · ${esc(number)}</div>
+        </div>
+      </div>
+      <div class="muted" style="text-align:right">Fecha: ${esc(fmtDate(payment.payment_date))}</div>
+    </div>
+    <div class="muted">Recibimos de: <b style="color:#111">${esc(clientName)}</b>${clientRnc ? ` · RNC/Cédula: <b style="color:#111">${esc(clientRnc)}</b>` : ""}</div>
+    <div class="muted" style="margin-top:2px">Por concepto de: pago de la factura ${esc(invoice.invoice_number || "")} · NCF ${esc(invoice.ncf || "")}${invoice.title ? ` — ${esc(invoice.title)}` : ""}</div>
+    <div class="totals" style="width:340px">
+      <div><span>Forma de pago</span><span>${esc(payment.method || "—")}</span></div>
+      ${usd}
+      <div><span>Total factura</span><span>${fmtMoney(invoice.total)}</span></div>
+      <div class="total"><span>Monto recibido</span><span>${fmtMoney(payment.amount)}</span></div>
+      <div><span>Saldo pendiente</span><span>${fmtMoney(balanceAfter)}</span></div>
+    </div>
+    ${card}
+    ${payment.notes ? `<div class="muted" style="margin-top:10px">Notas: ${esc(payment.notes)}</div>` : ""}
+    <div style="display:flex;justify-content:space-between;gap:40px;margin-top:60px">
+      <div style="flex:1;border-top:1px solid #333;padding-top:4px;text-align:center" class="muted">Recibido por</div>
+      <div style="flex:1;border-top:1px solid #333;padding-top:4px;text-align:center" class="muted">Entregado por</div>
+    </div>
+  `;
+}
+
 function statementHtml(companyName, clientName, invoicesList) {
   const rows = invoicesList.map((inv) => {
     const balance = Number(inv.total) - Number(inv.amount_paid || 0);
@@ -2533,6 +2574,176 @@ function ClientAssetFormModal({ clients, branches, technicians, initial, onClose
   );
 }
 
+
+// ---- Inventario por sucursal: transferencias, ajustes y kárdex ----
+const STOCK_KIND_LABELS = {
+  inicial: "Stock inicial", compra: "Compra", nota_entrega: "Nota de entrega", venta: "Venta", anulacion: "Anulación de factura",
+  transferencia_salida: "Transferencia (salida)", transferencia_entrada: "Transferencia (entrada)", ajuste: "Ajuste",
+  eliminacion_compra: "Compra eliminada", eliminacion_nota_entrega: "Nota de entrega eliminada",
+};
+const STOCK_ADJUST_REASONS = ["Conteo físico", "Merma", "Daño o vencimiento", "Consumo interno", "Corrección de error", "Otro"];
+const stockableProducts = (products) => (products || []).filter((p) => (p.item_type || "producto") !== "servicio" && !p.is_composite);
+
+function StockTransferModal({ branches, products, stockAt, defaultFromId, onClose, onSave, saving }) {
+  const [fromId, setFromId] = useState(defaultFromId || branches[0]?.id || "");
+  const [toId, setToId] = useState(branches.find((b) => b.id !== (defaultFromId || branches[0]?.id))?.id || "");
+  const [date, setDate] = useState(() => todayStrRD());
+  const [notes, setNotes] = useState("");
+  const [rows, setRows] = useState([{ key: 1, product_id: "", quantity: "" }]);
+  const [error, setError] = useState("");
+  const items = stockableProducts(products);
+  const update = (key, patch) => setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const submit = () => {
+    setError("");
+    if (!fromId || !toId || fromId === toId) { setError("Elige dos sucursales distintas."); return; }
+    const valid = rows.filter((r) => r.product_id && Number(r.quantity) > 0);
+    if (valid.length === 0) { setError("Agrega al menos un producto con cantidad."); return; }
+    for (const r of valid) {
+      const avail = stockAt(r.product_id, fromId);
+      if (Number(r.quantity) > avail) { setError(`${items.find((p) => p.id === r.product_id)?.name}: solo hay ${avail} en la sucursal de origen.`); return; }
+    }
+    onSave(fromId, toId, valid.map((r) => ({ product_id: r.product_id, quantity: Number(r.quantity) })), notes.trim(), date);
+  };
+  return (
+    <Modal title="Transferir inventario entre sucursales" onClose={onClose} wide>
+      <div className="grid grid-cols-3 gap-3">
+        <Field label="Desde">
+          <select className={inputClass} style={inputStyle} value={fromId} onChange={(e) => setFromId(e.target.value)}>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Hacia">
+          <select className={inputClass} style={inputStyle} value={toId} onChange={(e) => setToId(e.target.value)}>
+            <option value="">Selecciona</option>
+            {branches.filter((b) => b.id !== fromId).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label="Fecha">
+          <input type="date" className={inputClass} style={inputStyle} value={date} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+      </div>
+      <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos</div>
+      <div className="space-y-2 mb-2">
+        {rows.map((r) => {
+          const avail = r.product_id ? stockAt(r.product_id, fromId) : null;
+          return (
+            <div key={r.key} className="grid grid-cols-12 gap-2 items-center">
+              <div className="col-span-7"><SearchSelect items={items} value={r.product_id} onChange={(v) => update(r.key, { product_id: v })} placeholder="Buscar producto..." getLabel={(p) => `${p.name}${p.sku ? ` (${p.sku})` : ""}`} /></div>
+              <input type="text" inputMode="decimal" className={`${inputClass} col-span-2`} style={inputStyle} value={r.quantity} onChange={(e) => update(r.key, { quantity: e.target.value })} placeholder="Cant." />
+              <div className="col-span-2 text-xs" style={{ color: avail !== null && Number(r.quantity) > avail ? C.red : C.muted }}>{avail !== null ? `Hay ${avail}` : ""}</div>
+              <button onClick={() => setRows((prev) => prev.length > 1 ? prev.filter((x) => x.key !== r.key) : prev)} style={iconBtnStyle} className="col-span-1"><X size={14} /></button>
+            </div>
+          );
+        })}
+      </div>
+      <button onClick={() => setRows((prev) => [...prev, { key: Date.now(), product_id: "", quantity: "" }])} className="flex items-center gap-1 text-sm mb-3" style={{ color: C.amber }}><Plus size={14} /> Agregar producto</button>
+      <Field label="Notas (opcional)">
+        <input className={inputClass} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej. Reposición para obra en Santiago" />
+      </Field>
+      {error && <div className="text-xs mb-2" style={{ color: C.red }}>{error}</div>}
+      <div className="flex justify-end gap-2 mt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>{saving ? "Transfiriendo..." : "Transferir"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function StockAdjustModal({ branches, products, stockAt, initialProductId, defaultBranchId, onClose, onSave, saving }) {
+  const items = stockableProducts(products);
+  const [productId, setProductId] = useState(initialProductId || "");
+  const [branchId, setBranchId] = useState(defaultBranchId || branches[0]?.id || "");
+  const [counted, setCounted] = useState("");
+  const [reason, setReason] = useState(STOCK_ADJUST_REASONS[0]);
+  const [detail, setDetail] = useState("");
+  const [error, setError] = useState("");
+  const current = productId && branchId ? stockAt(productId, branchId) : null;
+  const delta = counted !== "" && current !== null ? Number(counted) - current : 0;
+  const submit = () => {
+    setError("");
+    if (!productId || !branchId) { setError("Elige el producto y la sucursal."); return; }
+    if (counted === "" || Number(counted) < 0 || isNaN(Number(counted))) { setError("Escribe la existencia real (0 o más)."); return; }
+    if (delta === 0) { setError("La existencia contada es igual a la del sistema: no hay nada que ajustar."); return; }
+    onSave(productId, branchId, delta, detail.trim() ? `${reason}: ${detail.trim()}` : reason);
+  };
+  return (
+    <Modal title="Ajustar inventario" onClose={onClose}>
+      <Field label="Producto">
+        <SearchSelect items={items} value={productId} onChange={setProductId} placeholder="Buscar producto..." getLabel={(p) => `${p.name}${p.sku ? ` (${p.sku})` : ""}`} />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Sucursal">
+          <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+            {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        </Field>
+        <Field label={`Existencia real${current !== null ? ` (sistema: ${current})` : ""}`}>
+          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={counted} onChange={(e) => setCounted(e.target.value)} placeholder="Lo que hay físicamente" />
+        </Field>
+      </div>
+      {counted !== "" && current !== null && delta !== 0 && (
+        <div className="text-xs mb-2" style={{ color: delta > 0 ? C.green : C.red }}>Se {delta > 0 ? "sumarán" : "restarán"} {Math.abs(delta)} unidades.</div>
+      )}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Motivo">
+          <select className={inputClass} style={inputStyle} value={reason} onChange={(e) => setReason(e.target.value)}>
+            {STOCK_ADJUST_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+        </Field>
+        <Field label="Detalle (opcional)">
+          <input className={inputClass} style={inputStyle} value={detail} onChange={(e) => setDetail(e.target.value)} placeholder="Ej. conteo de fin de mes" />
+        </Field>
+      </div>
+      {error && <div className="text-xs mb-2" style={{ color: C.red }}>{error}</div>}
+      <div className="flex justify-end gap-2 mt-2">
+        <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>{saving ? "Guardando..." : "Guardar ajuste"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+function StockMovementsModal({ product, branches, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [branchFilter, setBranchFilter] = useState("");
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.from("stock_movements").select("*").eq("product_id", product.id).order("created_at", { ascending: false }).limit(500);
+      setRows(error ? [] : (data || []));
+    })();
+  }, [product.id]);
+  const shown = (rows || []).filter((r) => !branchFilter || r.branch_id === branchFilter);
+  return (
+    <Modal title={`Movimientos · ${product.name}`} onClose={onClose} wide>
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+        <div className="text-xs" style={{ color: C.muted }}>Existencia total: <span style={{ color: C.text }}>{product.stock_qty} {product.unit}</span> · costo promedio {fmtMoney(product.cost_price)}</div>
+        <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="px-3 py-1.5 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
+          <option value="">Todas las sucursales</option>
+          {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      </div>
+      <div className="overflow-x-auto" style={{ border: `1px solid ${C.border}` }}>
+        <div className="grid grid-cols-12 gap-2 min-w-[720px] px-3 py-2 text-[10px] uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+          <div className="col-span-2">Fecha</div><div className="col-span-3">Movimiento</div><div className="col-span-2">Sucursal</div>
+          <div className="col-span-1 text-right">Cant.</div><div className="col-span-1 text-right">Queda</div><div className="col-span-3">Detalle</div>
+        </div>
+        {rows === null && <div className="px-3 py-6 text-center text-sm" style={{ color: C.muted }}>Cargando...</div>}
+        {rows !== null && shown.length === 0 && <div className="px-3 py-6 text-center text-sm" style={{ color: C.muted }}>Sin movimientos registrados.</div>}
+        {shown.map((r) => (
+          <div key={r.id} className="grid grid-cols-12 gap-2 min-w-[720px] px-3 py-2 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+            <div className="col-span-2 text-xs" style={{ color: C.muted }}>{new Date(r.created_at).toLocaleString("es-DO", { dateStyle: "short", timeStyle: "short" })}</div>
+            <div className="col-span-3">{STOCK_KIND_LABELS[r.kind] || r.kind}</div>
+            <div className="col-span-2 text-xs" style={{ color: C.muted }}>{branches.find((b) => b.id === r.branch_id)?.name || "—"}</div>
+            <div className="col-span-1 text-right font-mono" style={{ color: Number(r.quantity) >= 0 ? C.green : C.red }}>{Number(r.quantity) > 0 ? "+" : ""}{Number(r.quantity)}</div>
+            <div className="col-span-1 text-right font-mono">{r.balance_after ?? "—"}</div>
+            <div className="col-span-3 text-xs truncate" style={{ color: C.muted }}>{r.reason || ""}</div>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
 function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, branches, restrictToBranchIds, onClose, onSave, saving }) {
   const [itemType, setItemType] = useState(initial?.item_type || defaultItemType || "producto");
   const [sku, setSku] = useState(initial?.sku || "");
@@ -2635,11 +2846,14 @@ function ProductFormModal({ initial, existingProducts, allProducts, initialCompo
       unit: unit.trim() || "unidad",
       cost_price: Number(costPrice) || 0,
       unit_price: Number(unitPrice) || 0,
-      stock_qty: (isService || isComposite) ? 0 : Number(stockQty) || 0,
       branch_id: isService ? null : (branchId || null),
       is_taxable: isTaxable,
       is_composite: isComposite,
-    }, components);
+    }, components, {
+      // Stock inicial (solo al crear): entra a la sucursal del producto o a la principal
+      initialStock: (!initial && !isService && !isComposite) ? (Number(stockQty) || 0) : 0,
+      initialStockBranchId: branchId || null,
+    });
   };
 
   return (
@@ -2680,9 +2894,15 @@ function ProductFormModal({ initial, existingProducts, allProducts, initialCompo
           <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={costPrice} onChange={(e) => onCostChange(e.target.value)} placeholder="0.00" />
         </Field>
         {!isService && !isComposite && (
-          <Field label="Cantidad en stock">
-            <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="0" />
-          </Field>
+          initial ? (
+            <Field label="Existencia">
+              <div className="px-3 py-2 text-sm" style={{ ...inputStyle, color: C.muted }}>{initial.stock_qty} {initial.unit} — se cambia con "Ajustar inventario"</div>
+            </Field>
+          ) : (
+            <Field label="Stock inicial">
+              <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="0" />
+            </Field>
+          )
         )}
       </div>
       {!isService && (
@@ -3078,6 +3298,11 @@ const TIPOS_INGRESO_607 = [
   { code: "06", label: "06 · Otros ingresos" },
 ];
 
+// Secuencias que la empresa puede emitir ella misma para un tipo dado (B11 compras, B13 gastos menores)
+function issuableSequences(ncfSequences, type, onDate) {
+  return (ncfSequences || []).filter((s) => s.ncf_type === type && s.active && s.next_number <= s.range_end && (!s.expiration_date || !onDate || s.expiration_date >= onDate));
+}
+
 // Deducir la forma de pago del 606 a partir de los pagos registrados (texto libre en
 // purchase_payments.method): sin pagos = a crédito; varios métodos distintos = mixto.
 function formaPago606FromPayments(payments) {
@@ -3093,7 +3318,7 @@ function formaPago606FromPayments(payments) {
   return codes.size === 1 ? [...codes][0] : "07";
 }
 
-function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
+function ExpenseFormModal({ suppliers, ncfSequences, initial, onClose, onSave, saving }) {
   const [expenseDate, setExpenseDate] = useState(initial?.expense_date || (() => todayStrRD())());
   const [category, setCategory] = useState(initial?.category || "");
   const [description, setDescription] = useState(initial?.description || "");
@@ -3107,7 +3332,13 @@ function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
   const [formaPago, setFormaPago] = useState(initial?.forma_pago || "");
   const [paymentDate, setPaymentDate] = useState(initial?.payment_date || "");
   const [formError, setFormError] = useState("");
-  const hasNcf = ncf.trim().length > 0;
+  // Emitir el comprobante desde el sistema: B13 (gasto menor sin comprobante) o B11 (proveedor informal)
+  const [emitType, setEmitType] = useState("");
+  const b13Seqs = issuableSequences(ncfSequences, "B13", expenseDate);
+  const b11Seqs = issuableSequences(ncfSequences, "B11", expenseDate);
+  const emitSeqs = emitType === "B13" ? b13Seqs : emitType === "B11" ? b11Seqs : [];
+  const canEmit = !initial?.ncf && (b13Seqs.length > 0 || b11Seqs.length > 0);
+  const hasNcf = ncf.trim().length > 0 || !!emitType;
   const selectedSupplier = suppliers.find((s) => s.id === supplierId) || null;
   const amountNum = Number(amount) || 0;
   const itbisNum = Number(itbisAmount) || 0;
@@ -3115,13 +3346,17 @@ function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
     if (!description.trim() || !amount) return;
     if (itbisNum < 0 || itbisNum > amountNum) { setFormError("El ITBIS no puede ser negativo ni mayor que el monto total."); return; }
     if (hasNcf) {
-      if (!selectedSupplier) { setFormError("Para que el gasto vaya al 606 hay que elegir el proveedor (se necesita su RNC)."); return; }
-      if (!(selectedSupplier.rnc || "").trim()) { setFormError(`El proveedor ${selectedSupplier.name} no tiene RNC registrado — agrégaselo en Proveedores.`); return; }
+      if (emitType && emitSeqs.length === 0) { setFormError(`No hay una secuencia ${emitType} activa y vigente — configúrala en Secuencias NCF.`); return; }
+      if (emitType !== "B13") {
+        if (!selectedSupplier) { setFormError(emitType === "B11" ? "Para emitir B11 elige el proveedor (se necesita su cédula)." : "Para que el gasto vaya al 606 hay que elegir el proveedor (se necesita su RNC)."); return; }
+        if (!(selectedSupplier.rnc || "").trim()) { setFormError(`El proveedor ${selectedSupplier.name} no tiene RNC/cédula registrado — agrégaselo en Proveedores.`); return; }
+      }
       if (!formaPago) { setFormError("Selecciona la forma de pago (se exige en el 606)."); return; }
     }
     onSave({
       expense_date: expenseDate, category: category.trim() || null, description: description.trim(), amount: amountNum, supplier_id: supplierId || null, notes: notes.trim() || null,
-      ncf: hasNcf ? ncf.trim().toUpperCase() : null,
+      ncf: emitType ? (initial?.ncf || null) : (ncf.trim() ? ncf.trim().toUpperCase() : null),
+      issue_ncf_sequence_id: emitType ? emitSeqs[0]?.id || null : null,
       itbis_amount: hasNcf ? itbisNum : 0,
       expense_kind: expenseKind,
       tipo_bien_servicio: hasNcf ? tipoBienServicio : null,
@@ -3155,9 +3390,22 @@ function ExpenseFormModal({ suppliers, initial, onClose, onSave, saving }) {
       </div>
       <div className="p-3 mb-3 space-y-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
         <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Comprobante fiscal (para el 606)</div>
-        <Field label="NCF del proveedor (déjalo vacío si el gasto no tiene comprobante)">
-          <input className={inputClass} style={inputStyle} value={ncf} onChange={(e) => setNcf(e.target.value)} placeholder="Ej. B0100000123" />
-        </Field>
+        {canEmit && (
+          <Field label="Comprobante">
+            <select className={inputClass} style={inputStyle} value={emitType} onChange={(e) => { setEmitType(e.target.value); if (e.target.value) setNcf(""); setFormError(""); }}>
+              <option value="">NCF del proveedor / sin comprobante</option>
+              {b13Seqs.length > 0 && <option value="B13">Emitir B13 — gasto menor sin comprobante</option>}
+              {b11Seqs.length > 0 && <option value="B11">Emitir B11 — proveedor informal</option>}
+            </select>
+          </Field>
+        )}
+        {emitType ? (
+          <div className="text-xs" style={{ color: C.muted }}>Se emite un {emitType} ({emitSeqs[0]?.prefix}) al guardar el gasto.</div>
+        ) : (
+          <Field label="NCF del proveedor (déjalo vacío si el gasto no tiene comprobante)">
+            <input className={inputClass} style={inputStyle} value={ncf} onChange={(e) => setNcf(e.target.value)} placeholder="Ej. B0100000123" disabled={!!initial?.ncf && /^B1[13]/i.test(initial.ncf)} />
+          </Field>
+        )}
         {hasNcf && (
           <>
             <div className="grid grid-cols-2 gap-3">
@@ -3996,7 +4244,7 @@ function TaxRateFormModal({ initial, onClose, onSave, saving }) {
   );
 }
 
-function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onRequestNewSupplier, onEnsureGenericProduct, prefill }) {
+function PurchaseFormModal({ suppliers, products, ncfSequences, branches, defaultBranchId, onClose, onSave, saving, onRequestNewSupplier, onEnsureGenericProduct, prefill }) {
   const [title, setTitle] = useState("");
   const [supplierId, setSupplierId] = useState(prefill?.supplier_id || suppliers[0]?.id || "");
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -4016,6 +4264,9 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   const [tipoBienServicio, setTipoBienServicio] = useState("09");
   const [formaPago, setFormaPago] = useState("");
   const [isrRetentionType, setIsrRetentionType] = useState("02");
+  const [purchaseBranchId, setPurchaseBranchId] = useState(prefill?.branch_id || defaultBranchId || (branches || [])[0]?.id || "");
+  const [emitB11, setEmitB11] = useState(false);
+  const [b11SeqId, setB11SeqId] = useState("");
   const [pdfDetectedTotal, setPdfDetectedTotal] = useState(null);
   const [readingPdf, setReadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState("");
@@ -4096,9 +4347,11 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   const hasChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const chapterSubtotal = (name) => chapterGroups.find((g) => g.chapter === (name.trim() || "General"))?.subtotal || 0;
 
+  const b11Seqs = issuableSequences(ncfSequences, "B11", purchaseDate);
   const submit = () => {
     const validItems = resolvedItems.filter((it) => it.product_id && Number(it.quantity) > 0);
     if (!supplierId || validItems.length === 0) return;
+    if (emitB11 && b11Seqs.length === 0) return;
     onSave({
       title: title.trim() || null, supplier_id: supplierId, invoice_number: invoiceNumber.trim() || null, purchase_date: purchaseDate, notes: notes.trim() || null,
       applies_254_06: apply254_06, retains_itbis: retainItbis, retains_isr: retainIsr,
@@ -4107,6 +4360,8 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
       tipo_bien_servicio: tipoBienServicio || null,
       forma_pago: formaPago || null,
       isr_retention_type: retainIsr ? isrRetentionType : null,
+      issue_ncf_sequence_id: emitB11 ? (b11SeqId || b11Seqs[0]?.id || null) : null,
+      branch_id: purchaseBranchId || null,
     }, validItems);
   };
 
@@ -4142,13 +4397,35 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
           </div>
         </Field>
         <Field label="NCF del proveedor (va al 606)">
-          <input className={inputClass} style={inputStyle} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="Ej. B0100000123" />
+          {emitB11 ? (
+            <div className="px-3 py-2 text-sm" style={{ ...inputStyle, color: C.muted }}>Se emite un B11 al guardar</div>
+          ) : (
+            <input className={inputClass} style={inputStyle} value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} placeholder="Ej. B0100000123" />
+          )}
+          {b11Seqs.length > 0 && (
+            <label className="flex items-center gap-1 text-xs mt-1 cursor-pointer" style={{ color: C.amber }}>
+              <input type="checkbox" checked={emitB11} onChange={(e) => { setEmitB11(e.target.checked); if (e.target.checked) setInvoiceNumber(""); }} /> Proveedor informal: emitir B11
+            </label>
+          )}
+          {emitB11 && b11Seqs.length > 1 && (
+            <select className={`${inputClass} mt-1`} style={inputStyle} value={b11SeqId || b11Seqs[0].id} onChange={(e) => setB11SeqId(e.target.value)}>
+              {b11Seqs.map((sq) => <option key={sq.id} value={sq.id}>{sq.prefix} (disp. {sq.range_end - sq.next_number + 1})</option>)}
+            </select>
+          )}
         </Field>
         <Field label="Fecha de compra">
           <input type="date" className={inputClass} style={inputStyle} value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
         </Field>
       </div>
 
+      {(branches || []).length > 0 && (
+        <Field label="Sucursal (a qué inventario entra)">
+          <select className={inputClass} style={inputStyle} value={purchaseBranchId} onChange={(e) => setPurchaseBranchId(e.target.value)} disabled={!!goodsReceiptId}>
+            {(branches || []).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+          {goodsReceiptId && <div className="text-xs mt-1" style={{ color: C.muted }}>La mercancía ya entró con la nota de entrega.</div>}
+        </Field>
+      )}
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Productos comprados</div>
       <div className="grid grid-cols-12 gap-2 min-w-[860px] text-[10px] uppercase tracking-wide mb-1 px-1" style={{ color: C.muted }}>
         <div className="col-span-4">Producto</div>
@@ -4274,7 +4551,8 @@ function PurchaseFormModal({ suppliers, products, onClose, onSave, saving, onReq
   );
 }
 
-function PurchaseDetailModal({ purchase, items, payments, supplierName, supplierRnc, companyName, company, canEdit, canDelete, onClose, onRegisterPayment, onDeletePayment, onUpdate606 }) {
+function PurchaseDetailModal({ purchase, items, payments, supplierName, supplierRnc, companyName, company, canEdit, canDelete, onClose, onRegisterPayment, onDeletePayment, onUpdate606, b11Sequences, onIssueB11 }) {
+  const [issuingB11, setIssuingB11] = useState(false);
   const [edit606, setEdit606] = useState(false);
   const [f606, setF606] = useState({ tipo_bien_servicio: purchase.tipo_bien_servicio || "", forma_pago: purchase.forma_pago || "", isr_retention_type: purchase.isr_retention_type || (purchase.retains_isr ? "02" : "") });
   const [saving606, setSaving606] = useState(false);
@@ -4368,7 +4646,14 @@ function PurchaseDetailModal({ purchase, items, payments, supplierName, supplier
         </div>
         {!edit606 ? (
           <div className="text-xs space-y-0.5" style={{ color: C.text }}>
-            <div>NCF: <span className="font-mono">{purchase.invoice_number || <span style={{ color: C.red }}>sin NCF</span>}</span></div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span>NCF: <span className="font-mono">{purchase.invoice_number || <span style={{ color: C.red }}>sin NCF</span>}</span></span>
+              {!purchase.invoice_number && canEdit && onIssueB11 && (b11Sequences || []).length > 0 && (
+                <button disabled={issuingB11} onClick={async () => { setIssuingB11(true); await onIssueB11(purchase, b11Sequences[0].id); setIssuingB11(false); }} className="text-xs px-2 py-0.5 font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+                  {issuingB11 ? "Emitiendo..." : `Emitir B11 (${b11Sequences[0].prefix})`}
+                </button>
+              )}
+            </div>
             <div>Tipo de bien o servicio: {purchase.tipo_bien_servicio ? label606(TIPOS_BIENES_SERVICIOS_606, purchase.tipo_bien_servicio) : <span style={{ color: C.orange }}>sin asignar</span>}</div>
             <div>Forma de pago: {purchase.forma_pago ? label606(FORMAS_PAGO_606, purchase.forma_pago) : <span style={{ color: C.muted }}>según los pagos registrados ({label606(FORMAS_PAGO_606, formaPago606FromPayments(payments))})</span>}</div>
             {purchase.retains_isr && <div>Tipo de retención ISR: {label606(TIPOS_RETENCION_ISR_606, purchase.isr_retention_type || "02")}</div>}
@@ -4729,6 +5014,11 @@ const NCF_TYPES = [
   { code: "B04", label: "B04 · Nota de Crédito" },
   { code: "B14", label: "B14 · Régimen Especial" },
   { code: "B15", label: "B15 · Gubernamental" },
+  { code: "B03", label: "B03 · Nota de Débito" },
+  { code: "B11", label: "B11 · Comprobante de Compras (proveedores informales)" },
+  { code: "B13", label: "B13 · Gastos Menores" },
+  { code: "B16", label: "B16 · Exportaciones" },
+  { code: "B17", label: "B17 · Pagos al Exterior" },
 ];
 
 function NCFSequenceFormModal({ initial, onClose, onSave, saving }) {
@@ -5154,6 +5444,14 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
   };
 
   const [payError, setPayError] = useState("");
+  // Saldo que quedó después de cada cobro (en orden de fecha), para mostrarlo en el recibo
+  const printReceipt = (payment) => {
+    const ordered = (payments || []).slice().sort((a, b) => (a.payment_date || "").localeCompare(b.payment_date || "") || (a.created_at || "").localeCompare(b.created_at || ""));
+    let paidUpTo = 0;
+    for (const pmt of ordered) { paidUpTo += Number(pmt.amount || 0); if (pmt.id === payment.id) break; }
+    const balanceAfter = Math.max(Number(invoice.total || 0) - paidUpTo - Number(invoice.credit_applied || 0), 0);
+    printDocument(`Recibo ${payment.receipt_number || ""}`, receiptHtml({ company, companyName, clientName, clientRnc, invoice, payment, balanceAfter }));
+  };
   const submitPayment = () => {
     setPayError("");
     let amt = Number(payAmount);
@@ -5205,6 +5503,11 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
         </div>
         <Pill label={invoice.status === "anulada" ? "Anulada" : "Emitida"} color={statusColor} />
       </div>
+      {invoice.status === "anulada" && (invoice.void_reason_code || invoice.void_reason) && (
+        <div className="text-xs mb-2 px-2 py-1" style={{ background: C.redBg, color: C.red }}>
+          Anulada{invoice.voided_at ? ` el ${new Date(invoice.voided_at).toLocaleDateString("es-DO")}` : ""} · {MOTIVOS_ANULACION_608.find((m) => m.code === invoice.void_reason_code)?.label || "sin motivo"}{invoice.void_reason ? ` — ${invoice.void_reason}` : ""}
+        </div>
+      )}
       {invoice.currency === "USD" && (
         <div className="text-xs mb-2 px-2 py-1 inline-block" style={{ background: C.blue + "1A", color: C.blue }}>
           Cotizada en US$ — tasa RD$ {invoice.exchange_rate} · Total ≈ US$ {Number(invoice.foreign_total || 0).toFixed(2)}
@@ -5265,9 +5568,12 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
             {payments.map((p) => (
               <div key={p.id} className="px-3 py-2" style={{ background: C.panelAlt }}>
                 <div className="flex items-center justify-between text-sm">
-                  <div>{fmtDate(p.payment_date)} {p.method && <span style={{ color: C.muted }}>· {p.method}</span>}</div>
+                  <div>{fmtDate(p.payment_date)} {p.method && <span style={{ color: isRetentionMethod(p.method) ? C.orange : C.muted }}>· {p.method}</span>}{p.receipt_number && <span className="font-mono text-xs" style={{ color: C.muted }}> · {p.receipt_number}</span>}</div>
                   <div className="flex items-center gap-3">
                     <span className="font-mono" style={{ color: C.green }}>{fmtMoney(p.amount)}</span>
+                    {!isRetentionMethod(p.method) && (
+                      <button title="Imprimir recibo de ingreso" onClick={() => printReceipt(p)} style={iconBtnStyle}><FileText size={13} /></button>
+                    )}
                     {canDelete && <button onClick={() => onDeletePayment(p, invoice)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                   </div>
                 </div>
@@ -5308,7 +5614,7 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
       {showPaymentForm && invoice.status !== "anulada" && (
         <div className="mt-3 p-3 space-y-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
           <div className="grid grid-cols-2 gap-2">
-            {allowUsd ? (
+            {allowUsd && !isRetentionMethod(payMethod) ? (
               <Field label="Moneda recibida">
                 <select className={inputClass} style={inputStyle} value={payCurrency} onChange={(e) => { setPayCurrency(e.target.value); setPayError(""); }}>
                   <option value="DOP">Pesos (RD$)</option>
@@ -5346,14 +5652,18 @@ function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, c
             </>
           )}
           <Field label="Método (opcional)">
-            <select className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => { setPayMethod(e.target.value); setCardError(""); }}>
+            <select className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => { setPayMethod(e.target.value); setCardError(""); if (isRetentionMethod(e.target.value)) setPayCurrency("DOP"); }}>
               <option value="">Selecciona un método</option>
               <option value="Efectivo">Efectivo</option>
               <option value="Tarjeta">Tarjeta</option>
               <option value="Transferencia">Transferencia</option>
               <option value="Otro">Otro</option>
+              <option value="Retención ISR (cliente)">Retención ISR hecha por el cliente</option>
             </select>
           </Field>
+          {isRetentionMethod(payMethod) && (
+            <div className="text-xs" style={{ color: C.muted }}>El cliente retuvo ISR y te pagó menos: esto rebaja el saldo de la factura, pero no es dinero en caja (no exige caja abierta ni lleva recibo). Va al 607 como "Retención Renta por Terceros". Adjunta abajo el certificado de retención cuando el cliente lo entregue.</div>
+          )}
           {payMethod === "Transferencia" && accountsForCurrency.length > 0 && (
             <Field label={`Cuenta a la que llegó (${payCurrency === "USD" ? "US$" : "RD$"})`}>
               <select className={inputClass} style={inputStyle} value={payBankAccountId} onChange={(e) => setPayBankAccountId(e.target.value)}>
@@ -5680,7 +5990,12 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
   const [notes, setNotes] = useState(initial?.notes || "");
 
-  const b02Sequences = ncfSequences.filter((s) => s.ncf_type === "B02" && s.next_number <= s.range_end);
+  const [appliesNorma0205, setAppliesNorma0205] = useState(!!initial?.applies_norma_0205);
+  // Cualquier secuencia válida para facturar (B01, B02, B14, B15...), nunca B04 ni las de compras/gastos
+  const contractSequences = ncfSequences.filter((s) => s.active && s.next_number <= s.range_end && !["B03", "B04", "B11", "B13", "B17"].includes(s.ncf_type));
+  const selectedClient = clients.find((c) => c.id === clientId);
+  const selectedSeq = ncfSequences.find((s) => s.id === ncfSequenceId);
+  const b01WithoutRnc = selectedSeq?.ncf_type === "B01" && ![9, 11].includes((selectedClient?.rnc_cedula || "").replace(/\D/g, "").length);
   const rate = currency === "USD" ? (Number(exchangeRate) || 1) : 1;
 
   const submit = () => {
@@ -5693,6 +6008,7 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
       currency, exchange_rate: rate,
       foreign_amount: currency === "USD" ? Number(amount) : null,
       is_taxable: isTaxable,
+      applies_norma_0205: isTaxable && appliesNorma0205,
       frequency_days: Number(frequencyDays), next_invoice_date: nextInvoiceDate, end_date: endDate || null, is_active: isActive, notes: notes.trim() || null,
     });
   };
@@ -5739,11 +6055,12 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
             {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </Field>
-        <Field label="Secuencia NCF (B02)">
+        <Field label="Secuencia NCF">
           <select className={inputClass} style={inputStyle} value={ncfSequenceId} onChange={(e) => setNcfSequenceId(e.target.value)}>
             <option value="">Sin asignar</option>
-            {b02Sequences.map((s) => <option key={s.id} value={s.id}>{s.prefix} (disp. {s.range_end - s.next_number + 1})</option>)}
+            {contractSequences.map((s) => <option key={s.id} value={s.id}>{s.ncf_type} · {s.prefix} (disp. {s.range_end - s.next_number + 1})</option>)}
           </select>
+          {b01WithoutRnc && <div className="text-xs mt-1" style={{ color: C.red }}>B01 exige que el cliente tenga RNC o cédula — agrégaselo o la factura no se podrá emitir.</div>}
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -5758,6 +6075,11 @@ function RecurringContractFormModal({ clients, branches, ncfSequences, initial, 
       <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
         <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} /> Aplica ITBIS (18%)
       </label>
+      {isTaxable && (
+        <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
+          <input type="checkbox" checked={appliesNorma0205} onChange={(e) => setAppliesNorma0205(e.target.checked)} /> El cliente retiene el 30% del ITBIS (Norma 02-05)
+        </label>
+      )}
       <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer" style={{ color: C.text }}>
         <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} /> Contrato activo (si se desmarca, deja de generar facturas)
       </label>
@@ -7755,6 +8077,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [salesReportDateFrom, setSalesReportDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [salesReportDateTo, setSalesReportDateTo] = useState(() => todayStrRD());
   const [invoicePaymentsAll, setInvoicePaymentsAll] = useState([]);
+  const [financialCardCommissions, setFinancialCardCommissions] = useState(0);
+  const [financialInvoiceItems, setFinancialInvoiceItems] = useState([]);
+  const [financialPurchaseItems, setFinancialPurchaseItems] = useState([]);
   const [purchasePaymentsAll, setPurchasePaymentsAll] = useState([]);
   const [loadingFinancial, setLoadingFinancial] = useState(false);
   const [incidentEquipmentFilter, setIncidentEquipmentFilter] = useState("all");
@@ -7941,6 +8266,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [sessionPayments, setSessionPayments] = useState([]);
   const [cardAcquirers, setCardAcquirers] = useState([]);
   const [voidingInvoice, setVoidingInvoice] = useState(null);
+  const [productStock, setProductStock] = useState([]); // existencia por producto y sucursal
+  const [showStockTransfer, setShowStockTransfer] = useState(false);
+  const [stockAdjustFor, setStockAdjustFor] = useState(null); // producto (o true) para el ajuste
+  const [stockMovementsFor, setStockMovementsFor] = useState(null); // producto para el kárdex
   const [showAcquirers, setShowAcquirers] = useState(false);
   const [editingTaxRate, setEditingTaxRate] = useState(null);
   const [showAddNcf, setShowAddNcf] = useState(false);
@@ -8077,8 +8406,29 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setPurchaseOrderItems(pordit.data || []);
     setGoodsReceipts(grcpts.data || []);
     setGoodsReceiptItems(grcptit.data || []);
+    // Existencia por sucursal (tabla product_stock; puede no existir si no se corrió la migración)
+    const ps = await fetchAllRows(() => supabase.from("product_stock").select("product_id, branch_id, quantity").eq("company_id", companyId));
+    setProductStock(ps.error ? [] : (ps.data || []));
     setLoadingScope(false);
   };
+  const transferStock = async (fromId, toId, items, notes, date) => {
+    setSaving(true);
+    const { error } = await supabase.rpc("transfer_stock", { p_from_branch: fromId, p_to_branch: toId, p_items: items, p_notes: notes || null, p_date: date || null });
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return; }
+    setShowStockTransfer(false);
+    setErrorMsg("");
+    loadAll();
+  };
+  const adjustStock = async (productId, branchId, delta, reason) => {
+    setSaving(true);
+    const { error } = await supabase.rpc("adjust_product_stock", { p_product_id: productId, p_delta: delta, p_branch_id: branchId, p_kind: "ajuste", p_reason: reason });
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return; }
+    setStockAdjustFor(null);
+    loadAll();
+  };
+  const stockAt = (productId, branchId) => Number(productStock.find((r) => r.product_id === productId && r.branch_id === branchId)?.quantity || 0);
 
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [companyId]);
 
@@ -8194,8 +8544,20 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         setErrorMsg("Este navegador no soporta notificaciones push.");
         return;
       }
+      // iPhone/iPad: el push solo funciona con la app instalada en la pantalla de inicio (iOS 16.4+)
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+      const isStandalone = window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+      if (isIOS && !isStandalone) {
+        setErrorMsg("En iPhone/iPad las notificaciones solo funcionan con la app instalada: en Safari toca Compartir → \"Agregar a pantalla de inicio\", abre la app desde ese ícono y activa las notificaciones ahí.");
+        return;
+      }
+      // Si el navegador ya tiene el sitio bloqueado, no vuelve a mostrar la ventana de permiso:
+      // hay que desbloquearlo a mano en la configuración del sitio.
+      const blockedHelp = "Las notificaciones están bloqueadas para este sitio en tu navegador, y por eso no aparece la ventana de permiso. Para desbloquearlas: toca el ícono a la izquierda de la dirección (candado o ajustes) → Notificaciones → Permitir, recarga la página y vuelve a tocar \"Activar notificaciones push\". En Windows revisa también Configuración → Sistema → Notificaciones, que el navegador tenga permiso.";
+      if (Notification.permission === "denied") { setErrorMsg(blockedHelp); return; }
       const permission = await Notification.requestPermission();
-      if (permission !== "granted") { setErrorMsg("No se concedió permiso de notificaciones."); return; }
+      if (permission === "denied") { setErrorMsg(blockedHelp); return; }
+      if (permission !== "granted") { setErrorMsg("Cerraste la ventana de permiso sin elegir. Toca \"Activar notificaciones push\" otra vez y elige \"Permitir\"."); return; }
       await navigator.serviceWorker.register("/sw.js");
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) });
@@ -8266,6 +8628,24 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (pp.error) { setErrorMsg(pp.error.message); return; }
     setInvoicePaymentsAll(ip.data || []);
     setPurchasePaymentsAll(pp.data || []);
+    // Renglones de facturas y compras del período: costo de venta y parte inventariable de las compras
+    const inRangeF = (d) => d && d >= financialDateFrom && d <= financialDateTo;
+    const invIds = invoices.filter((i) => i.status !== "anulada" && inRangeF(i.invoice_date)).map((i) => i.id);
+    const purIds = purchases.filter((pu) => inRangeF(pu.purchase_date)).map((pu) => pu.id);
+    const [{ data: invItems }, { data: purItems }] = await Promise.all([
+      fetchByIdChunks(invIds, (chunk) => supabase.from("invoice_items").select("invoice_id, product_id, quantity, unit_cost").in("invoice_id", chunk)),
+      fetchByIdChunks(purIds, (chunk) => supabase.from("purchase_items").select("purchase_id, product_id, subtotal").in("purchase_id", chunk)),
+    ]);
+    setFinancialInvoiceItems(invItems || []);
+    setFinancialPurchaseItems(purItems || []);
+    // Comisiones de tarjeta de los cobros del período (gasto financiero en el estado de resultados)
+    const cardIds = (ip.data || []).filter((p) => p.method === "Tarjeta").map((p) => p.id);
+    if (cardIds.length > 0) {
+      const { data: cardRows } = await fetchByIdChunks(cardIds, (chunk) => supabase.from("invoice_payment_card_details").select("payment_id, commission_amount").in("payment_id", chunk));
+      setFinancialCardCommissions((cardRows || []).reduce((sum, c) => sum + Number(c.commission_amount || 0), 0));
+    } else {
+      setFinancialCardCommissions(0);
+    }
   };
   useEffect(() => {
     if ((view === "financialReports" || view === "bankReconciliation") && (hasPerm("financialReports") || hasPerm("bankReconciliation"))) loadFinancialData();
@@ -8277,17 +8657,27 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const revenue = invoices.filter((i) => i.status !== "anulada" && inRange(i.invoice_date)).reduce((sum, i) => sum + Number(i.subtotal || 0), 0);
     const creditNotesTotal = creditNotes.filter((n) => inRange(n.note_date)).reduce((sum, n) => sum + Number(n.subtotal || 0), 0);
     const netRevenue = revenue - creditNotesTotal;
-    const purchasesCost = purchases.filter((p) => inRange(p.purchase_date)).reduce((sum, p) => sum + (Number(p.total || 0) - Number(p.itbis_amount || 0)), 0);
+    // Costo de la compra = monto antes de impuestos (service_value). Antes se usaba total - ITBIS,
+    // que en compras con retención 254-06 quedaba corto (el total ya viene neto de retenciones).
+    const purchasesCost = purchases.filter((p) => inRange(p.purchase_date)).reduce((sum, p) => sum + Number(p.service_value ?? (Number(p.total || 0) - Number(p.itbis_amount || 0)) + Number(p.itbis_retained || 0) + Number(p.isr_retained || 0)), 0);
     // El ITBIS de un gasto con NCF se adelanta en el 606 — no es gasto.
     const otherExpensesCost = otherExpenses.filter((e) => inRange(e.expense_date)).reduce((sum, e) => sum + Number(e.amount || 0) - Number(e.itbis_amount || 0), 0);
     // Diferencia cambiaria de los cobros en US$ del período (+ ganancia / - pérdida)
     const fxDifference = invoicePaymentsAll.reduce((sum, p) => sum + Number(p.fx_difference || 0), 0);
-    const netIncome = netRevenue - purchasesCost - otherExpensesCost + fxDifference;
-    return { revenue, creditNotesTotal, netRevenue, purchasesCost, otherExpensesCost, fxDifference, netIncome };
-  }, [invoices, creditNotes, purchases, otherExpenses, invoicePaymentsAll, financialDateFrom, financialDateTo]);
+    const cardCommissions = financialCardCommissions;
+    // Costo de venta: lo que costó cada producto vendido (guardado en el renglón al facturar).
+    const itemType = (pid) => products.find((pr) => pr.id === pid)?.item_type || "producto";
+    const costOfSales = financialInvoiceItems.reduce((sum, it) => sum + (it.unit_cost != null && it.product_id && itemType(it.product_id) !== "servicio" ? Number(it.quantity || 0) * Number(it.unit_cost) : 0), 0);
+    const linesWithoutCost = financialInvoiceItems.filter((it) => it.product_id && it.unit_cost == null && itemType(it.product_id) !== "servicio").length;
+    // Las compras de productos de inventario no son gasto hasta venderse (entran como costo de venta)
+    const inventoryPurchases = financialPurchaseItems.reduce((sum, it) => sum + (it.product_id && itemType(it.product_id) !== "servicio" ? Number(it.subtotal || 0) : 0), 0);
+    const expensePurchases = Math.max(purchasesCost - inventoryPurchases, 0);
+    const netIncome = netRevenue - costOfSales - expensePurchases - otherExpensesCost - cardCommissions + fxDifference;
+    return { revenue, creditNotesTotal, netRevenue, purchasesCost, costOfSales, linesWithoutCost, inventoryPurchases, expensePurchases, otherExpensesCost, cardCommissions, fxDifference, netIncome };
+  }, [invoices, creditNotes, purchases, otherExpenses, products, invoicePaymentsAll, financialCardCommissions, financialInvoiceItems, financialPurchaseItems, financialDateFrom, financialDateTo]);
 
   const financialCashFlow = useMemo(() => {
-    const cashIn = invoicePaymentsAll.reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.fx_difference || 0), 0);
+    const cashIn = invoicePaymentsAll.filter((p) => !isRetentionMethod(p.method)).reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.fx_difference || 0), 0);
     const cashOutSuppliers = purchasePaymentsAll.reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const inRange = (dateStr) => dateStr && dateStr >= financialDateFrom && dateStr <= financialDateTo;
     const cashOutExpenses = otherExpenses.filter((e) => inRange(e.expense_date)).reduce((sum, e) => sum + Number(e.amount || 0), 0);
@@ -9372,7 +9762,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }
   };
 
-  const saveProduct = async (payload, components) => {
+  const saveProduct = async (payload, components, stockInfo = {}) => {
     setSaving(true);
     if (editingProduct) {
       const { data, error } = await supabase.from("products").update(payload).eq("id", editingProduct.id).select().single();
@@ -9382,10 +9772,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       setSaving(false);
       setEditingProduct(null);
     } else {
-      const { data, error } = await supabase.from("products").insert({ ...payload, company_id: companyId }).select().single();
+      const { data, error } = await supabase.from("products").insert({ ...payload, stock_qty: 0, company_id: companyId }).select().single();
       if (error) { setSaving(false); setErrorMsg(error.message); return; }
       setProducts((prev) => [...prev, data]);
       if (payload.is_composite) await syncProductComponents(data.id, components);
+      if (stockInfo.initialStock > 0) {
+        const { error: stErr } = await supabase.rpc("adjust_product_stock", { p_product_id: data.id, p_delta: stockInfo.initialStock, p_branch_id: stockInfo.initialStockBranchId, p_kind: "inicial", p_reason: "Stock inicial" });
+        if (stErr) setErrorMsg(`El producto se creó, pero no se pudo cargar el stock inicial: ${stErr.message}`);
+        loadAll();
+      }
       setSaving(false);
       setShowAddProduct(false);
     }
@@ -9425,19 +9820,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   // ---- Otros gastos ----
-  const saveExpense = async (payload) => {
+  const saveExpense = async (rawPayload) => {
     setSaving(true);
+    const { issue_ncf_sequence_id: seqId, ...payload } = rawPayload;
+    let saved;
     if (editingExpense) {
       const { data, error } = await supabase.from("other_expenses").update(payload).eq("id", editingExpense.id).select().single();
-      setSaving(false);
-      if (error) { setErrorMsg(error.message); return; }
-      setOtherExpenses((prev) => prev.map((e) => (e.id === data.id ? data : e)));
-      setEditingExpense(null);
+      if (error) { setSaving(false); setErrorMsg(error.message); return; }
+      saved = data;
     } else {
       const { data, error } = await supabase.from("other_expenses").insert({ ...payload, company_id: companyId }).select().single();
-      setSaving(false);
-      if (error) { setErrorMsg(error.message); return; }
-      setOtherExpenses((prev) => [data, ...prev]);
+      if (error) { setSaving(false); setErrorMsg(error.message); return; }
+      saved = data;
+    }
+    // B13/B11 emitido por la empresa: se asigna después de guardar (si falla, no se pierde el número)
+    if (seqId && !saved.ncf) {
+      const { data: ncf, error: ncfError } = await supabase.rpc("assign_document_ncf", { p_doc_type: "expense", p_doc_id: saved.id, p_sequence_id: seqId });
+      if (ncfError) setErrorMsg(`El gasto se guardó, pero no se pudo emitir el comprobante: ${ncfError.message}. Edítalo para intentarlo de nuevo.`);
+      else saved = { ...saved, ncf };
+    }
+    setSaving(false);
+    if (editingExpense) {
+      setOtherExpenses((prev) => prev.map((e) => (e.id === saved.id ? saved : e)));
+      setEditingExpense(null);
+    } else {
+      setOtherExpenses((prev) => [saved, ...prev]);
       setShowAddExpense(false);
     }
   };
@@ -9848,6 +10255,19 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // ---- Compras (registrar suma stock; eliminar lo resta de vuelta) ----
   // Solo los datos descriptivos del 606 (tipo de bien/servicio, forma de pago, tipo de
   // retención ISR) — nunca montos. Sirve también para completar compras viejas.
+  const issueDocumentNcf = async (docType, doc, sequenceId) => {
+    const { data: ncf, error } = await supabase.rpc("assign_document_ncf", { p_doc_type: docType, p_doc_id: doc.id, p_sequence_id: sequenceId });
+    if (error) { setErrorMsg(error.message); return false; }
+    if (docType === "purchase") {
+      setPurchases((prev) => prev.map((p) => (p.id === doc.id ? { ...p, invoice_number: ncf } : p)));
+      setPurchaseDetail((prev) => (prev && prev.purchase.id === doc.id ? { ...prev, purchase: { ...prev.purchase, invoice_number: ncf } } : prev));
+    } else {
+      setOtherExpenses((prev) => prev.map((e) => (e.id === doc.id ? { ...e, ncf } : e)));
+    }
+    loadAll();
+    return true;
+  };
+
   const updatePurchase606 = async (purchase, fields) => {
     const { data, error } = await supabase.from("purchases").update(fields).eq("id", purchase.id).select();
     if (error) { setErrorMsg(error.message); return false; }
@@ -9858,10 +10278,17 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return true;
   };
 
-  const createPurchase = async (payload, items) => {
+  const createPurchase = async (rawPayload, items) => {
     setSaving(true);
+    const { issue_ncf_sequence_id: b11SequenceId, ...payload } = rawPayload;
     const { data: purchase, error: purchaseError } = await supabase.from("purchases").insert({ ...payload, company_id: companyId }).select().single();
     if (purchaseError) { setSaving(false); setErrorMsg(purchaseError.message); return; }
+    if (b11SequenceId) {
+      // El B11 se asigna después de guardar: si falla, la compra queda sin NCF (se puede emitir
+      // desde su detalle) y no se desperdicia ningún número.
+      const { error: ncfError } = await supabase.rpc("assign_document_ncf", { p_doc_type: "purchase", p_doc_id: purchase.id, p_sequence_id: b11SequenceId });
+      if (ncfError) setErrorMsg(`La compra se registró, pero no se pudo emitir el B11: ${ncfError.message}. Puedes emitirlo desde el detalle de la compra.`);
+    }
 
     const itemRows = items.map((it) => ({
       purchase_id: purchase.id,
@@ -9874,27 +10301,26 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const { error: itemsError } = await supabase.from("purchase_items").insert(itemRows);
     if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
 
+    // Entrada de inventario con costo promedio ponderado (receive_product_stock, en el servidor).
+    const stockErrors = [];
     for (const row of itemRows) {
       const prod = products.find((p) => p.id === row.product_id);
       if (!prod) continue;
-      if ((prod.item_type || "producto") === "servicio") {
-        await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
+      if (payload.goods_receipt_id && (prod.item_type || "producto") !== "servicio") {
+        // El stock ya subió con la nota de entrega (a su costo). Si la factura trae otro costo,
+        // se ajusta el costo promedio por la diferencia, sin volver a sumar stock.
+        const receiptItem = goodsReceiptItems.find((gi) => gi.goods_receipt_id === payload.goods_receipt_id && gi.product_id === prod.id);
+        const diff = Number(row.unit_cost) - Number(receiptItem?.unit_cost ?? row.unit_cost);
+        if (Math.abs(diff) >= 0.0001) {
+          const { error: revErr } = await supabase.rpc("revalue_product_cost", { p_product_id: prod.id, p_qty: row.quantity, p_cost_difference: diff });
+          if (revErr) stockErrors.push(`${prod.name}: ${revErr.message}`);
+        }
         continue;
       }
-      // Si esta factura viene de una nota de entrega ya registrada, el inventario ya subió
-      // en ese momento (ver createGoodsReceipt) — la factura no lo vuelve a tocar, solo
-      // actualiza el costo con el monto final facturado.
-      if (payload.goods_receipt_id) {
-        await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
-        continue;
-      }
-      // El ajuste de stock se hace con una función de la base de datos (adjust_product_stock,
-      // ver SQL) que suma/resta de forma atómica en el propio UPDATE — evita que dos ventas o
-      // compras simultáneas del mismo producto se pisen entre sí usando un stock_qty ya viejo
-      // que cada una leyó por separado (lo que hacía este código antes).
-      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: row.quantity });
-      await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
+      const { error: recErr } = await supabase.rpc("receive_product_stock", { p_product_id: prod.id, p_qty: row.quantity, p_unit_cost: row.unit_cost, p_branch_id: payload.branch_id || null, p_ref_type: "purchase", p_ref_id: purchase.id });
+      if (recErr) stockErrors.push(`${prod.name}: ${recErr.message}`);
     }
+    if (stockErrors.length > 0) setErrorMsg(`La compra se registró, pero no se pudo actualizar el inventario de: ${stockErrors.join("; ")}`);
 
     setSaving(false);
     setShowAddSupplier(false);
@@ -9915,7 +10341,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       for (const it of items || []) {
         const prod = products.find((p) => p.id === it.product_id);
         if (!prod) continue;
-        await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity) });
+        await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity), p_branch_id: purchase.branch_id || null, p_kind: "eliminacion_compra", p_ref_type: "purchase", p_ref_id: purchase.id });
       }
     }
     const { error } = await supabase.from("purchases").delete().eq("id", purchase.id);
@@ -10018,12 +10444,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const { data: insertedItems, error: itemsError } = await supabase.from("goods_receipt_items").insert(itemRows).select();
     if (itemsError) { setSaving(false); setErrorMsg(itemsError.message); return; }
 
+    const receiptStockErrors = [];
     for (const row of itemRows) {
       const prod = products.find((p) => p.id === row.product_id);
       if (!prod || (prod.item_type || "producto") === "servicio") continue;
-      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: row.quantity });
-      await supabase.from("products").update({ cost_price: row.unit_cost }).eq("id", prod.id);
+      const { error: recErr } = await supabase.rpc("receive_product_stock", { p_product_id: prod.id, p_qty: row.quantity, p_unit_cost: row.unit_cost, p_branch_id: payload.branch_id || null, p_ref_type: "goods_receipt", p_ref_id: gr.id });
+      if (recErr) receiptStockErrors.push(`${prod.name}: ${recErr.message}`);
     }
+    if (receiptStockErrors.length > 0) setErrorMsg(`La nota de entrega se registró, pero no se pudo actualizar el inventario de: ${receiptStockErrors.join("; ")}`);
 
     if (payload.purchase_order_id) {
       const poItems = purchaseOrderItems.filter((it) => it.purchase_order_id === payload.purchase_order_id);
@@ -10053,7 +10481,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     for (const it of items) {
       const prod = products.find((p) => p.id === it.product_id);
       if (!prod || (prod.item_type || "producto") === "servicio") continue;
-      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity) });
+      await supabase.rpc("adjust_product_stock", { p_product_id: prod.id, p_delta: -Number(it.quantity), p_branch_id: receipt.branch_id || null, p_kind: "eliminacion_nota_entrega", p_ref_type: "goods_receipt", p_ref_id: receipt.id });
     }
     if (receipt.purchase_order_id) {
       const poItems = purchaseOrderItems.filter((it) => it.purchase_order_id === receipt.purchase_order_id);
@@ -10329,8 +10757,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       subtotal,
       itbis,
       exempt_itbis: !contract.is_taxable,
-      applies_norma_0205: false,
-      itbis_retained: false,
+      applies_norma_0205: !!contract.applies_norma_0205 && !!contract.is_taxable,
+      itbis_retained: 0, // lo calcula create_invoice
       total: subtotal + itbis,
       currency: contract.currency || "DOP",
       exchange_rate: effectiveRate,
@@ -10482,7 +10910,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const accountCurrency = account?.currency || "DOP";
     // Un cobro sirve si no fue en efectivo (el efectivo no pasa por el banco) y, si se indicó la
     // cuenta de destino, es esta misma cuenta.
-    const paymentFitsAccount = (p) => p.method !== "Efectivo" && (!p.bank_account_id || !tx.bank_account_id || p.bank_account_id === tx.bank_account_id);
+    const paymentFitsAccount = (p) => p.method !== "Efectivo" && !isRetentionMethod(p.method) && (!p.bank_account_id || !tx.bank_account_id || p.bank_account_id === tx.bank_account_id);
     if (tx.amount > 0) {
       const candidates = invoicePaymentsAll.filter((p) => {
         if (!paymentFitsAccount(p) || !free("invoice_payment", p.id)) return false;
@@ -13106,6 +13534,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   >
                     <FileText size={14} /> {selectedProducts.size > 0 ? `Imprimir selección (${selectedProducts.size})` : "Imprimir lista"}
                   </button>
+                  {!isServicesView && canEdit("products") && branches.length > 1 && (
+                    <button onClick={() => setShowStockTransfer(true)} className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
+                      <ArrowRight size={14} /> Transferir
+                    </button>
+                  )}
+                  {!isServicesView && canEdit("products") && branches.length > 0 && (
+                    <button onClick={() => setStockAdjustFor(true)} className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.amber }}>
+                      <Pencil size={14} /> Ajustar inventario
+                    </button>
+                  )}
                   <button onClick={() => setShowAddProduct(true)} disabled={!canEdit(isServicesView ? "services" : "products")} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                     <Plus size={14} /> {isServicesView ? "Agregar servicio" : "Agregar producto"}
                   </button>
@@ -13159,11 +13597,23 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="text-xs" style={{ color: C.muted }}>Costo: <span style={{ color: C.text }}>{fmtMoney(p.cost_price)}</span></div>
                       <div className="font-mono font-semibold">{fmtMoney(p.unit_price)}</div>
                     </div>
-                    {!isServicesView && (
-                      <div className="text-xs mt-1" style={{ color: p.is_composite ? C.muted : (p.stock_qty <= 0 ? C.red : C.muted) }}>
-                        {p.is_composite ? `${productComponents.filter((c) => c.parent_product_id === p.id).length} componentes` : `Stock: ${p.stock_qty} ${p.unit}`}
-                      </div>
-                    )}
+                    {!isServicesView && (() => {
+                      if (p.is_composite) return <div className="text-xs mt-1" style={{ color: C.muted }}>{productComponents.filter((c) => c.parent_product_id === p.id).length} componentes</div>;
+                      const byBranch = branches.map((b) => ({ b, q: stockAt(p.id, b.id) })).filter((x) => x.q !== 0);
+                      const filterBranch = productBranchFilter !== "all" && productBranchFilter !== "none" ? branches.find((b) => b.id === productBranchFilter) : null;
+                      const shownQty = filterBranch ? stockAt(p.id, filterBranch.id) : Number(p.stock_qty || 0);
+                      return (
+                        <div className="text-xs mt-1 flex items-start justify-between gap-2">
+                          <div style={{ color: shownQty <= 0 ? C.red : C.muted }}>
+                            {filterBranch ? `En ${filterBranch.name}: ${shownQty} ${p.unit}` : `Stock total: ${p.stock_qty} ${p.unit}`}
+                            {!filterBranch && byBranch.length > 0 && branches.length > 1 && (
+                              <div style={{ color: C.muted }}>{byBranch.map((x) => `${x.b.name}: ${x.q}`).join(" · ")}</div>
+                            )}
+                          </div>
+                          <button onClick={() => setStockMovementsFor(p)} title="Ver movimientos (kárdex)" className="flex-shrink-0" style={{ color: C.amber }}><ClipboardList size={13} /></button>
+                        </div>
+                      );
+                    })()}
                     {!isServicesView && p.branch_id && (
                       <div className="flex items-center gap-1 text-xs mt-1" style={{ color: C.muted }}><MapPin size={11} /> {branches.find((b) => b.id === p.branch_id)?.name || "—"}</div>
                     )}
@@ -13480,7 +13930,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           {!loadingScope && hasPerm("fiscalReports") && view === "fiscalReports" && (
             <div>
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-                <div className="text-sm font-semibold" style={{ color: C.text }}>Reportes DGII 606 (Compras) / 607 (Ventas)</div>
+                <div className="text-sm font-semibold" style={{ color: C.text }}>Reportes DGII 606 (Compras) / 607 (Ventas) / 608 (Anulados)</div>
                 <input type="month" value={taxReportPeriod} onChange={(e) => setTaxReportPeriod(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
               </div>
               <div className="text-xs mb-3" style={{ color: C.muted }}>Las columnas coinciden con las plantillas oficiales de la DGII (606 y 607). El 606 incluye las compras y los otros gastos que tengan NCF; si falta algún dato, aparece la lista de lo que hay que completar. El 607 incluye las facturas y las notas de crédito del mes; la forma de venta sale de los cobros registrados hasta el cierre del mes (lo pendiente va a "Venta a Crédito").</div>
@@ -13497,10 +13947,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   if (!(sup?.rnc || "").trim()) issues606.push(`${ref}: el proveedor no tiene RNC`);
                   if (!pu.tipo_bien_servicio) issues606.push(`${ref}: falta el tipo de bien o servicio (ábrela y completa "Datos para el 606")`);
                 });
+                const isB13 = (ex) => /^B13/i.test(ex.ncf || "");
                 periodExpenses.forEach((ex) => {
                   const sup = supplierOf(ex.supplier_id);
                   const ref = `Gasto ${ex.ncf} (${ex.description})`;
-                  if (!(sup?.rnc || "").trim()) issues606.push(`${ref}: el proveedor no tiene RNC`);
+                  if (!isB13(ex) && !(sup?.rnc || "").trim()) issues606.push(`${ref}: el proveedor no tiene RNC`);
+                  if (isB13(ex) && !(sup?.rnc || company?.rnc || "").trim()) issues606.push(`${ref}: B13 sin proveedor y la empresa no tiene RNC en su perfil`);
                   if (!ex.tipo_bien_servicio) issues606.push(`${ref}: falta el tipo de bien o servicio`);
                   if (!ex.forma_pago) issues606.push(`${ref}: falta la forma de pago`);
                 });
@@ -13615,11 +14067,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   });
                   periodExpenses.forEach((ex) => {
                     const sup = supplierOf(ex.supplier_id);
+                    // B13 (gasto menor): si no hay proveedor, se usa el RNC de la propia empresa
+                    const rncLinea = isB13(ex) && !(sup?.rnc || "").trim() ? (company?.rnc || "") : (sup?.rnc || "");
                     const itbisAmount = Number(ex.itbis_amount || 0);
                     const base = Math.max(Number(ex.amount || 0) - itbisAmount, 0);
                     const isService = (ex.expense_kind || "servicios") === "servicios";
                     rows.push([
-                      "", sup?.rnc || "", tipoId(sup?.rnc), ex.tipo_bien_servicio || "", ex.ncf || "", "",
+                      "", rncLinea, tipoId(rncLinea), ex.tipo_bien_servicio || "", ex.ncf || "", "",
                       ymd(ex.expense_date), ymd(ex.payment_date || ex.expense_date), (isService ? base : 0).toFixed(2), (isService ? 0 : base).toFixed(2), base.toFixed(2),
                       itbisAmount.toFixed(2), "0.00", "", "",
                       itbisAmount.toFixed(2), "", "", "0.00",
@@ -13630,6 +14084,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                   rows.forEach((r, idx) => { r[0] = idx + 1; });
                   downloadCsv(`606_${taxReportPeriod}.csv`, header, rows);
                 };
+                // 608: NCF anulados. Se toman por la fecha de anulación (o la de la factura en las
+                // anuladas antes de que se guardara esa fecha).
+                const periodVoided = invoices.filter((inv) => inv.status === "anulada" && ((inv.voided_at || inv.invoice_date || "").slice(0, 7) === taxReportPeriod));
+                const voidedWithoutReason = periodVoided.filter((inv) => !inv.void_reason_code);
+                const download608 = () => {
+                  const header = ["Número de Comprobante Fiscal", "Fecha de Comprobante", "Tipo de Anulación"];
+                  const rows = periodVoided.map((inv) => [inv.ncf || "", (inv.invoice_date || "").replaceAll("-", ""), inv.void_reason_code || ""]);
+                  downloadCsv(`608_${taxReportPeriod}.csv`, header, rows);
+                };
+
                 const download607 = async () => {
                   const header = [
                     "No", "RNC/Cédula o Pasaporte", "Tipo Identificación", "Número Comprobante Fiscal", "Número Comprobante Fiscal Modificado",
@@ -13662,8 +14126,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                     const sumBy = (fn) => paidInPeriod.filter(fn).reduce((sum, p) => sum + Number(p.amount || 0), 0);
                     const efectivo = sumBy((p) => p.method === "Efectivo");
                     const tarjeta = sumBy((p) => p.method === "Tarjeta");
-                    const banco = sumBy((p) => p.method !== "Efectivo" && p.method !== "Tarjeta");
-                    const credito = Math.max(Number(inv.total || 0) - efectivo - tarjeta - banco, 0);
+                    const banco = sumBy((p) => p.method !== "Efectivo" && p.method !== "Tarjeta" && !isRetentionMethod(p.method));
+                    // Retención de ISR hecha por el cliente (cualquier fecha): va a "Retención Renta por Terceros"
+                    const isrRetPays = pays.filter((p) => p.method === "Retención ISR (cliente)");
+                    const isrRetenido = isrRetPays.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                    const credito = Math.max(Number(inv.total || 0) - efectivo - tarjeta - banco - isrRetenido, 0);
                     // La retención de la Norma 02-05 la hace el cliente al pagar: fecha = primer cobro.
                     let fechaRetencion = "";
                     let itbisRetenido = 0;
@@ -13671,10 +14138,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       if (pays.length > 0) { fechaRetencion = ymd(pays[0].payment_date); itbisRetenido = retained; }
                       else pendingRetentions.push(inv.ncf);
                     }
+                    if (isrRetPays.length > 0 && !fechaRetencion) fechaRetencion = ymd(isrRetPays[0].payment_date);
                     rows.push([
                       "", cli?.rnc_cedula || "", tipoId(cli?.rnc_cedula), inv.ncf || "", "",
                       inv.income_type || "01", ymd(inv.invoice_date), fechaRetencion, subtotal.toFixed(2), itbis.toFixed(2), itbisRetenido.toFixed(2),
-                      "", "", "", "", "",
+                      "", isrRetenido > 0 ? isrRetenido.toFixed(2) : "", "", "", "",
                       "", efectivo.toFixed(2), banco.toFixed(2), tarjeta.toFixed(2), credito.toFixed(2),
                       "", "", "", "",
                     ]);
@@ -13740,12 +14208,102 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                         </button>
                       </div>
                     </div>
-                    <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.amber}60` }}>
-                      <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.amber }}>Cálculo general del período</div>
-                      <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado en ventas (menos notas de crédito)</span><span className="font-mono">{fmtMoney(salesTotals.itbis)}</span></div>
-                      <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado en compras y gastos (adelantado)</span><span className="font-mono">-{fmtMoney(purchTotals.itbis)}</span></div>
-                      <div className="flex justify-between text-sm font-bold mt-1" style={{ color: C.text }}><span>ITBIS a pagar (o a favor si es negativo)</span><span className="font-mono">{fmtMoney(salesTotals.itbis - purchTotals.itbis)}</span></div>
+                    <div className="p-3 mb-4" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+                      <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>608 · Comprobantes anulados ({periodVoided.length})</div>
+                      {periodVoided.length > 0 ? (
+                        <div className="space-y-0.5 mb-2">
+                          {periodVoided.slice(0, 8).map((inv) => (
+                            <div key={inv.id} className="flex justify-between text-xs" style={{ color: C.text }}>
+                              <span className="font-mono">{inv.ncf}</span>
+                              <span style={{ color: inv.void_reason_code ? C.muted : C.orange }}>{inv.void_reason_code ? (MOTIVOS_ANULACION_608.find((m) => m.code === inv.void_reason_code)?.label || inv.void_reason_code) : "sin motivo"}</span>
+                            </div>
+                          ))}
+                          {periodVoided.length > 8 && <div className="text-xs" style={{ color: C.muted }}>…y {periodVoided.length - 8} más</div>}
+                        </div>
+                      ) : <div className="text-xs mb-2" style={{ color: C.muted }}>No hay facturas anuladas en este mes.</div>}
+                      {voidedWithoutReason.length > 0 && (
+                        <div className="text-xs mb-2" style={{ color: C.orange }}>{voidedWithoutReason.length} anulada{voidedWithoutReason.length !== 1 ? "s" : ""} antes de que existiera el motivo: la columna "Tipo de Anulación" sale vacía y hay que completarla a mano.</div>
+                      )}
+                      <button onClick={download608} disabled={periodVoided.length === 0} className="flex items-center gap-2 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                        <FileText size={13} /> Descargar 608 (CSV)
+                      </button>
                     </div>
+                    {(() => {
+                      // ---- Resumen IT-1 (ITBIS) ----
+                      const itbisVentas = periodInvoices.reduce((sum, inv) => sum + Number(inv.itbis || 0), 0);
+                      const itbisNC = periodCreditNotes.reduce((sum, cn) => sum + Number(cn.itbis || 0), 0);
+                      const ventasTotales = periodInvoices.reduce((sum, inv) => sum + Number(inv.subtotal || 0), 0) - periodCreditNotes.reduce((sum, cn) => sum + Number(cn.subtotal || 0), 0);
+                      // Base gravada = ITBIS / 18%; lo demás del subtotal es exento
+                      const ventasGravadas = (itbisVentas - itbisNC) / 0.18;
+                      const ventasExentas = Math.max(ventasTotales - ventasGravadas, 0);
+                      // Norma 02-05: el cliente retiene al pagar; cuenta solo si ya hubo cobro
+                      const retenidoPorClientes = periodInvoices.filter((inv) => inv.applies_norma_0205 && Number(inv.amount_paid || 0) > 0).reduce((sum, inv) => sum + Number(inv.itbis_retained || 0), 0);
+                      const retencionPendiente = periodInvoices.filter((inv) => inv.applies_norma_0205 && Number(inv.amount_paid || 0) <= 0).reduce((sum, inv) => sum + Number(inv.itbis_retained || 0), 0);
+                      const itbisAdelantado = purchTotals.itbis; // compras + gastos con NCF
+                      const itbisRetenidoAProveedores = purchTotals.itbisRet;
+                      const saldoItbis = itbisVentas - itbisNC - itbisAdelantado - retenidoPorClientes;
+                      // ---- Resumen IR-17 (ISR retenido a proveedores, por tipo) ----
+                      const ir17 = {};
+                      periodPurchases.filter((pu) => Number(pu.isr_retained || 0) > 0).forEach((pu) => {
+                        const code = pu.isr_retention_type || "02";
+                        if (!ir17[code]) ir17[code] = { count: 0, base: 0, retenido: 0 };
+                        ir17[code].count += 1;
+                        ir17[code].base += Number(pu.service_value || 0);
+                        ir17[code].retenido += Number(pu.isr_retained || 0);
+                      });
+                      const ir17IsrTotal = Object.values(ir17).reduce((sum, r) => sum + r.retenido, 0);
+                      const ir17ItbisCount = periodPurchases.filter((pu) => Number(pu.itbis_retained || 0) > 0).length;
+                      const ir17Total = ir17IsrTotal + itbisRetenidoAProveedores;
+                      const row = (label, value, opts = {}) => (
+                        <div className={`flex justify-between text-sm ${opts.bold ? "font-bold mt-1 pt-1" : ""}`} style={{ color: opts.bold ? C.text : C.muted, borderTop: opts.bold ? `1px solid ${C.border}` : "none" }}>
+                          <span>{label}</span><span className="font-mono" style={opts.color ? { color: opts.color } : undefined}>{value}</span>
+                        </div>
+                      );
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.amber}60` }}>
+                            <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.amber }}>Resumen para la IT-1 (ITBIS)</div>
+                            {row("Ventas del mes (neto de notas de crédito)", fmtMoney(ventasTotales))}
+                            {row("· Gravadas", fmtMoney(ventasGravadas))}
+                            {row("· Exentas", fmtMoney(ventasExentas))}
+                            {row("ITBIS facturado en ventas", fmtMoney(itbisVentas))}
+                            {itbisNC > 0 && row("ITBIS de notas de crédito", `-${fmtMoney(itbisNC)}`)}
+                            {row("ITBIS adelantado (compras y gastos con NCF)", `-${fmtMoney(itbisAdelantado)}`)}
+                            {retenidoPorClientes > 0 && row("ITBIS retenido por clientes (Norma 02-05)", `-${fmtMoney(retenidoPorClientes)}`)}
+                            {row(saldoItbis >= 0 ? "ITBIS a pagar" : "Saldo a favor", fmtMoney(Math.abs(saldoItbis)), { bold: true, color: saldoItbis >= 0 ? C.text : C.green })}
+                            {retencionPendiente > 0 && (
+                              <div className="text-xs mt-1" style={{ color: C.orange }}>{fmtMoney(retencionPendiente)} de retención 02-05 todavía sin cobrar — no se resta hasta que el cliente pague.</div>
+                            )}
+                          </div>
+                          <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.amber}60` }}>
+                            <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.amber }}>Resumen para la IR-17 (retenciones a terceros)</div>
+                            {Object.keys(ir17).length === 0 && itbisRetenidoAProveedores <= 0 ? (
+                              <div className="text-sm" style={{ color: C.muted }}>No hay retenciones a proveedores en este mes.</div>
+                            ) : (
+                              <>
+                                {Object.entries(ir17).sort(([a], [b]) => a.localeCompare(b)).map(([code, r]) => (
+                                  <div key={code} className="mb-1">
+                                    {row(`ISR · ${TIPOS_RETENCION_ISR_606.find((t) => t.code === code)?.label || code}`, fmtMoney(r.retenido))}
+                                    <div className="text-xs" style={{ color: C.muted }}>{r.count} compra{r.count !== 1 ? "s" : ""} · base {fmtMoney(r.base)}</div>
+                                  </div>
+                                ))}
+                                {itbisRetenidoAProveedores > 0 && (
+                                  <div className="mb-1">
+                                    {row("ITBIS retenido a proveedores (254-06)", fmtMoney(itbisRetenidoAProveedores))}
+                                    <div className="text-xs" style={{ color: C.muted }}>{ir17ItbisCount} compra{ir17ItbisCount !== 1 ? "s" : ""}</div>
+                                  </div>
+                                )}
+                                {row("Total retenido a pagar", fmtMoney(ir17Total), { bold: true })}
+                              </>
+                            )}
+                            <div className="text-xs mt-2" style={{ color: C.muted }}>Sale de las compras del mes con retención de ISR y/o ITBIS.</div>
+                          </div>
+                          <div className="md:col-span-2 text-xs" style={{ color: C.muted }}>
+                            Son resúmenes de apoyo para llenar las declaraciones en la Oficina Virtual — revísalos con tu contador antes de presentar. No incluyen anticipos de ISR, saldos a favor de meses anteriores ni retenciones de nómina.
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </>
                 );
               })()}
@@ -13856,8 +14414,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <div className="flex justify-between"><span style={{ color: C.muted }}>Notas de crédito</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.creditNotesTotal)}</span></div>
                     )}
                     <div className="flex justify-between font-semibold pt-1" style={{ borderTop: `1px solid ${C.border}` }}><span>Ingresos netos</span><span className="font-mono">{fmtMoney(financialPnl.netRevenue)}</span></div>
-                    <div className="flex justify-between pt-2"><span style={{ color: C.muted }}>Compras a proveedores</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.purchasesCost)}</span></div>
+                    <div className="flex justify-between pt-2"><span style={{ color: C.muted }}>Costo de venta (productos vendidos)</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.costOfSales)}</span></div>
+                    <div className="flex justify-between font-semibold pt-1" style={{ borderTop: `1px solid ${C.border}` }}><span>Utilidad bruta</span><span className="font-mono">{fmtMoney(financialPnl.netRevenue - financialPnl.costOfSales)}</span></div>
+                    <div className="flex justify-between pt-2"><span style={{ color: C.muted }}>Compras de servicios y gastos</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.expensePurchases)}</span></div>
                     <div className="flex justify-between"><span style={{ color: C.muted }}>Otros gastos</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.otherExpensesCost)}</span></div>
+                    {financialPnl.cardCommissions > 0 && (
+                      <div className="flex justify-between"><span style={{ color: C.muted }}>Comisiones de tarjeta</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.cardCommissions)}</span></div>
+                    )}
                     {Math.abs(financialPnl.fxDifference) >= 0.01 && (
                       <div className="flex justify-between"><span style={{ color: C.muted }}>Diferencia cambiaria ({financialPnl.fxDifference > 0 ? "ganancia" : "pérdida"})</span><span className="font-mono" style={{ color: financialPnl.fxDifference > 0 ? C.green : C.red }}>{financialPnl.fxDifference > 0 ? "+" : ""}{fmtMoney(financialPnl.fxDifference)}</span></div>
                     )}
@@ -13865,7 +14428,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       <span>Utilidad neta</span><span className="font-mono">{fmtMoney(financialPnl.netIncome)}</span>
                     </div>
                   </div>
-                  <div className="text-xs mt-3" style={{ color: C.muted }}>Montos sin ITBIS. No incluye mano de obra ni materiales consumidos en órdenes (eso se ve por orden en Departamento Técnico).</div>
+                  <div className="text-xs mt-3" style={{ color: C.muted }}>
+                    Montos sin ITBIS. Las compras de productos de inventario ({fmtMoney(financialPnl.inventoryPurchases)} en el período) no se restan como gasto: entran al inventario y pasan a costo de venta cuando se venden. No incluye mano de obra ni materiales consumidos en órdenes (eso se ve por orden en Departamento Técnico).
+                    {financialPnl.linesWithoutCost > 0 && <div className="mt-1" style={{ color: C.orange }}>{financialPnl.linesWithoutCost} renglón(es) vendido(s) antes del costo promedio no tienen costo guardado: el costo de venta de este período sale menor de lo real.</div>}
+                  </div>
                 </div>
 
                 <div className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
@@ -14190,8 +14756,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 {ncfSequences.map((s) => {
                   const remaining = s.range_end - s.next_number + 1;
+                  const total = s.range_end - s.range_start + 1;
+                  // Avisos: pocos números (≤ 10% del rango o ≤ 20) o vencimiento en ≤ 30 días
+                  const lowStock = s.active && remaining > 0 && (remaining <= 20 || remaining <= total * 0.1);
+                  const daysToExpire = s.expiration_date ? Math.floor((new Date(`${s.expiration_date}T00:00:00`) - new Date(`${todayStrRD()}T00:00:00`)) / 86400000) : null;
+                  const expired = daysToExpire !== null && daysToExpire < 0;
+                  const expiringSoon = daysToExpire !== null && daysToExpire >= 0 && daysToExpire <= 30;
+                  const exhausted = remaining <= 0;
+                  const alertColor = (expired || exhausted) ? C.red : (lowStock || expiringSoon) ? C.orange : null;
                   return (
-                    <div key={s.id} className="p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                    <div key={s.id} className="p-4" style={{ background: C.panel, border: `1px solid ${alertColor ? alertColor + "90" : C.border}` }}>
                       <div className="flex items-start justify-between gap-2 mb-1">
                         <div className="font-mono font-semibold">{s.ncf_type}</div>
                         <div className="flex items-center gap-1">
@@ -14202,7 +14776,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                           {canDelete("ncf") && <button onClick={() => deleteNcfSequence(s.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                         </div>
                       </div>
-                      <div className="text-xs font-mono mb-2" style={{ color: C.muted }}>{s.range_start} – {s.range_end}</div>
+                      <div className="text-xs font-mono mb-2" style={{ color: C.muted }}>{s.prefix ? `${s.prefix} · ` : ""}{s.range_start} – {s.range_end}{s.expiration_date ? ` · vence ${fmtDate(s.expiration_date)}` : ""}</div>
+                      {(expired || exhausted || lowStock || expiringSoon) && (
+                        <div className="text-xs mb-2" style={{ color: alertColor }}>
+                          {exhausted ? "Sin números disponibles — solicita una nueva secuencia a la DGII." : expired ? "Vencida — ya no se puede usar para facturar." : [lowStock ? `Quedan pocos números (${remaining})` : null, expiringSoon ? `vence en ${daysToExpire} día${daysToExpire !== 1 ? "s" : ""}` : null].filter(Boolean).join(" · ") + " — solicita la próxima a tiempo."}
+                        </div>
+                      )}
                       <div className="flex items-center justify-between pt-2 text-sm" style={{ borderTop: `1px solid ${C.border}` }}>
                         <div className="text-xs" style={{ color: C.muted }}>Próximo: <span className="font-mono" style={{ color: C.text }}>{s.next_number}</span></div>
                         <div className="text-xs font-mono" style={{ color: remaining <= 10 ? C.red : C.muted }}>{Math.max(0, remaining)} restantes</div>
@@ -14998,8 +15577,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       )}
       {showAddSupplier && <SupplierFormModal onClose={() => setShowAddSupplier(false)} onSave={saveSupplier} saving={saving} />}
       {editingSupplier && <SupplierFormModal initial={editingSupplier} onClose={() => setEditingSupplier(null)} onSave={saveSupplier} saving={saving} />}
-      {showAddExpense && <ExpenseFormModal suppliers={suppliers} onClose={() => setShowAddExpense(false)} onSave={saveExpense} saving={saving} />}
-      {editingExpense && <ExpenseFormModal suppliers={suppliers} initial={editingExpense} onClose={() => setEditingExpense(null)} onSave={saveExpense} saving={saving} />}
+      {showAddExpense && <ExpenseFormModal suppliers={suppliers} ncfSequences={ncfSequences} onClose={() => setShowAddExpense(false)} onSave={saveExpense} saving={saving} />}
+      {editingExpense && <ExpenseFormModal suppliers={suppliers} ncfSequences={ncfSequences} initial={editingExpense} onClose={() => setEditingExpense(null)} onSave={saveExpense} saving={saving} />}
       {showAddTool && <ToolFormModal branches={branches} technicians={technicians} onClose={() => setShowAddTool(false)} onSave={saveTool} saving={saving} />}
       {editingTool && <ToolFormModal branches={branches} technicians={technicians} initial={editingTool} onClose={() => setEditingTool(null)} onSave={saveTool} saving={saving} />}
       {showAddToolList && <ToolListFormModal tools={tools} technicians={technicians} onClose={() => setShowAddToolList(false)} onSave={saveToolList} saving={saving} />}
@@ -15042,6 +15621,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           ? {
               supplier_id: receipt.supplier_id,
               goods_receipt_id: receipt.id,
+              branch_id: receipt.branch_id || null,
               receiptLabel: receipt.receipt_number,
               items: goodsReceiptItems.filter((it) => it.goods_receipt_id === receipt.id).map((it) => ({ product_id: it.product_id, quantity: it.quantity, unit_cost: it.unit_cost })),
             }
@@ -15050,6 +15630,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           <PurchaseFormModal
             suppliers={suppliers}
             products={products}
+            ncfSequences={ncfSequences}
+            branches={vendorScopedBranches}
+            defaultBranchId={profile.branch_id || null}
             prefill={prefill}
             onClose={() => { setShowAddPurchase(false); setPrefillReceiptId(null); }}
             onSave={createPurchase}
@@ -15074,6 +15657,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onRegisterPayment={registerPurchasePayment}
           onDeletePayment={deletePurchasePayment}
           onUpdate606={updatePurchase606}
+          b11Sequences={issuableSequences(ncfSequences, "B11", purchaseDetail.purchase.purchase_date)}
+          onIssueB11={(purchase, seqId) => issueDocumentNcf("purchase", purchase, seqId)}
         />
       )}
       {showAddPurchaseOrder && (
@@ -15298,6 +15883,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onDeletePayment={deletePayment}
           onDeletePaymentAttachment={deletePaymentAttachment}
         />
+      )}
+      {showStockTransfer && (
+        <StockTransferModal branches={branches} products={products} stockAt={stockAt} defaultFromId={profile.branch_id || null} saving={saving} onClose={() => setShowStockTransfer(false)} onSave={transferStock} />
+      )}
+      {stockAdjustFor && (
+        <StockAdjustModal branches={vendorScopedBranches} products={products} stockAt={stockAt} initialProductId={stockAdjustFor === true ? "" : stockAdjustFor.id} defaultBranchId={profile.branch_id || null} saving={saving} onClose={() => setStockAdjustFor(null)} onSave={adjustStock} />
+      )}
+      {stockMovementsFor && (
+        <StockMovementsModal product={products.find((x) => x.id === stockMovementsFor.id) || stockMovementsFor} branches={branches} onClose={() => setStockMovementsFor(null)} />
       )}
       {voidingInvoice && (
         <VoidInvoiceModal invoice={voidingInvoice} saving={saving} onClose={() => setVoidingInvoice(null)} onConfirm={confirmVoidInvoice} />
