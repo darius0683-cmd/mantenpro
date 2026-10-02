@@ -13,7 +13,7 @@ import { useState, useEffect } from "react";
 // (probando en su máquina), el link saldría apuntando a localhost y la otra persona no
 // podría abrirlo. Por eso estos dos casos siempre usan APP_URL a propósito, en vez del
 // origin actual.
-export const APP_URL = "https://mantenpro-seven.vercel.app";
+export const APP_URL = "https://app.manticrd.com";
 
 // ---------------------------------------------------------------------------
 // Tokens
