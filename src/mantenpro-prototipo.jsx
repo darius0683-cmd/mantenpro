@@ -17183,26 +17183,43 @@ export default function MantenProApp() {
     setInviteInfo({ ...row, companyName: row.company_name || "tu nueva empresa" });
   };
 
+  // Usuario cuyo perfil ya está cargado. Supabase vuelve a avisar "hay sesión" cada vez que
+  // renueva el token (más o menos cada hora) y cuando la pestaña o la app vuelve a tener el
+  // foco. Antes cada aviso ponía la pantalla de "Cargando..." y volvía a montar toda la app:
+  // se cerraban los formularios abiertos y se perdía lo que se estaba escribiendo. Ahora solo
+  // se recarga el perfil si de verdad entró OTRO usuario (o si se cerró la sesión).
+  const loadedUserIdRef = useRef(null);
   useEffect(() => {
     loadInvite();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
-      if (session) { await loadProfile(session.user.id); await checkPlatformAdmin(session.user.id); }
+      if (session && loadedUserIdRef.current !== session.user.id) {
+        loadedUserIdRef.current = session.user.id;
+        await loadProfile(session.user.id);
+        await checkPlatformAdmin(session.user.id);
+      }
       setAuthLoading(false);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (_event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
       setSession(session);
-      if (session) {
+      if (!session) {
+        loadedUserIdRef.current = null;
+        setProfile(undefined);
+        setCompany(null);
+        setIsPlatformAdmin(false);
+        return;
+      }
+      if (loadedUserIdRef.current === session.user.id) return; // mismo usuario: token renovado o foco
+      loadedUserIdRef.current = session.user.id;
+      // Fuera del callback: Supabase recomienda no esperar otras llamadas suyas dentro de
+      // onAuthStateChange (puede trabarse).
+      setTimeout(async () => {
         setAuthLoading(true);
         await loadProfile(session.user.id);
         await checkPlatformAdmin(session.user.id);
         setAuthLoading(false);
-      } else {
-        setProfile(undefined);
-        setCompany(null);
-        setIsPlatformAdmin(false);
-      }
+      }, 0);
     });
     return () => listener.subscription.unsubscribe();
     // eslint-disable-next-line
