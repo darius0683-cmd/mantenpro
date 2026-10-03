@@ -264,6 +264,7 @@ export const PERMISSION_CATALOG = [
     { key: "users", label: "Usuarios" },
     { key: "companyProfile", label: "Perfil de la empresa" },
     { key: "activityLog", label: "Historial de actividad" },
+    { key: "dataExport", label: "Exportar datos de la empresa" },
     { key: "bankReconciliation", label: "Conciliación bancaria" },
     { key: "dgiiCatalog", label: "Catálogo RNC (DGII)" },
   ] },

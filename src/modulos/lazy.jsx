@@ -75,6 +75,7 @@ function lazyComponent(file, name) {
 // admin
 export const AccountFormModal = lazyComponent("admin", "AccountFormModal");
 export const CompanyProfileForm = lazyComponent("admin", "CompanyProfileForm");
+export const ExportDataPanel = lazyComponent("admin", "ExportDataPanel");
 export const InviteFormModal = lazyComponent("admin", "InviteFormModal");
 export const TaxRateFormModal = lazyComponent("admin", "TaxRateFormModal");
 export const UserPermissionsModal = lazyComponent("admin", "UserPermissionsModal");
@@ -191,6 +192,7 @@ export const VistaRecurringContracts = lazyComponent("vistas-ventas", "VistaRecu
 
 // Qué archivo necesita cada sección del menú (para precargar en segundo plano).
 const CHUNK_OF_VIEW = {
+  dataExport: "admin",
   agenda: "tecnico",
   orders: "tecnico",
   incidents: "tecnico",

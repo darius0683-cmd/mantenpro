@@ -1,10 +1,11 @@
 // Administración y contabilidad: perfil de la empresa, cuentas bancarias, usuarios, invitaciones,
-// catálogo de cuentas, tasas y secuencias NCF. Se carga solo cuando se usa (ver lazy.jsx).
+// catálogo de cuentas, tasas y exportación de datos. Se carga solo cuando se usa (ver lazy.jsx).
 
 import React from "react";
 import { useState } from "react";
-import { ImageIcon, Plus, Pencil, Trash2, Copy } from "lucide-react";
-import { ActivityHistorySection, C, Field, Modal, PermissionChecklist, Pill, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, iconBtnStyle, inputClass, inputStyle } from "./base.jsx";
+import { ImageIcon, Plus, Pencil, Trash2, Copy, Download } from "lucide-react";
+import { supabase } from "../supabaseClient";
+import { ActivityHistorySection, C, Field, Modal, PermissionChecklist, Pill, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, fetchAllRows, iconBtnStyle, inputClass, inputStyle, loadXlsx, todayStrRD } from "./base.jsx";
 
 export function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAccount, onDeleteBankAccount, onSetDefaultBankAccount, saving }) {
   const [name, setName] = useState(company?.name || "");
@@ -425,5 +426,217 @@ export function InviteFormModal({ technicians, branches, saving, generatedLink, 
         </button>
       </div>
     </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Exportar todos los datos de la empresa (permiso "dataExport").
+// Descarga un Excel legible (una hoja por tipo de dato) y una copia técnica en JSON.
+// Solo exporta lo que el usuario puede leer: el candado real es RLS, así que nadie
+// puede sacar por aquí datos de otra empresa ni de una sección que la base le niega.
+// Es solo de salida: a propósito NO existe "subir y restaurar" (ver resumen-sesion).
+// ---------------------------------------------------------------------------
+const EXPORT_GROUPS = [
+  { group: "Empresa", tables: [
+    ["companies", "Empresa"], ["branches", "Sucursales"], ["profiles", "Usuarios"], ["company_bank_accounts", "Cuentas bancarias"],
+    ["ncf_sequences", "Secuencias NCF"], ["chart_of_accounts", "Catálogo de cuentas"], ["tax_rates", "Tasas impositivas"], ["card_acquirers", "Adquirentes de tarjeta"],
+  ] },
+  { group: "Ventas", tables: [
+    ["clients", "Clientes"], ["quotes", "Cotizaciones"], ["quote_items", "Cotizaciones - renglones"],
+    ["sales_orders", "Órdenes de venta"], ["sales_order_items", "Órdenes de venta - renglones"],
+    ["invoices", "Facturas"], ["invoice_items", "Facturas - renglones"], ["invoice_payments", "Cobros"],
+    ["invoice_payment_card_details", "Cobros - tarjeta"], ["invoice_payment_attachments", "Cobros - adjuntos"],
+    ["credit_notes", "Notas de crédito"], ["credit_note_items", "Notas de crédito - renglones"],
+    ["recurring_contracts", "Contratos recurrentes"], ["cash_sessions", "Caja"],
+  ] },
+  { group: "Compras", tables: [
+    ["suppliers", "Proveedores"], ["purchase_orders", "Pedidos a proveedores"], ["purchase_order_items", "Pedidos - renglones"],
+    ["goods_receipts", "Notas de entrega"], ["goods_receipt_items", "Notas de entrega - renglones"],
+    ["purchases", "Facturas de proveedor"], ["purchase_items", "Facturas proveedor - renglones"], ["purchase_payments", "Pagos a proveedores"],
+    ["other_expenses", "Otros gastos"], ["bank_transactions", "Movimientos bancarios"],
+  ] },
+  { group: "Inventario", tables: [
+    ["products", "Productos y servicios"], ["product_components", "Componentes de kits"], ["product_stock", "Existencias por sucursal"],
+    ["stock_movements", "Movimientos de inventario"], ["inventory_materials", "Almacén (materiales)"],
+  ] },
+  { group: "Técnico", tables: [
+    ["technicians", "Técnicos"], ["locations", "Ubicaciones"], ["equipment", "Equipos"], ["client_assets", "Activos en garantía"],
+    ["work_orders", "Órdenes de trabajo"], ["work_order_technicians", "Órdenes - técnicos"], ["work_order_materials", "Órdenes - materiales"],
+    ["work_order_checklist_items", "Órdenes - checklist"], ["work_order_attachments", "Órdenes - adjuntos"],
+    ["checklist_templates", "Checklists"], ["checklist_template_items", "Checklists - puntos"], ["incidents", "Incidentes"],
+    ["projects", "Proyectos"], ["project_materials", "Proyectos - materiales"],
+    ["tools", "Herramientas"], ["tool_lists", "Listados de herramientas"], ["tool_loans", "Préstamos de herramientas"],
+  ] },
+  { group: "Nómina", payroll: true, tables: [
+    ["payroll_settings", "Nómina - configuración"], ["employees", "Empleados"], ["payroll_periods", "Nóminas"], ["payroll_lines", "Nóminas - renglones"],
+    ["payroll_items", "Nóminas - novedades"], ["employee_loans", "Préstamos a empleados"], ["employee_loan_payments", "Préstamos - cuotas"],
+    ["employee_vacations", "Vacaciones"],
+  ] },
+];
+// Columnas que nunca salen en el archivo (credenciales o datos internos).
+const EXPORT_HIDDEN_COLUMNS = { profiles: ["permissions"], companies: ["billing_note"] };
+
+async function fetchTableForExport(table, companyId) {
+  // La mayoría de las tablas tiene company_id e id; algunas no (renglones, configuración).
+  // Se prueba de la variante más precisa a la más general; RLS limita lo que se ve en todas.
+  const isMissingColumn = (err) => err && (err.code === "42703" || /column .* does not exist/i.test(err.message || ""));
+  const build = (withCompany) => {
+    let q = supabase.from(table).select("*");
+    if (table === "companies") return q.eq("id", companyId);
+    if (withCompany) q = q.eq("company_id", companyId);
+    return q;
+  };
+  const pageNoOrder = async (withCompany) => {
+    const all = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await build(withCompany).range(from, from + 999);
+      if (error) return { data: null, error };
+      all.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+    return { data: all, error: null };
+  };
+  for (const attempt of [() => fetchAllRows(() => build(true)), () => fetchAllRows(() => build(false)), () => pageNoOrder(true), () => pageNoOrder(false)]) {
+    const res = await attempt();
+    if (!res.error) return res;
+    if (!isMissingColumn(res.error)) return res;
+  }
+  return { data: null, error: { message: "no se pudo leer la tabla" } };
+}
+
+// Enlaces de descarga nuevos (7 días) para fotos, firmas y adjuntos guardados en Storage.
+async function addFreshFileLinks(rows) {
+  if (!rows.length) return rows;
+  const pathCols = Object.keys(rows[0]).filter((k) => k.endsWith("_path"));
+  if (pathCols.length === 0) return rows;
+  const out = rows.map((r) => ({ ...r }));
+  for (const col of pathCols) {
+    const linkCol = col.replace(/_path$/, "_enlace_7_dias");
+    const paths = [...new Set(out.map((r) => r[col]).filter(Boolean))];
+    const urlByPath = {};
+    for (let i = 0; i < paths.length; i += 100) {
+      const { data } = await supabase.storage.from("evidence").createSignedUrls(paths.slice(i, i + 100), 604800);
+      (data || []).forEach((s) => { if (!s.error && s.signedUrl) urlByPath[s.path] = s.signedUrl; });
+    }
+    out.forEach((r) => { r[linkCol] = r[col] ? urlByPath[r[col]] || "" : ""; });
+  }
+  return out;
+}
+
+const toExcelValue = (v) => {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") v = JSON.stringify(v);
+  if (typeof v === "string" && v.length > 32000) return v.slice(0, 32000) + " …(recortado; completo en el JSON)";
+  return v;
+};
+
+export function ExportDataPanel({ companyId, companyName, canSeePayroll }) {
+  const [includeLinks, setIncludeLinks] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState([]); // [{table, label, count, error}]
+  const [done, setDone] = useState(null);
+
+  const groups = EXPORT_GROUPS.filter((g) => !g.payroll || canSeePayroll);
+  const totalTables = groups.reduce((s, g) => s + g.tables.length, 0);
+
+  const run = async () => {
+    setRunning(true);
+    setProgress([]);
+    setDone(null);
+    const startedAt = new Date();
+    const result = {};
+    const log = [];
+    for (const g of groups) {
+      for (const [table, label] of g.tables) {
+        const { data, error } = await fetchTableForExport(table, companyId);
+        let rows = data || [];
+        const hidden = EXPORT_HIDDEN_COLUMNS[table] || [];
+        if (hidden.length) rows = rows.map((r) => { const c = { ...r }; hidden.forEach((h) => delete c[h]); return c; });
+        if (includeLinks && rows.length) rows = await addFreshFileLinks(rows);
+        result[table] = rows;
+        const entry = { group: g.group, table, label, count: rows.length, error: error ? error.message : null };
+        log.push(entry);
+        setProgress((prev) => [...prev, entry]);
+      }
+    }
+    const stamp = todayStrRD();
+    const safeName = (companyName || "empresa").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "empresa";
+
+    // Excel legible
+    const XLSX = await loadXlsx();
+    const wb = XLSX.utils.book_new();
+    const info = [
+      { Campo: "Empresa", Valor: companyName || "" },
+      { Campo: "Exportado", Valor: startedAt.toLocaleString("es-DO") },
+      { Campo: "Contenido", Valor: "Una hoja por tipo de dato con todos sus registros. Solo incluye lo que tu usuario tiene permiso de ver." },
+      { Campo: "Archivos", Valor: includeLinks ? "Las columnas *_enlace_7_dias descargan cada foto, firma o adjunto. Vencen en 7 días." : "No se incluyeron enlaces a los archivos." },
+      { Campo: "Copia técnica", Valor: "El archivo .json que se descargó junto a este trae los mismos datos completos, sin recortes." },
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(info), "Léeme");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(log.map((e) => ({ Área: e.group, Hoja: e.label, Tabla: e.table, Registros: e.count, Nota: e.error || "" }))), "Resumen");
+    const usedNames = new Set(["Léeme", "Resumen"]);
+    for (const e of log) {
+      if (!result[e.table].length) continue;
+      let name = e.label.replace(/[\\/?*[\]:]/g, " ").slice(0, 31);
+      for (let i = 2; usedNames.has(name); i++) name = `${e.label.slice(0, 27)} (${i})`;
+      usedNames.add(name);
+      const rows = result[e.table].map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, toExcelValue(v)])));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), name);
+    }
+    XLSX.writeFile(wb, `mantenpro-${safeName}-${stamp}.xlsx`);
+
+    // Copia técnica completa
+    const json = JSON.stringify({ formato: "mantenpro-export", version: 1, exportado_en: startedAt.toISOString(), empresa: { id: companyId, nombre: companyName }, tablas: result }, null, 1);
+    const blob = new Blob([json], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `mantenpro-${safeName}-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+
+    setDone({ tables: log.length, rows: log.reduce((s, e) => s + e.count, 0), errors: log.filter((e) => e.error).length });
+    setRunning(false);
+  };
+
+  return (
+    <div className="max-w-3xl">
+      <div className="p-5 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        <div className="text-base font-semibold mb-1">Exportar todos los datos de la empresa</div>
+        <div className="text-sm mb-3" style={{ color: C.muted }}>
+          Descarga una copia de la información de {companyName || "tu empresa"}: ventas, compras, inventario, Departamento Técnico{canSeePayroll ? ", nómina" : ""} y configuración. Sirve para guardar tu propio respaldo o para llevarte tus datos.
+        </div>
+        <ul className="text-xs mb-3 space-y-1 list-disc pl-5" style={{ color: C.muted }}>
+          <li><b style={{ color: C.text }}>Excel:</b> una hoja por tipo de dato, para abrir y revisar.</li>
+          <li><b style={{ color: C.text }}>JSON:</b> copia técnica completa con los mismos datos, sin recortes.</li>
+          <li>Solo incluye lo que tu usuario tiene permiso de ver.{!canSeePayroll ? " La nómina no se incluye porque no tienes permiso de Nómina." : ""}</li>
+          <li>Es una copia de consulta: no se puede volver a subir para restaurar. Los respaldos automáticos del sistema son los que protegen contra pérdida de datos.</li>
+        </ul>
+        <label className="flex items-center gap-2 text-sm mb-4 cursor-pointer" style={{ color: C.text }}>
+          <input type="checkbox" checked={includeLinks} onChange={(e) => setIncludeLinks(e.target.checked)} disabled={running} />
+          Incluir enlaces para descargar fotos, firmas y adjuntos (válidos 7 días)
+        </label>
+        <button onClick={run} disabled={running} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          <Download size={15} /> {running ? `Exportando... (${progress.length} de ${totalTables})` : "Exportar datos"}
+        </button>
+        {done && (
+          <div className="text-sm mt-3" style={{ color: done.errors ? C.orange : C.green }}>
+            Listo: {done.rows.toLocaleString("es-DO")} registros en {done.tables} tablas. Revisa tus descargas (un .xlsx y un .json).
+            {done.errors > 0 && ` ${done.errors} tabla(s) no se pudieron leer: aparecen en la hoja «Resumen».`}
+          </div>
+        )}
+      </div>
+      {progress.length > 0 && (
+        <div style={{ border: `1px solid ${C.border}` }}>
+          {progress.map((e) => (
+            <div key={e.table} className="flex justify-between px-3 py-1.5 text-xs" style={{ borderBottom: `1px solid ${C.border}` }}>
+              <span><span style={{ color: C.muted }}>{e.group} · </span>{e.label}</span>
+              <span className="font-mono" style={{ color: e.error ? C.red : C.muted }}>{e.error ? "no disponible" : e.count.toLocaleString("es-DO")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
