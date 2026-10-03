@@ -6,6 +6,10 @@ import React from "react";
 import { ACTIVITY_ACTION_LABELS, ACTIVITY_TABLE_LABELS, C, Pill, ROLE_CFG, fmtDate, iconBtnStyle, inputStyle, listHtml, printDocument } from "./base.jsx";
 import { Ban, FileText, Mail, RotateCcw, Trash2 } from "lucide-react";
 
+// Registros borrados que se pueden restaurar desde el historial (misma lista que
+// restore_deleted_record en restaurar-registros.sql; el servidor vuelve a validar todo).
+const RESTORABLE_TABLES = new Set(["branches", "clients", "suppliers", "technicians", "equipment", "locations", "client_assets", "tools", "inventory_materials", "incidents", "chart_of_accounts", "tax_rates"]);
+
 // Pantalla: users
 export function VistaUsers({ branches, canDelete, canEdit, cancelInvite, invites, profiles, setEditingPermissionsFor, setShowInvite, toggleUserActive, updateMaxDiscount }) {
   return (
@@ -84,7 +88,7 @@ export function VistaUsers({ branches, canDelete, canEdit, cancelInvite, invites
 }
 
 // Pantalla: activityLog
-export function VistaActivityLog({ activityActionFilter, activityDateFrom, activityDateTo, activityLogFiltered, activityTableFilter, activityTablesPresent, activityUserFilter, activityUserName, activityUsers, companyName, describeActivityEntry, loadingActivityLog, setActivityActionFilter, setActivityDateFrom, setActivityDateTo, setActivityTableFilter, setActivityUserFilter }) {
+export function VistaActivityLog({ canRestore, onRestoreDeleted, activityActionFilter, activityDateFrom, activityDateTo, activityLogFiltered, activityTableFilter, activityTablesPresent, activityUserFilter, activityUserName, activityUsers, companyName, describeActivityEntry, loadingActivityLog, setActivityActionFilter, setActivityDateFrom, setActivityDateTo, setActivityTableFilter, setActivityUserFilter }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
@@ -164,7 +168,13 @@ export function VistaActivityLog({ activityActionFilter, activityDateFrom, activ
               </div>
 
               <div className="space-y-2">
-                {activityLogFiltered.map((l) => {
+                {(() => {
+                  // Último "Creado" de cada registro: si es posterior al borrado, ya se restauró.
+                  const lastInsertAt = {};
+                  activityLogFiltered.forEach((x) => { if (x.action === "INSERT" && x.record_id && (!lastInsertAt[x.record_id] || x.changed_at > lastInsertAt[x.record_id])) lastInsertAt[x.record_id] = x.changed_at; });
+                  return activityLogFiltered.map((l) => {
+                  const restorable = canRestore && l.action === "DELETE" && RESTORABLE_TABLES.has(l.table_name) && l.old_data;
+                  const alreadyRestored = restorable && lastInsertAt[l.record_id] && lastInsertAt[l.record_id] > l.changed_at;
                   const a = ACTIVITY_ACTION_LABELS[l.action] || { label: l.action, color: C.muted };
                   const dt = new Date(l.changed_at);
                   return (
@@ -177,10 +187,20 @@ export function VistaActivityLog({ activityActionFilter, activityDateFrom, activ
                         <div className="text-xs flex-shrink-0" style={{ color: C.muted }}>{dt.toLocaleDateString("es-DO")} · {dt.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}</div>
                       </div>
                       <div className="text-xs" style={{ color: C.muted }}>{describeActivityEntry(l) || "—"}</div>
-                      <div className="text-xs mt-1" style={{ color: C.muted }}>Por: <span style={{ color: C.text }}>{activityUserName(l.changed_by_email)}</span></div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-xs" style={{ color: C.muted }}>Por: <span style={{ color: C.text }}>{activityUserName(l.changed_by_email)}</span></div>
+                        {restorable && (alreadyRestored ? (
+                          <span className="text-xs" style={{ color: C.green }}>Restaurado</span>
+                        ) : (
+                          <button onClick={() => onRestoreDeleted(l)} className="flex items-center gap-1 text-xs px-2 py-1" style={{ border: `1px solid ${C.amber}`, color: C.amber }}>
+                            <RotateCcw size={12} /> Restaurar
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   );
-                })}
+                  });
+                })()}
                 {!loadingActivityLog && activityLogFiltered.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted, background: C.panel, border: `1px solid ${C.border}` }}>No hay actividad registrada en este rango.</div>}
               </div>
             </div>

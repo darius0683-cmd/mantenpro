@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus } from "lucide-react";
-import { APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, todayStrRD } from "./modulos/base.jsx";
+import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, todayStrRD } from "./modulos/base.jsx";
 import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 
@@ -655,6 +655,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setLoadingActivityLog(false);
     if (error) { setErrorMsg(error.message); return; }
     setActivityLog(data || []);
+  };
+  // Restaurar un registro borrado (solo admin; el servidor valida tipo, empresa, módulo y que no exista ya).
+  const restoreDeletedRecord = async (log) => {
+    const label = ACTIVITY_TABLE_LABELS[log.table_name] || log.table_name;
+    if (!window.confirm(`¿Restaurar este registro de ${label}? Vuelve tal como estaba cuando se borró.`)) return;
+    const { error } = await supabase.rpc("restore_deleted_record", { p_log_id: log.id });
+    if (error) { setErrorMsg(error.message); return; }
+    await loadActivityLog();
+    loadAll();
   };
   useEffect(() => {
     if (view === "activityLog" && hasPerm("activityLog")) loadActivityLog();
@@ -4412,7 +4421,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("activityLog") && view === "activityLog" && (
-            <VistaActivityLog activityActionFilter={activityActionFilter} activityDateFrom={activityDateFrom} activityDateTo={activityDateTo} activityLogFiltered={activityLogFiltered} activityTableFilter={activityTableFilter} activityTablesPresent={activityTablesPresent} activityUserFilter={activityUserFilter} activityUserName={activityUserName} activityUsers={activityUsers} companyName={companyName} describeActivityEntry={describeActivityEntry} loadingActivityLog={loadingActivityLog} setActivityActionFilter={setActivityActionFilter} setActivityDateFrom={setActivityDateFrom} setActivityDateTo={setActivityDateTo} setActivityTableFilter={setActivityTableFilter} setActivityUserFilter={setActivityUserFilter} />
+            <VistaActivityLog canRestore={isAdmin} onRestoreDeleted={restoreDeletedRecord} activityActionFilter={activityActionFilter} activityDateFrom={activityDateFrom} activityDateTo={activityDateTo} activityLogFiltered={activityLogFiltered} activityTableFilter={activityTableFilter} activityTablesPresent={activityTablesPresent} activityUserFilter={activityUserFilter} activityUserName={activityUserName} activityUsers={activityUsers} companyName={companyName} describeActivityEntry={describeActivityEntry} loadingActivityLog={loadingActivityLog} setActivityActionFilter={setActivityActionFilter} setActivityDateFrom={setActivityDateFrom} setActivityDateTo={setActivityDateTo} setActivityTableFilter={setActivityTableFilter} setActivityUserFilter={setActivityUserFilter} />
           )}
         </div>
       </div>
