@@ -5,6 +5,7 @@
 import React from "react";
 import { C, Dot, Field, INCIDENT_STATUS_CFG, KpiCard, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, TOOL_STATUS_CFG, TYPE_CFG, addDaysToDateStr, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, listHtml, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 import { TechnicianToolRow, ToolListCard, UsageQuickUpdate } from "./lazy.jsx";
+import { EquipmentExcelButtons } from "./equipos-excel.jsx";
 import { AlertTriangle, Ban, Boxes, Building2, ChevronLeft, ChevronRight, ClipboardList, FileText, History, Layers, MapPin, Paperclip, Pencil, Plus, RotateCcw, Search, Trash2, Upload, UserCheck, X } from "lucide-react";
 import { Bar, BarChart, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -499,7 +500,7 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
 }
 
 // Pantalla: equipment
-export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipmentSearch, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
   // Imprime lo que se ve en pantalla (filtros aplicados) o, si hay equipos marcados, solo esos.
   const printEquipment = (mode) => {
     const list = selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered;
@@ -533,6 +534,18 @@ export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteE
                       <button onClick={() => printEquipment("todos")} className="px-3 py-2 text-sm font-semibold" style={{ color: C.text, borderLeft: `1px solid ${C.border}` }}>Todos</button>
                     </div>
                   )}
+                  <EquipmentExcelButtons
+                    canUpload={canEdit("equipment") && branches.length > 0}
+                    companyId={companyId}
+                    companyName={companyName}
+                    equipment={equipment}
+                    downloadList={selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered}
+                    branches={branches}
+                    locations={locations}
+                    technicians={technicians}
+                    setEquipment={setEquipment}
+                    setLocations={setLocations}
+                  />
                   {canDelete("equipment") && selectedEquipment.size > 0 && (
                     <button onClick={() => bulkDeleteEquipment(Array.from(selectedEquipment))} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#fff" }}>
                       <Trash2 size={14} /> Eliminar seleccionados ({selectedEquipment.size})
