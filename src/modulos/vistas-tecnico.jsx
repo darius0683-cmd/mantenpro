@@ -3,7 +3,7 @@
 // (estados, funciones y cálculos del Dashboard) le llega por props con el mismo nombre.
 // Se carga solo cuando se abre la pantalla (ver lazy.jsx).
 import React from "react";
-import { C, Dot, Field, INCIDENT_STATUS_CFG, KpiCard, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, TOOL_STATUS_CFG, TYPE_CFG, addDaysToDateStr, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, listHtml, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
+import { C, Dot, Field, INCIDENT_STATUS_CFG, KpiCard, LEFTOVER_CONDITIONS, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, TOOL_STATUS_CFG, TYPE_CFG, addDaysToDateStr, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, listHtml, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 import { TechnicianToolRow, ToolListCard, UsageQuickUpdate } from "./lazy.jsx";
 import { EquipmentExcelButtons } from "./equipos-excel.jsx";
 import { AlertTriangle, Ban, Boxes, Building2, ChevronLeft, ChevronRight, ClipboardList, FileText, History, Layers, MapPin, Paperclip, Pencil, Plus, RotateCcw, Search, Trash2, Upload, UserCheck, X } from "lucide-react";
@@ -868,12 +868,24 @@ export function VistaTools({ assignToolsByQuantity, bulkDeleteTools, bulkRetireT
 }
 
 // Pantalla: materials
-export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial, lowStockMaterials, materials, materialsLowStockOnly, setEditingMaterial, setMaterialsLowStockOnly, setShowAddMaterial }) {
+export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial, lowStockMaterials, materials, materialsLowStockOnly, setEditingMaterial, setMaterialsLowStockOnly, setShowAddMaterial, techUsesProducts, products, productStock, branches, orders, projects }) {
+  // Empresa con técnico + comercial: aquí quedan los sobrantes (y los materiales que ya existían);
+  // el inventario nuevo vive en Productos y se muestra abajo solo para consulta.
+  const techProducts = techUsesProducts ? (products || []).filter((p) => p.tech_available && (p.item_type || "producto") !== "servicio" && !p.is_composite) : [];
+  const stockByBranch = (productId) => (productStock || []).filter((r) => r.product_id === productId && Number(r.quantity) !== 0);
+  const originLabel = (m) => {
+    if (m.source_work_order_id) return `De ${(orders || []).find((o) => o.id === m.source_work_order_id)?.code || "una orden"}`;
+    if (m.source_project_id) return `De proyecto ${(projects || []).find((p) => p.id === m.source_project_id)?.name || ""}`.trim();
+    return null;
+  };
+  const sobrantes = materials.filter((m) => m.kind === "sobrante").length;
   return (
           <div>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <div className="text-sm" style={{ color: C.muted }}>
-                  {materials.length} material{materials.length !== 1 ? "es" : ""} en almacén
+                  {techUsesProducts
+                    ? `${sobrantes} sobrante${sobrantes !== 1 ? "s" : ""}${materials.length - sobrantes > 0 ? ` y ${materials.length - sobrantes} material${materials.length - sobrantes !== 1 ? "es" : ""} anterior${materials.length - sobrantes !== 1 ? "es" : ""}` : ""} en el almacén técnico`
+                    : `${materials.length} material${materials.length !== 1 ? "es" : ""} en almacén`}
                   {lowStockMaterials.length > 0 && <span style={{ color: C.red }}> &middot; {lowStockMaterials.length} con stock bajo</span>}
                 </div>
                 <div className="flex items-center gap-3">
@@ -884,14 +896,35 @@ export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial,
                   )}
                   {canEdit("materials") && (
                     <button onClick={() => setShowAddMaterial(true)} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
-                      <Plus size={14} /> Agregar material
+                      <Plus size={14} /> {techUsesProducts ? "Agregar sobrante" : "Agregar material"}
                     </button>
                   )}
                 </div>
               </div>
+              {techUsesProducts && (
+                <div className="mb-4 p-3 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.muted }}>
+                  Tu empresa lleva el inventario en <b style={{ color: C.text }}>Productos</b>. Aquí quedan los <b style={{ color: C.text }}>sobrantes</b> (material incompleto, usado o recuperado: sin costo y no se vende) y los materiales que ya estaban cargados antes.
+                  Para que un producto se pueda usar en órdenes y proyectos, márcalo como "Disponible para el Departamento Técnico" en Productos.
+                  <details className="mt-2">
+                    <summary className="cursor-pointer" style={{ color: C.blue }}>Productos disponibles para el técnico ({techProducts.length})</summary>
+                    <div className="mt-2 max-h-64 overflow-y-auto">
+                      {techProducts.map((p) => (
+                        <div key={p.id} className="flex justify-between gap-3 py-1" style={{ borderBottom: `1px solid ${C.border}` }}>
+                          <span style={{ color: C.text }}>{p.name}</span>
+                          <span className="text-right">
+                            <span className="font-mono" style={{ color: C.text }}>{Number(p.stock_qty || 0).toLocaleString("es-DO")} {p.unit || ""}</span>
+                            {stockByBranch(p.id).length > 0 && <span className="ml-2">({stockByBranch(p.id).map((r) => `${(branches || []).find((b) => b.id === r.branch_id)?.name || "—"}: ${Number(r.quantity).toLocaleString("es-DO")}`).join(" · ")})</span>}
+                          </span>
+                        </div>
+                      ))}
+                      {techProducts.length === 0 && <div>Todavía no hay productos marcados para el Departamento Técnico.</div>}
+                    </div>
+                  </details>
+                </div>
+              )}
               <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Material</div>
+                  <div className="col-span-3">{techUsesProducts ? "Material / sobrante" : "Material"}</div>
                   <div className="col-span-2">Código / Nº parte</div>
                   <div className="col-span-2">Ubicación</div>
                   <div className="col-span-1">Sucursal</div>
@@ -904,6 +937,11 @@ export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial,
                   <div key={m.id} className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}`, background: isLow ? C.red + "15" : "transparent" }}>
                     <div className="col-span-3">
                       <div className="font-medium">{m.name}</div>
+                      {techUsesProducts && (
+                        <div className="text-[10px] uppercase tracking-wide" style={{ color: m.kind === "sobrante" ? C.amber : C.muted }}>
+                          {m.kind === "sobrante" ? `Sobrante · ${LEFTOVER_CONDITIONS[m.condition] || "sin condición"}` : "Material anterior"}{originLabel(m) ? ` · ${originLabel(m)}` : ""}
+                        </div>
+                      )}
                       {m.description && <div className="text-xs" style={{ color: C.muted }}>{m.description}</div>}
                       {m.notes && <div className="text-xs" style={{ color: C.muted }}>{m.notes}</div>}
                     </div>
@@ -927,7 +965,7 @@ export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial,
                   </div>
                   );
                 })}
-                {materials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Todavía no hay materiales registrados en el almacén.</div>}
+                {materials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>{techUsesProducts ? "Todavía no hay sobrantes registrados." : "Todavía no hay materiales registrados en el almacén."}</div>}
                 {materials.length > 0 && materialsLowStockOnly && lowStockMaterials.length === 0 && <div className="px-4 py-8 text-center text-sm" style={{ color: C.muted }}>Ningún material está bajo su stock mínimo.</div>}
               </div>
             </div>

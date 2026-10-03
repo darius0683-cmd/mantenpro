@@ -5,7 +5,7 @@ import React from "react";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { ImageIcon, FileText, X, Plus, Pencil, Trash2, CheckCircle2, Unlink, Link2, Upload, Layers, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { ActivityHistorySection, C, Field, INCIDENT_STATUS_CFG, Modal, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
+import { ActivityHistorySection, C, Field, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 
 export function UsageQuickUpdate({ item, onUpdate }) {
   const [value, setValue] = useState(item.current_usage ?? "");
@@ -738,6 +738,74 @@ export function ToolFormModal({ branches, technicians, initial, onClose, onSave,
 
 export const MATERIAL_UNITS = ["unidad", "pieza", "metro", "kg", "litro", "galón", "caja", "rollo"];
 
+// ---- Material para órdenes de trabajo y proyectos ----
+// Empresa con técnico + comercial: se puede sacar de Productos (los marcados "Disponible para el
+// Departamento Técnico", con existencia en la sucursal de la orden) o del almacén técnico (sobrantes).
+// Empresa solo técnico: del almacén técnico, como siempre. El descuento y la devolución los hace la
+// base de datos (disparadores en work_order_materials / project_materials).
+const fmtQty = (n) => Number(n || 0).toLocaleString("es-DO");
+export function techMaterialOptions({ techUsesProducts, products, productStock, materials, branchId }) {
+  const opts = [];
+  if (techUsesProducts) {
+    (products || []).filter((p) => p.tech_available && (p.item_type || "producto") !== "servicio" && !p.is_composite).forEach((p) => {
+      const qty = Number((productStock || []).find((r) => r.product_id === p.id && r.branch_id === branchId)?.quantity || 0);
+      if (qty > 0) opts.push({ id: "p:" + p.id, name: p.name, unit: p.unit, available: qty, sourceLabel: "Productos" });
+    });
+  }
+  (materials || []).filter((m) => Number(m.quantity || 0) > 0).forEach((m) => {
+    opts.push({ id: "m:" + m.id, name: m.name, unit: m.unit, available: Number(m.quantity), sourceLabel: m.kind === "sobrante" ? "Sobrante" : techUsesProducts ? "Almacén técnico (anterior)" : "Almacén técnico" });
+  });
+  return opts;
+}
+export const techOptionLabel = (o) => `${o.name} — ${o.sourceLabel} (disp. ${fmtQty(o.available)} ${o.unit || ""})`;
+// Convierte el id elegido ("p:..." o "m:...") en las columnas del renglón
+export const techPickToColumns = (pickId) => (pickId.startsWith("p:") ? { product_id: pickId.slice(2) } : { material_id: pickId.slice(2) });
+export function materialLineSource(line, materials) {
+  if (line.product_id) return "Productos";
+  const mat = (materials || []).find((m) => m.id === line.material_id);
+  return mat?.kind === "sobrante" ? "Sobrante" : "Almacén técnico";
+}
+
+// Formulario corto para registrar un sobrante (lo que quedó de un producto usado)
+export function LeftoverInlineForm({ defaultName, defaultUnit, onSave, onCancel }) {
+  const [name, setName] = useState(defaultName || "");
+  const [quantity, setQuantity] = useState("");
+  const [unit, setUnit] = useState(defaultUnit || MATERIAL_UNITS[0]);
+  const [condition, setCondition] = useState("incompleto");
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const units = MATERIAL_UNITS.includes(unit) ? MATERIAL_UNITS : [unit, ...MATERIAL_UNITS];
+  const save = async () => {
+    const q = Number(String(quantity).replace(",", "."));
+    if (!name.trim() || !(q > 0)) return;
+    setBusy(true);
+    const ok = await onSave({ name: name.trim(), quantity: q, unit, condition, notes: notes.trim() || null });
+    setBusy(false);
+    if (ok !== false) onCancel();
+  };
+  return (
+    <div className="p-3 mt-1 mb-2 space-y-2" style={{ background: C.panel, border: `1px dashed ${C.amber}` }}>
+      <div className="text-xs font-semibold" style={{ color: C.amber }}>Registrar sobrante en el almacén técnico (sin costo, no regresa a Productos)</div>
+      <div className="grid grid-cols-12 gap-2">
+        <input className={`${inputClass} col-span-12 md:col-span-5 text-xs`} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Descripción" />
+        <input type="text" inputMode="decimal" className={`${inputClass} col-span-4 md:col-span-2 text-xs`} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="Cant." />
+        <select className={`${inputClass} col-span-4 md:col-span-2 text-xs`} style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)}>
+          {units.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+        <select className={`${inputClass} col-span-4 md:col-span-3 text-xs`} style={inputStyle} value={condition} onChange={(e) => setCondition(e.target.value)}>
+          {Object.entries(LEFTOVER_CONDITIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <input className={`${inputClass} col-span-12 text-xs`} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notas (opcional): estado, dónde se guardó..." />
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="px-3 py-1.5 text-xs" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+        <button onClick={save} disabled={busy || !name.trim() || !quantity} className="px-3 py-1.5 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>{busy ? "Guardando..." : "Guardar sobrante"}</button>
+      </div>
+    </div>
+  );
+}
+
+
 export function ToolListFormModal({ tools, technicians, initial, onClose, onSave, saving }) {
   const [name, setName] = useState(initial?.name || "");
   const [toolIds, setToolIds] = useState(initial?.tool_ids || []);
@@ -1022,7 +1090,12 @@ export function BulkToolFormModal({ branches, technicians, onClose, onSave, savi
 }
 
 
-export function MaterialFormModal({ branches, initial, onClose, onSave, saving }) {
+export function MaterialFormModal({ branches, initial, leftoverMode, onClose, onSave, saving }) {
+  // leftoverMode: la empresa lleva el inventario en Productos; aquí solo se crean sobrantes
+  // y la cantidad de los materiales anteriores no se cambia a mano.
+  const isLeftover = initial ? initial.kind === "sobrante" : !!leftoverMode;
+  const quantityLocked = !!leftoverMode && !!initial && initial.kind !== "sobrante";
+  const [condition, setCondition] = useState(initial?.condition || "incompleto");
   const [name, setName] = useState(initial?.name || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [partCode, setPartCode] = useState(initial?.part_code || "");
@@ -1050,10 +1123,25 @@ export function MaterialFormModal({ branches, initial, onClose, onSave, saving }
       max_quantity: maxQuantity === "" ? null : Number(maxQuantity),
       location: location.trim() || null,
       notes: notes.trim() || null,
+      ...(isLeftover ? { condition } : {}),
+      ...(!initial && leftoverMode ? { kind: "sobrante" } : {}),
+      ...(quantityLocked ? { quantity: initial.quantity } : {}),
     });
   };
   return (
-    <Modal title={initial ? "Editar material" : "Agregar material al almacén"} onClose={onClose}>
+    <Modal title={initial ? (isLeftover ? "Editar sobrante" : "Editar material") : (leftoverMode ? "Agregar sobrante" : "Agregar material al almacén")} onClose={onClose}>
+      {leftoverMode && !initial && (
+        <div className="text-xs mb-3 p-2" style={{ background: C.panelAlt, color: C.muted, border: `1px solid ${C.border}` }}>
+          Sobrante: material incompleto, usado o recuperado de un equipo. No tiene costo y no entra al inventario de Productos. El material nuevo se registra en Productos.
+        </div>
+      )}
+      {isLeftover && (
+        <Field label="Condición">
+          <select className={inputClass} style={inputStyle} value={condition} onChange={(e) => setCondition(e.target.value)}>
+            {Object.entries(LEFTOVER_CONDITIONS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+        </Field>
+      )}
       <Field label="Nombre del material">
         <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Tubería PVC 1/2, cable THHN #12" />
       </Field>
@@ -1072,8 +1160,8 @@ export function MaterialFormModal({ branches, initial, onClose, onSave, saving }
         </Field>
       </div>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Stock actual">
-          <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
+        <Field label={isLeftover ? "Cantidad" : "Stock actual"}>
+          <input type="text" inputMode="decimal" disabled={quantityLocked} title={quantityLocked ? "La cantidad de un material anterior solo cambia al usarlo en una orden o proyecto" : undefined} className={`${inputClass} disabled:opacity-50`} style={inputStyle} value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="0" />
         </Field>
         <Field label="Unidad">
           <select className={inputClass} style={inputStyle} value={unit} onChange={(e) => setUnit(e.target.value)}>
@@ -1196,6 +1284,7 @@ export function ProjectDetailModal({
   project, clients, branches, technicians, orders, orderTechnicians, salesOrders, materials, projectMaterials,
   canEditProjects, canDeleteProjects, canManageWarehouse, onClose, onEdit, onDelete, onSetStatus,
   onLinkOrder, onUnlinkOrder, onLinkSalesOrder, onUnlinkSalesOrder, onAddMaterial, onRemoveMaterial, saving,
+  techUsesProducts, products, productStock, defaultBranchId, onRegisterLeftover,
 }) {
   const [pickOrderId, setPickOrderId] = useState("");
   const [pickSalesOrderId, setPickSalesOrderId] = useState("");
@@ -1219,7 +1308,9 @@ export function ProjectDetailModal({
   const linkedSalesOrders = salesOrders.filter((o) => o.project_id === project.id);
   const availableSalesOrders = salesOrders.filter((o) => !o.project_id);
   const linkedMaterials = projectMaterials.filter((pm) => pm.project_id === project.id);
-  const availableMaterials = materials.filter((m) => Number(m.quantity || 0) > 0);
+  const materialOptions = techMaterialOptions({ techUsesProducts, products, productStock, materials, branchId: project.branch_id || defaultBranchId });
+  const materialsCost = linkedMaterials.reduce((sum, pm) => sum + Number(pm.quantity || 0) * Number(pm.unit_cost || 0), 0);
+  const [leftoverFor, setLeftoverFor] = useState(null);
 
   const clientName = clients.find((c) => c.id === project.client_id)?.name || "—";
   const branchNameStr = branches.find((b) => b.id === project.branch_id)?.name || "—";
@@ -1302,17 +1393,34 @@ export function ProjectDetailModal({
 
       {/* Materiales */}
       <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${C.border}` }}>
-        <div className="text-sm font-semibold mb-2">Materiales asignados ({linkedMaterials.length})</div>
+        <div className="text-sm font-semibold mb-2">
+          Materiales asignados ({linkedMaterials.length})
+          {materialsCost > 0 && <span className="text-xs font-normal ml-2" style={{ color: C.muted }}>Costo de lo usado de Productos: {fmtMoney(materialsCost)}</span>}
+        </div>
         <div className="space-y-2 mb-3">
           {linkedMaterials.map((pm) => {
             const mat = materials.find((m) => m.id === pm.material_id);
+            const name = pm.name || mat?.name || "Material eliminado";
+            const unit = pm.unit || mat?.unit || "";
             return (
-              <div key={pm.id} className="flex items-center justify-between px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-                <div>
-                  {mat?.name || "Material eliminado"} <span className="text-xs" style={{ color: C.muted }}>× {Number(pm.quantity).toLocaleString("es-DO")} {mat?.unit || ""}</span>
-                  {pm.notes && <div className="text-xs" style={{ color: C.muted }}>{pm.notes}</div>}
+              <div key={pm.id}>
+                <div className="flex items-center justify-between gap-2 px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+                  <div className="min-w-0">
+                    {name} <span className="text-xs" style={{ color: C.muted }}>× {fmtQty(pm.quantity)} {unit}</span>
+                    <span className="text-[10px] uppercase tracking-wide ml-2" style={{ color: pm.product_id ? C.blue : C.muted }}>{materialLineSource(pm, materials)}</span>
+                    {pm.notes && <div className="text-xs" style={{ color: C.muted }}>{pm.notes}</div>}
+                  </div>
+                  {canDeleteProjects && canManageWarehouse && (
+                    <span className="flex items-center gap-2 flex-shrink-0">
+                      {techUsesProducts && pm.product_id && <button onClick={() => setLeftoverFor(leftoverFor === pm.id ? null : pm.id)} className="text-xs" style={{ color: C.amber }} title="Lo que sobró y no puede regresar a Productos">Sobrante</button>}
+                      <button onClick={() => onRemoveMaterial({ ...pm, name, unit })} className="text-xs" style={{ color: C.muted }} title="Devolver todo o parte a su origen">Devolver</button>
+                    </span>
+                  )}
                 </div>
-                {canDeleteProjects && canManageWarehouse && <button onClick={() => onRemoveMaterial(pm)} style={iconBtnStyle} title="Quitar y devolver al inventario"><Trash2 size={14} /></button>}
+                {leftoverFor === pm.id && (
+                  <LeftoverInlineForm defaultName={name} defaultUnit={unit} onCancel={() => setLeftoverFor(null)}
+                    onSave={(payload) => onRegisterLeftover({ ...payload, branch_id: project.branch_id || null, source_project_id: project.id, source_product_id: pm.product_id || null })} />
+                )}
               </div>
             );
           })}
@@ -1320,7 +1428,7 @@ export function ProjectDetailModal({
         </div>
         {canEditProjects && canManageWarehouse && (
           <div className="flex flex-wrap gap-2">
-            <div className="flex-1 min-w-[160px]"><SearchSelect items={availableMaterials} value={pickMaterialId} onChange={setPickMaterialId} placeholder="Buscar material del almacén..." getLabel={(m) => `${m.name} (disp. ${Number(m.quantity).toLocaleString("es-DO")} ${m.unit || ""})`} /></div>
+            <div className="flex-1 min-w-[160px]"><SearchSelect items={materialOptions} value={pickMaterialId} onChange={setPickMaterialId} placeholder={techUsesProducts ? "Buscar producto o sobrante..." : "Buscar material del almacén..."} getLabel={techOptionLabel} /></div>
             <input type="text" inputMode="decimal" className="px-3 py-2 text-sm w-24" style={inputStyle} value={pickMaterialQty} onChange={(e) => setPickMaterialQty(e.target.value)} placeholder="Cant." />
             <input type="text" className="px-3 py-2 text-sm flex-1 min-w-[120px]" style={inputStyle} value={pickMaterialNotes} onChange={(e) => setPickMaterialNotes(e.target.value)} placeholder="Notas (opcional)" />
             <button
@@ -1331,7 +1439,7 @@ export function ProjectDetailModal({
           </div>
         )}
         {canEditProjects && !canManageWarehouse && (
-          <div className="text-xs" style={{ color: C.muted }}>Solo un supervisor o administrador puede retirar materiales del almacén.</div>
+          <div className="text-xs" style={{ color: C.muted }}>Solo un supervisor o administrador puede retirar materiales.</div>
         )}
       </div>
 
@@ -1915,7 +2023,7 @@ export function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave }) 
   );
 }
 
-export function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onConsumeMaterial, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
+export function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [uploadingStage, setUploadingStage] = useState(null);
@@ -1951,36 +2059,37 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
     return () => { active = false; };
   }, [order.id]);
 
-  const availableWarehouseStock = materials.filter((m) => Number(m.quantity || 0) > 0);
+  const materialOptions = techMaterialOptions({ techUsesProducts, products, productStock, materials, branchId: order.branch_id || defaultBranchId });
+  const [leftoverFor, setLeftoverFor] = useState(null); // renglón del que se registra un sobrante
+  const leftoversFromOrder = (materials || []).filter((m) => m.kind === "sobrante" && m.source_work_order_id === order.id);
 
   const addUsedMaterial = async () => {
     setMaterialErr("");
-    const mat = materials.find((m) => m.id === pickMaterialId);
-    const qty = Number(pickMaterialQty);
-    if (!mat || !qty) return;
-    if (qty > Number(mat.quantity || 0)) { setMaterialErr("No hay suficiente cantidad disponible en el almacén."); return; }
+    const opt = materialOptions.find((o) => o.id === pickMaterialId);
+    const qty = Number(String(pickMaterialQty).replace(",", "."));
+    if (!opt || !(qty > 0)) return;
+    if (qty > opt.available) { setMaterialErr(`No hay suficiente: disponible ${fmtQty(opt.available)} ${opt.unit || ""}.`); return; }
     setSavingMaterial(true);
-    const payload = {
-      work_order_id: order.id,
-      material_id: mat.id,
-      name: mat.name,
-      quantity: qty,
-      unit: mat.unit || null,
-    };
-    const { data, error } = await supabase.from("work_order_materials").insert(payload).select().single();
+    // La base de datos completa nombre, unidad, costo y empresa, y descuenta la existencia.
+    const { data, error } = await supabase.from("work_order_materials")
+      .insert({ work_order_id: order.id, company_id: order.company_id, name: opt.name, quantity: qty, ...techPickToColumns(opt.id) })
+      .select().single();
     setSavingMaterial(false);
     if (error) { setMaterialErr(error.message); return; }
     setUsedMaterials((prev) => [...prev, data]);
-    onConsumeMaterial(mat.id, qty);
+    onInventoryChanged && onInventoryChanged();
     setPickMaterialId(""); setPickMaterialQty("");
   };
   const removeUsedMaterial = async (m) => {
-    if (!window.confirm(`¿Quitar ${m.name} de esta orden? La cantidad regresará al almacén.`)) return;
-    const { error } = await supabase.from("work_order_materials").delete().eq("id", m.id);
-    if (error) return;
-    if (m.material_id) onConsumeMaterial(m.material_id, -Number(m.quantity || 0));
-    setUsedMaterials((prev) => prev.filter((x) => x.id !== m.id));
+    const res = await returnMaterialLine("work_order_materials", m);
+    if (!res) return;
+    if (res.removed) setUsedMaterials((prev) => prev.filter((x) => x.id !== m.id));
+    else setUsedMaterials((prev) => prev.map((x) => (x.id === m.id ? res.updated : x)));
+    onInventoryChanged && onInventoryChanged();
   };
+  const saveLeftover = (line) => (payload) => onRegisterLeftover({
+    ...payload, branch_id: order.branch_id || null, source_work_order_id: order.id, source_product_id: line.product_id || null,
+  });
 
   const laborCost = (Number(laborHours) || 0) * (Number(laborRate) || 0);
   const extraTechnicianCost = (extraTechnicianRows || []).reduce((sum, row) => {
@@ -2347,23 +2456,39 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
       </div>
 
       <div className="mt-2 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
-        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Materiales retirados del almacén</div>
+        <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>{techUsesProducts ? "Materiales usados (de Productos o del almacén técnico)" : "Materiales retirados del almacén"}</div>
         {!loadingMaterials && usedMaterials.length > 0 && (
           <div className="mb-2 space-y-1">
             {usedMaterials.map((m) => (
-              <div key={m.id} className="flex items-center justify-between text-sm px-3 py-1.5" style={{ background: C.panelAlt }}>
-                <span>{m.name} — {m.quantity} {m.unit || ""}</span>
-                {!readOnly && canManageWarehouse && <button onClick={() => removeUsedMaterial(m)} style={iconBtnStyle}><X size={13} /></button>}
+              <div key={m.id}>
+                <div className="flex items-center justify-between gap-2 text-sm px-3 py-1.5" style={{ background: C.panelAlt }}>
+                  <span className="min-w-0">
+                    {m.name} — {fmtQty(m.quantity)} {m.unit || ""}
+                    <span className="text-[10px] uppercase tracking-wide ml-2" style={{ color: m.product_id ? C.blue : C.muted }}>{materialLineSource(m, materials)}</span>
+                  </span>
+                  {!readOnly && canManageWarehouse && (
+                    <span className="flex items-center gap-2 flex-shrink-0">
+                      {techUsesProducts && m.product_id && <button onClick={() => setLeftoverFor(leftoverFor === m.id ? null : m.id)} className="text-xs" style={{ color: C.amber }} title="Lo que sobró y no puede regresar a Productos">Sobrante</button>}
+                      <button onClick={() => removeUsedMaterial(m)} className="text-xs" style={{ color: C.muted }} title="Devolver todo o parte a su origen">Devolver</button>
+                    </span>
+                  )}
+                </div>
+                {leftoverFor === m.id && <LeftoverInlineForm defaultName={m.name} defaultUnit={m.unit} onSave={saveLeftover(m)} onCancel={() => setLeftoverFor(null)} />}
               </div>
             ))}
           </div>
         )}
-        {!loadingMaterials && usedMaterials.length === 0 && <div className="text-xs mb-2" style={{ color: C.muted }}>Todavía no se ha retirado ningún material del almacén para esta orden.</div>}
+        {!loadingMaterials && usedMaterials.length === 0 && <div className="text-xs mb-2" style={{ color: C.muted }}>Todavía no se ha retirado ningún material para esta orden.</div>}
+        {leftoversFromOrder.length > 0 && (
+          <div className="text-xs mb-2" style={{ color: C.muted }}>
+            Sobrantes registrados de esta orden: {leftoversFromOrder.map((x) => `${x.name} (${fmtQty(x.quantity)} ${x.unit || ""}, ${LEFTOVER_CONDITIONS[x.condition] || "sobrante"})`).join(" · ")}
+          </div>
+        )}
         {!readOnly && canManageWarehouse && (
           <div>
             <div className="grid grid-cols-12 gap-2 min-w-[500px] items-end">
-              <div className="col-span-7"><SearchSelect items={availableWarehouseStock} value={pickMaterialId} onChange={setPickMaterialId} placeholder="Buscar material del almacén..." getLabel={(m) => `${m.name} (disp. ${Number(m.quantity).toLocaleString("es-DO")} ${m.unit || ""})`} /></div>
-              <input type="number" step="0.01" className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={pickMaterialQty} onChange={(e) => setPickMaterialQty(e.target.value)} placeholder="Cant." />
+              <div className="col-span-7"><SearchSelect items={materialOptions} value={pickMaterialId} onChange={setPickMaterialId} placeholder={techUsesProducts ? "Buscar producto o sobrante..." : "Buscar material del almacén..."} getLabel={techOptionLabel} /></div>
+              <input type="text" inputMode="decimal" className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={pickMaterialQty} onChange={(e) => setPickMaterialQty(e.target.value)} placeholder="Cant." />
               <button onClick={addUsedMaterial} disabled={savingMaterial || !pickMaterialId || !pickMaterialQty} className="col-span-3 px-2 py-2 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
                 <Plus size={13} className="inline" /> Retirar
               </button>

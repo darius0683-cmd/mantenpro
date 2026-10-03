@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus } from "lucide-react";
-import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, todayStrRD } from "./modulos/base.jsx";
+import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
 import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 
@@ -41,6 +41,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     payroll: "nomina",
   };
   const companyHasModule = (mod) => !mod || (company?.enabled_modules || []).includes(mod);
+  // Técnico + comercial: el técnico usa Productos como inventario y su almacén queda para sobrantes
+  const techUsesProducts = companyHasModule("tecnico") && companyHasModule("comercial");
   const hasPerm = (key) => (isAdmin || !!effectivePermissions[key]) && companyHasModule(MODULE_OF_KEY[key]);
   const canEdit = (key) => isAdmin || effectivePermissions[key] === "edit" || effectivePermissions[key] === "edit_no_delete";
   const canDelete = (key) => isAdmin || effectivePermissions[key] === "edit";
@@ -2125,14 +2127,29 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (error) { setErrorMsg(error.message); return; }
     setMaterials((prev) => prev.filter((m) => m.id !== id));
   };
-  const consumeMaterialStock = async (materialId, quantityUsed) => {
-    const mat = materials.find((m) => m.id === materialId);
-    if (!mat) return;
-    const newQty = Math.max(0, Number(mat.quantity || 0) - Number(quantityUsed || 0));
-    const { data, error } = await supabase.from("inventory_materials").update({ quantity: newQty }).eq("id", materialId).select().single();
-    if (error) { setErrorMsg(error.message); return; }
-    setMaterials((prev) => prev.map((m) => (m.id === data.id ? data : m)));
+  // Existencias que cambian cuando una orden o un proyecto usa/devuelve material (lo hace la base
+  // de datos): se vuelven a leer el almacén técnico y, si aplica, Productos.
+  const reloadInventory = async () => {
+    const [mats, ps, prods] = await Promise.all([
+      fetchAllRows(() => supabase.from("inventory_materials").select("*").eq("company_id", companyId).order("name")),
+      techUsesProducts ? fetchAllRows(() => supabase.from("product_stock").select("product_id, branch_id, quantity").eq("company_id", companyId)) : Promise.resolve({ data: null, error: true }),
+      techUsesProducts ? fetchAllRows(() => supabase.from("products").select("*").eq("company_id", companyId).order("name")) : Promise.resolve({ data: null, error: true }),
+    ]);
+    if (!mats.error) setMaterials(mats.data || []);
+    if (!ps.error) setProductStock(ps.data || []);
+    if (!prods.error) setProducts(prods.data || []);
   };
+  // Sobrante: lo que quedó de un producto usado (sin costo, no regresa a Productos)
+  const registerLeftover = async (payload) => {
+    const { data, error } = await supabase.from("inventory_materials").insert({ ...payload, kind: "sobrante", company_id: companyId }).select().single();
+    if (error) { setErrorMsg(error.message); window.alert(error.message); return false; }
+    setMaterials((prev) => [data, ...prev]);
+    return true;
+  };
+  const defaultBranchId = useMemo(() => {
+    const sorted = branches.slice().sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")) || String(a.name || "").localeCompare(String(b.name || "")));
+    return sorted[0]?.id || null;
+  }, [branches]);
 
   // ---- Proyectos ----
   const saveProject = async (payload) => {
@@ -2189,30 +2206,25 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (error) { setErrorMsg(error.message); return; }
     setSalesOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
   };
-  const addProjectMaterial = async (projectId, materialId, quantity, notes) => {
-    const mat = materials.find((m) => m.id === materialId);
-    if (!mat) return;
-    const qty = Number(quantity || 0);
+  // pickId: "p:<producto>" o "m:<material del almacén técnico>". La base descuenta y devuelve.
+  const addProjectMaterial = async (projectId, pickId, quantity, notes) => {
+    const qty = Number(String(quantity || "").replace(",", "."));
     if (!qty || qty <= 0) { setErrorMsg("La cantidad debe ser mayor a cero."); return; }
-    if (qty > Number(mat.quantity || 0)) { setErrorMsg("No hay suficiente cantidad disponible en el almacén."); return; }
+    const cols = pickId.startsWith("p:") ? { product_id: pickId.slice(2) } : { material_id: pickId.slice(2) };
     setSaving(true);
-    const { data, error } = await supabase.from("project_materials").insert({ company_id: companyId, project_id: projectId, material_id: materialId, quantity: qty, notes: (notes || "").trim() || null }).select().single();
-    if (error) { setSaving(false); setErrorMsg(error.message); return; }
-    await consumeMaterialStock(materialId, qty);
+    const { data, error } = await supabase.from("project_materials").insert({ company_id: companyId, project_id: projectId, quantity: qty, notes: (notes || "").trim() || null, ...cols }).select().single();
     setSaving(false);
+    if (error) { setErrorMsg(error.message); window.alert(error.message); return; }
     setProjectMaterials((prev) => [data, ...prev]);
+    reloadInventory();
   };
+  // Devolver todo (se quita el renglón) o parte (baja la cantidad)
   const removeProjectMaterial = async (pm) => {
-    if (!window.confirm("¿Quitar este material del proyecto? La cantidad regresará al almacén.")) return;
-    const { error } = await supabase.from("project_materials").delete().eq("id", pm.id);
-    if (error) { setErrorMsg(error.message); return; }
-    const mat = materials.find((m) => m.id === pm.material_id);
-    if (mat) {
-      const newQty = Number(mat.quantity || 0) + Number(pm.quantity || 0);
-      const { data, error: matError } = await supabase.from("inventory_materials").update({ quantity: newQty }).eq("id", mat.id).select().single();
-      if (!matError && data) setMaterials((prev) => prev.map((m) => (m.id === data.id ? data : m)));
-    }
-    setProjectMaterials((prev) => prev.filter((p) => p.id !== pm.id));
+    const res = await returnMaterialLine("project_materials", pm);
+    if (!res) return;
+    if (res.removed) setProjectMaterials((prev) => prev.filter((p) => p.id !== pm.id));
+    else setProjectMaterials((prev) => prev.map((p) => (p.id === pm.id ? res.updated : p)));
+    reloadInventory();
   };
 
   // ---- Catálogo de cuentas ----
@@ -4281,7 +4293,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("materials") && view === "materials" && (
-            <VistaMaterials branchName={branchName} canDelete={canDelete} canEdit={canEdit} deleteMaterial={deleteMaterial} lowStockMaterials={lowStockMaterials} materials={materials} materialsLowStockOnly={materialsLowStockOnly} setEditingMaterial={setEditingMaterial} setMaterialsLowStockOnly={setMaterialsLowStockOnly} setShowAddMaterial={setShowAddMaterial} />
+            <VistaMaterials branchName={branchName} canDelete={canDelete} canEdit={canEdit} deleteMaterial={deleteMaterial} lowStockMaterials={lowStockMaterials} materials={materials} materialsLowStockOnly={materialsLowStockOnly} setEditingMaterial={setEditingMaterial} setMaterialsLowStockOnly={setMaterialsLowStockOnly} setShowAddMaterial={setShowAddMaterial} techUsesProducts={techUsesProducts} products={products} productStock={productStock} branches={branches} orders={orders} projects={projects} />
           )}
 
           {!loadingScope && hasPerm("maintenanceSchedule") && view === "maintenanceSchedule" && (
@@ -4469,7 +4481,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           extraTechnicianRows={orderTechnicians.filter((wt) => wt.work_order_id === detailOrder.id)}
           onUpdateTechnicianHours={updateOrderTechnicianHours}
           materials={materials}
-          onConsumeMaterial={consumeMaterialStock}
+          onInventoryChanged={reloadInventory}
+          onRegisterLeftover={registerLeftover}
+          techUsesProducts={techUsesProducts}
+          products={products}
+          productStock={productStock}
+          defaultBranchId={defaultBranchId}
           canManageWarehouse={canManage}
           onAddPhoto={addOrderPhoto}
           onDeletePhoto={deleteDetailAttachment}
@@ -4515,6 +4532,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           allProducts={products}
           branches={branches}
           restrictToBranchIds={!isAdmin && profile.branch_id ? [profile.branch_id, ...(profile.extra_branch_ids || [])] : null}
+          showTechFlag={techUsesProducts}
           defaultItemType={view === "services" ? "servicio" : "producto"}
           onClose={() => setShowAddProduct(false)}
           onSave={saveProduct}
@@ -4529,6 +4547,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           allProducts={products}
           branches={branches}
           restrictToBranchIds={!isAdmin && profile.branch_id ? [profile.branch_id, ...(profile.extra_branch_ids || [])] : null}
+          showTechFlag={techUsesProducts}
           onClose={() => setEditingProduct(null)}
           onSave={saveProduct}
           saving={saving}
@@ -4543,8 +4562,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {showAddToolList && <ToolListFormModal tools={tools} technicians={technicians} onClose={() => setShowAddToolList(false)} onSave={saveToolList} saving={saving} />}
       {editingToolList && <ToolListFormModal tools={tools} technicians={technicians} initial={editingToolList} onClose={() => setEditingToolList(null)} onSave={saveToolList} saving={saving} />}
       {showBulkTools && <BulkToolFormModal branches={branches} technicians={technicians} onClose={() => setShowBulkTools(false)} onSave={createBulkTools} saving={saving} />}
-      {showAddMaterial && <MaterialFormModal branches={branches} onClose={() => setShowAddMaterial(false)} onSave={saveMaterial} saving={saving} />}
-      {editingMaterial && <MaterialFormModal branches={branches} initial={editingMaterial} onClose={() => setEditingMaterial(null)} onSave={saveMaterial} saving={saving} />}
+      {showAddMaterial && <MaterialFormModal branches={branches} leftoverMode={techUsesProducts} onClose={() => setShowAddMaterial(false)} onSave={saveMaterial} saving={saving} />}
+      {editingMaterial && <MaterialFormModal branches={branches} leftoverMode={techUsesProducts} initial={editingMaterial} onClose={() => setEditingMaterial(null)} onSave={saveMaterial} saving={saving} />}
       {showAddProject && <ProjectFormModal branches={branches} clients={clients} technicians={technicians} onClose={() => setShowAddProject(false)} onSave={saveProject} saving={saving} />}
       {editingProject && (
         <ProjectFormModal
@@ -4567,6 +4586,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onUnlinkSalesOrder={unlinkSalesOrderFromProject}
           onAddMaterial={addProjectMaterial}
           onRemoveMaterial={removeProjectMaterial}
+          techUsesProducts={techUsesProducts}
+          products={products}
+          productStock={productStock}
+          defaultBranchId={defaultBranchId}
+          onRegisterLeftover={registerLeftover}
         />
       )}
       {showAddAccount && <AccountFormModal onClose={() => setShowAddAccount(false)} onSave={saveAccount} saving={saving} />}

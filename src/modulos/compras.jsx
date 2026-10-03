@@ -12,6 +12,8 @@ export const STOCK_KIND_LABELS = {
   inicial: "Stock inicial", compra: "Compra", nota_entrega: "Nota de entrega", venta: "Venta", anulacion: "Anulación de factura",
   transferencia_salida: "Transferencia (salida)", transferencia_entrada: "Transferencia (entrada)", ajuste: "Ajuste",
   eliminacion_compra: "Compra eliminada", eliminacion_nota_entrega: "Nota de entrega eliminada",
+  consumo_ot: "Consumo en orden de trabajo", devolucion_ot: "Devolución de orden de trabajo",
+  consumo_proyecto: "Consumo en proyecto", devolucion_proyecto: "Devolución de proyecto",
 };
 export const STOCK_ADJUST_REASONS = ["Conteo físico", "Merma", "Daño o vencimiento", "Consumo interno", "Corrección de error", "Otro"];
 export const stockableProducts = (products) => (products || []).filter((p) => (p.item_type || "producto") !== "servicio" && !p.is_composite);
@@ -176,7 +178,7 @@ export function StockMovementsModal({ product, branches, onClose }) {
   );
 }
 
-export function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, branches, restrictToBranchIds, onClose, onSave, saving }) {
+export function ProductFormModal({ initial, existingProducts, allProducts, initialComponents, defaultItemType, branches, restrictToBranchIds, showTechFlag, onClose, onSave, saving }) {
   const [itemType, setItemType] = useState(initial?.item_type || defaultItemType || "producto");
   const [sku, setSku] = useState(initial?.sku || "");
   const [skuManual, setSkuManual] = useState(!!initial?.sku);
@@ -194,6 +196,8 @@ export function ProductFormModal({ initial, existingProducts, allProducts, initi
   const [branchId, setBranchId] = useState(initial?.branch_id || (restrictToBranchIds && restrictToBranchIds[0]) || "");
   const [isTaxable, setIsTaxable] = useState(initial?.is_taxable ?? true);
   const [isComposite, setIsComposite] = useState(initial?.is_composite ?? false);
+  // Empresas con técnico + comercial: el técnico solo ve/usa los productos marcados
+  const [techAvailable, setTechAvailable] = useState(!!initial?.tech_available);
   const [components, setComponents] = useState(() => (initialComponents || []).map((c) => ({ component_product_id: c.component_product_id, quantity: c.quantity })));
   const [newComponentId, setNewComponentId] = useState("");
   const [newComponentQty, setNewComponentQty] = useState(1);
@@ -281,6 +285,7 @@ export function ProductFormModal({ initial, existingProducts, allProducts, initi
       branch_id: isService ? null : (branchId || null),
       is_taxable: isTaxable,
       is_composite: isComposite,
+      ...(showTechFlag ? { tech_available: !isService && !isComposite && techAvailable } : {}),
     }, components, {
       // Stock inicial (solo al crear): entra a la sucursal del producto o a la principal
       initialStock: (!initial && !isService && !isComposite) ? (Number(stockQty) || 0) : 0,
@@ -410,6 +415,15 @@ export function ProductFormModal({ initial, existingProducts, allProducts, initi
         <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} />
         Aplica ITBIS (18%) al facturar
       </label>
+      {showTechFlag && !isService && !isComposite && (
+        <label className="flex items-start gap-2 text-sm mb-3" style={{ color: C.text }}>
+          <input type="checkbox" className="mt-0.5" checked={techAvailable} onChange={(e) => setTechAvailable(e.target.checked)} />
+          <span>
+            Disponible para el Departamento Técnico
+            <span className="block text-xs" style={{ color: C.muted }}>Los técnicos podrán usarlo en órdenes de trabajo y proyectos; se descuenta de la existencia de la sucursal y queda en el kárdex.</span>
+          </span>
+        </label>
+      )}
       {initial && <ActivityHistorySection tableName="products" recordId={initial.id} title={isService ? "Historial de este servicio" : "Historial de este producto"} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>

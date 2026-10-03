@@ -837,6 +837,27 @@ export function listHtml(title, companyName, headers, rows) {
     <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
+// Condición de un sobrante del almacén técnico
+export const LEFTOVER_CONDITIONS = { incompleto: "Incompleto", usado: "Usado", recuperado: "Recuperado de equipo" };
+
+// Devolver todo o parte de un renglón: todo = se quita el renglón; parte = baja la cantidad.
+// La base devuelve la diferencia a su origen (Productos de esa sucursal o almacén técnico).
+export async function returnMaterialLine(table, line) {
+  const dest = line.product_id ? "Productos" : "el almacén técnico";
+  const input = window.prompt(`¿Cuánto devuelves a ${dest}?\n${line.name || "Material"}: ${Number(line.quantity).toLocaleString("es-DO")} ${line.unit || ""} en uso.\n(Si devuelves todo, el renglón se quita.)`, String(line.quantity));
+  if (input === null) return null;
+  const qty = Number(String(input).replace(",", "."));
+  if (!(qty > 0) || qty > Number(line.quantity)) { window.alert(`Escribe una cantidad entre 0 y ${Number(line.quantity).toLocaleString("es-DO")}.`); return null; }
+  if (qty === Number(line.quantity)) {
+    const { error } = await supabase.from(table).delete().eq("id", line.id);
+    if (error) { window.alert(error.message); return null; }
+    return { removed: true };
+  }
+  const { data, error } = await supabase.from(table).update({ quantity: Number(line.quantity) - qty }).eq("id", line.id).select().single();
+  if (error) { window.alert(error.message); return null; }
+  return { updated: data };
+}
+
 export const isRetentionMethod = (m) => /^Retención/.test(m || "");
 
 
