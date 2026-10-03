@@ -500,7 +500,7 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
 }
 
 // Pantalla: equipment
-export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
   // Imprime lo que se ve en pantalla (filtros aplicados) o, si hay equipos marcados, solo esos.
   const printEquipment = (mode) => {
     const list = selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered;
@@ -527,12 +527,13 @@ export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteE
                 </div>
                 <div className="flex gap-2 flex-wrap">
                   {equipmentFiltered.length > 0 && (
-                    <div className="flex items-center" style={{ border: `1px solid ${C.border}` }} title={selectedEquipment.size > 0 ? "Imprime solo los equipos seleccionados" : "Imprime los equipos que se ven con los filtros actuales"}>
-                      <span className="flex items-center gap-2 px-3 py-2 text-sm" style={{ color: C.muted }}><FileText size={14} /> Imprimir{selectedEquipment.size > 0 ? ` selección (${selectedEquipment.size})` : ""}:</span>
-                      <button onClick={() => printEquipment("operativos")} className="px-3 py-2 text-sm" style={{ color: C.green, borderLeft: `1px solid ${C.border}` }}>Operativos</button>
-                      <button onClick={() => printEquipment("fuera")} className="px-3 py-2 text-sm" style={{ color: C.red, borderLeft: `1px solid ${C.border}` }}>Fuera de servicio</button>
-                      <button onClick={() => printEquipment("todos")} className="px-3 py-2 text-sm font-semibold" style={{ color: C.text, borderLeft: `1px solid ${C.border}` }}>Todos</button>
-                    </div>
+                    <button
+                      onClick={() => printEquipment(equipmentStatusFilter === "operativo" ? "operativos" : equipmentStatusFilter === "fuera_servicio" ? "fuera" : "todos")}
+                      title="Abre la hoja para imprimir. En la ventana de impresión puedes elegir «Guardar como PDF»."
+                      className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
+                    >
+                      <FileText size={14} /> {selectedEquipment.size > 0 ? `Imprimir / PDF selección (${selectedEquipment.size})` : `Imprimir / PDF${equipmentStatusFilter === "operativo" ? " operativos" : equipmentStatusFilter === "fuera_servicio" ? " fuera de servicio" : ""}`}
+                    </button>
                   )}
                   <EquipmentExcelButtons
                     canUpload={canEdit("equipment") && branches.length > 0}
@@ -572,6 +573,11 @@ export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteE
                   <option value="all">Todos los técnicos</option>
                   <option value="none">Sin técnico asignado</option>
                   {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <select value={equipmentStatusFilter} onChange={(e) => setEquipmentStatusFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: equipmentStatusFilter === "fuera_servicio" ? C.red : equipmentStatusFilter === "operativo" ? C.green : C.text }}>
+                  <option value="all">Todos los estados</option>
+                  <option value="operativo">Operativos</option>
+                  <option value="fuera_servicio">Fuera de servicio</option>
                 </select>
                 <select value={equipmentTypeFilter} onChange={(e) => setEquipmentTypeFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
                   <option value="all">Todos los tipos</option>

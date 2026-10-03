@@ -157,6 +157,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [branchFilter, setBranchFilter] = useState("all");
   const [equipmentTechFilter, setEquipmentTechFilter] = useState("all");
   const [equipmentTypeFilter, setEquipmentTypeFilter] = useState("all");
+  const [equipmentStatusFilter, setEquipmentStatusFilter] = useState("all"); // all | operativo | fuera_servicio
   const [equipmentSearch, setEquipmentSearch] = useState("");
   const [selectedEquipment, setSelectedEquipment] = useState(new Set());
   const [calendarMonth, setCalendarMonth] = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() }; });
@@ -920,12 +921,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (equipmentTechFilter === "none" && e.default_technician_id) return false;
     if (equipmentTechFilter !== "all" && equipmentTechFilter !== "none" && e.default_technician_id !== equipmentTechFilter) return false;
     if (equipmentTypeFilter !== "all" && e.type !== equipmentTypeFilter) return false;
+    if (equipmentStatusFilter === "fuera_servicio" && e.operational_status !== "fuera_servicio") return false;
+    if (equipmentStatusFilter === "operativo" && e.operational_status === "fuera_servicio") return false;
     if (equipmentSearch) {
       const q = equipmentSearch.toLowerCase();
       if (![e.name, e.brand, e.model, e.serial_number].some((v) => (v || "").toLowerCase().includes(q))) return false;
     }
     return true;
-  }), [equipment, branchFilter, equipmentTechFilter, equipmentTypeFilter, equipmentSearch]);
+  }), [equipment, branchFilter, equipmentTechFilter, equipmentTypeFilter, equipmentStatusFilter, equipmentSearch]);
 
   const orderMatchesAgendaTech = (o, techId) => {
     if (techId === "all") return true;
@@ -4266,7 +4269,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("equipment") && view === "equipment" && (
-            <VistaEquipment branchFilter={branchFilter} branchName={branchName} branches={branches} bulkDeleteEquipment={bulkDeleteEquipment} canDelete={canDelete} canEdit={canEdit} companyId={companyId} companyName={companyName} deleteEquipment={deleteEquipment} equipment={equipment} equipmentFiltered={equipmentFiltered} equipmentSearch={equipmentSearch} equipmentTechFilter={equipmentTechFilter} equipmentTypeFilter={equipmentTypeFilter} equipmentTypes={equipmentTypes} locationName={locationName} locations={locations} orders={orders} selectedEquipment={selectedEquipment} setBranchFilter={setBranchFilter} setEditingEquipment={setEditingEquipment} setEquipment={setEquipment} setEquipmentSearch={setEquipmentSearch} setEquipmentTechFilter={setEquipmentTechFilter} setEquipmentTypeFilter={setEquipmentTypeFilter} setHistoryFor={setHistoryFor} setLocations={setLocations} setPendingLocationBranch={setPendingLocationBranch} setSelectedEquipment={setSelectedEquipment} setShowAddEquipment={setShowAddEquipment} setShowAddLocation={setShowAddLocation} technicians={technicians} />
+            <VistaEquipment branchFilter={branchFilter} branchName={branchName} branches={branches} bulkDeleteEquipment={bulkDeleteEquipment} canDelete={canDelete} canEdit={canEdit} companyId={companyId} companyName={companyName} deleteEquipment={deleteEquipment} equipment={equipment} equipmentFiltered={equipmentFiltered} equipmentSearch={equipmentSearch} equipmentStatusFilter={equipmentStatusFilter} equipmentTechFilter={equipmentTechFilter} equipmentTypeFilter={equipmentTypeFilter} equipmentTypes={equipmentTypes} locationName={locationName} locations={locations} orders={orders} selectedEquipment={selectedEquipment} setBranchFilter={setBranchFilter} setEditingEquipment={setEditingEquipment} setEquipment={setEquipment} setEquipmentSearch={setEquipmentSearch} setEquipmentStatusFilter={setEquipmentStatusFilter} setEquipmentTechFilter={setEquipmentTechFilter} setEquipmentTypeFilter={setEquipmentTypeFilter} setHistoryFor={setHistoryFor} setLocations={setLocations} setPendingLocationBranch={setPendingLocationBranch} setSelectedEquipment={setSelectedEquipment} setShowAddEquipment={setShowAddEquipment} setShowAddLocation={setShowAddLocation} technicians={technicians} />
           )}
 
           {!loadingScope && hasPerm("technicians") && view === "technicians" && (
