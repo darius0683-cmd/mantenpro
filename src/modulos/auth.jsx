@@ -131,7 +131,7 @@ export function AuthScreen({ inviteInfo }) {
 // ---------------------------------------------------------------------------
 // Pantalla de bienvenida: crear la empresa la primera vez (sin invitación)
 // ---------------------------------------------------------------------------
-export function OnboardingScreen({ userId, userEmail, onDone }) {
+export function OnboardingScreen({ onDone }) {
   const [companyName, setCompanyName] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
@@ -141,15 +141,15 @@ export function OnboardingScreen({ userId, userEmail, onDone }) {
     if (!companyName.trim()) { setError("Escribe el nombre de tu empresa."); return; }
     setLoading(true);
     setError("");
-    const { data: company, error: companyError } = await supabase
-      .from("companies").insert({ name: companyName.trim() }).select().single();
-    if (companyError) { setLoading(false); setError(companyError.message); return; }
-
-    const { error: profileError } = await supabase.from("profiles").insert({
-      id: userId, company_id: company.id, full_name: fullName.trim() || null, role: "admin", email: userEmail,
+    // create_company_with_admin crea la empresa y tu perfil de administrador en un solo
+    // paso del lado del servidor (todo o nada). Antes eran dos inserts desde aquí y el
+    // primero fallaba por RLS: la empresa recién creada no se podía leer de vuelta porque
+    // el usuario todavía no tenía perfil.
+    const { error: createError } = await supabase.rpc("create_company_with_admin", {
+      p_company_name: companyName.trim(), p_full_name: fullName.trim() || null,
     });
     setLoading(false);
-    if (profileError) { setError(profileError.message); return; }
+    if (createError) { setError(createError.message); return; }
     onDone();
   };
 
