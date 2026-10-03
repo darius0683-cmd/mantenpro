@@ -465,13 +465,74 @@ export function VistaProjects({ branchName, canEdit, clients, orders, projectMat
   );
 }
 
+// ---- Impresión de la lista de equipos (operativos, fuera de servicio o todos) ----
+const escHtml = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const isOutOfService = (eq) => eq.operational_status === "fuera_servicio";
+
+function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, locationName, techLabel }) {
+  const operativos = list.filter((e) => !isOutOfService(e));
+  const fuera = list.filter(isOutOfService);
+  const byName = (a, b) => (a.name || "").localeCompare(b.name || "", "es");
+  const headers = ["#", "Equipo", "Tipo", "Marca", "Modelo", "Serie", "Ubicación", "Sucursal", "Técnico", "Estado"];
+  const table = (rows) => {
+    if (rows.length === 0) return `<div class="muted" style="margin-top:8px">No hay equipos en esta lista.</div>`;
+    const body = rows.slice().sort(byName).map((e, i) => [
+      i + 1, e.name, e.type, e.brand, e.model, e.serial_number, locationName(e.location_id), branchName(e.branch_id), techLabel(e.default_technician_id),
+      isOutOfService(e) ? "Fuera de servicio" : "Operativo",
+    ].map((c) => `<td>${c === null || c === undefined || c === "" ? "—" : escHtml(c)}</td>`).join(""));
+    return `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r}</tr>`).join("")}</tbody></table>`;
+  };
+  const title = mode === "operativos" ? "Equipos operativos" : mode === "fuera" ? "Equipos fuera de servicio" : "Listado de equipos";
+  const summary = `<div style="display:flex;gap:24px;margin-top:6px;font-size:13px">
+      <div>Operativos: <b>${operativos.length}</b></div>
+      <div>Fuera de servicio: <b>${fuera.length}</b></div>
+      <div>Total: <b>${list.length}</b></div>
+    </div>`;
+  let body;
+  if (mode === "operativos") body = table(operativos);
+  else if (mode === "fuera") body = table(fuera);
+  else body = `<h2 style="font-size:15px;margin:18px 0 0">Operativos (${operativos.length})</h2>${table(operativos)}
+    <h2 style="font-size:15px;margin:22px 0 0">Fuera de servicio (${fuera.length})</h2>${table(fuera)}
+    <div style="margin-top:14px;font-weight:bold;text-align:right">Total de equipos: ${list.length}</div>`;
+  return `<div class="header-row"><div><h1>${escHtml(companyName)}</h1><div class="muted">${title}</div>${filtersNote ? `<div class="muted">${escHtml(filtersNote)}</div>` : ""}</div><div class="muted">${new Date().toLocaleDateString("es-DO")}</div></div>
+    ${mode === "todos" ? summary : ""}${body}`;
+}
+
 // Pantalla: equipment
-export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipmentSearch, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipmentSearch, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+  // Imprime lo que se ve en pantalla (filtros aplicados) o, si hay equipos marcados, solo esos.
+  const printEquipment = (mode) => {
+    const list = selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered;
+    const notes = [];
+    if (selectedEquipment.size > 0) notes.push(list.length === 1 ? "Solo el equipo seleccionado" : `Solo los ${list.length} equipos seleccionados`);
+    if (branchFilter !== "all") notes.push(`Sucursal: ${branchName(branchFilter)}`);
+    if (equipmentTechFilter === "none") notes.push("Técnico: sin asignar");
+    else if (equipmentTechFilter !== "all") notes.push(`Técnico: ${technicians.find((t) => t.id === equipmentTechFilter)?.name || "—"}`);
+    if (equipmentTypeFilter !== "all") notes.push(`Tipo: ${equipmentTypeFilter}`);
+    if (equipmentSearch.trim()) notes.push(`Búsqueda: "${equipmentSearch.trim()}"`);
+    const techLabel = (id) => (id ? (technicians.find((t) => t.id === id)?.name || "—") : "Sin asignar");
+    const title = mode === "operativos" ? "Equipos operativos" : mode === "fuera" ? "Equipos fuera de servicio" : "Equipos";
+    printDocument(title, equipmentPrintHtml({ mode, list, companyName, filtersNote: notes.join(" · "), branchName, locationName, techLabel }));
+  };
+  const opCount = equipmentFiltered.filter((e) => !isOutOfService(e)).length;
+  const outCount = equipmentFiltered.length - opCount;
+
   return (
           <div>
-              <div className="flex justify-between items-center mb-4">
-                <div className="text-sm" style={{ color: C.muted }}>{equipmentFiltered.length}{equipmentFiltered.length !== equipment.length ? ` de ${equipment.length}` : ""} equipos{selectedEquipment.size > 0 ? ` · ${selectedEquipment.size} seleccionados` : ""}</div>
-                <div className="flex gap-2">
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div className="text-sm" style={{ color: C.muted }}>
+                  {equipmentFiltered.length}{equipmentFiltered.length !== equipment.length ? ` de ${equipment.length}` : ""} equipos{selectedEquipment.size > 0 ? ` · ${selectedEquipment.size} seleccionados` : ""}
+                  {equipmentFiltered.length > 0 && <span> · <span style={{ color: C.green }}>{opCount} operativo{opCount !== 1 ? "s" : ""}</span> · <span style={{ color: outCount > 0 ? C.red : C.muted }}>{outCount} fuera de servicio</span></span>}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {equipmentFiltered.length > 0 && (
+                    <div className="flex items-center" style={{ border: `1px solid ${C.border}` }} title={selectedEquipment.size > 0 ? "Imprime solo los equipos seleccionados" : "Imprime los equipos que se ven con los filtros actuales"}>
+                      <span className="flex items-center gap-2 px-3 py-2 text-sm" style={{ color: C.muted }}><FileText size={14} /> Imprimir{selectedEquipment.size > 0 ? ` selección (${selectedEquipment.size})` : ""}:</span>
+                      <button onClick={() => printEquipment("operativos")} className="px-3 py-2 text-sm" style={{ color: C.green, borderLeft: `1px solid ${C.border}` }}>Operativos</button>
+                      <button onClick={() => printEquipment("fuera")} className="px-3 py-2 text-sm" style={{ color: C.red, borderLeft: `1px solid ${C.border}` }}>Fuera de servicio</button>
+                      <button onClick={() => printEquipment("todos")} className="px-3 py-2 text-sm font-semibold" style={{ color: C.text, borderLeft: `1px solid ${C.border}` }}>Todos</button>
+                    </div>
+                  )}
                   {canDelete("equipment") && selectedEquipment.size > 0 && (
                     <button onClick={() => bulkDeleteEquipment(Array.from(selectedEquipment))} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#fff" }}>
                       <Trash2 size={14} /> Eliminar seleccionados ({selectedEquipment.size})
