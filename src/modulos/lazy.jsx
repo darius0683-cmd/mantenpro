@@ -10,6 +10,11 @@
 import React, { lazy, Suspense } from "react";
 
 const IMPORTERS = {
+  "vistas-admin": () => import("./vistas-admin.jsx"),
+  "vistas-compras": () => import("./vistas-compras.jsx"),
+  "vistas-contable": () => import("./vistas-contable.jsx"),
+  "vistas-tecnico": () => import("./vistas-tecnico.jsx"),
+  "vistas-ventas": () => import("./vistas-ventas.jsx"),
   admin: () => import("./admin.jsx"),
   compras: () => import("./compras.jsx"),
   nomina: () => import("./nomina.jsx"),
@@ -134,6 +139,56 @@ export const SalesOrderDetailModal = lazyComponent("ventas", "SalesOrderDetailMo
 export const StatementModal = lazyComponent("ventas", "StatementModal");
 export const VoidInvoiceModal = lazyComponent("ventas", "VoidInvoiceModal");
 
+// vistas-admin
+export const VistaUsers = lazyComponent("vistas-admin", "VistaUsers");
+export const VistaActivityLog = lazyComponent("vistas-admin", "VistaActivityLog");
+
+// vistas-compras
+export const VistaProductsServices = lazyComponent("vistas-compras", "VistaProductsServices");
+export const VistaSuppliers = lazyComponent("vistas-compras", "VistaSuppliers");
+export const VistaPurchases = lazyComponent("vistas-compras", "VistaPurchases");
+export const VistaPurchaseOrders = lazyComponent("vistas-compras", "VistaPurchaseOrders");
+export const VistaDeliveryNotes = lazyComponent("vistas-compras", "VistaDeliveryNotes");
+export const VistaOtherExpenses = lazyComponent("vistas-compras", "VistaOtherExpenses");
+export const VistaSupplierReceipts = lazyComponent("vistas-compras", "VistaSupplierReceipts");
+export const VistaPurchaseLedger = lazyComponent("vistas-compras", "VistaPurchaseLedger");
+export const VistaPayables = lazyComponent("vistas-compras", "VistaPayables");
+
+// vistas-contable
+export const VistaChartOfAccounts = lazyComponent("vistas-contable", "VistaChartOfAccounts");
+export const VistaTaxRates = lazyComponent("vistas-contable", "VistaTaxRates");
+export const VistaFiscalReports = lazyComponent("vistas-contable", "VistaFiscalReports");
+export const VistaFinancialReports = lazyComponent("vistas-contable", "VistaFinancialReports");
+export const VistaBankReconciliation = lazyComponent("vistas-contable", "VistaBankReconciliation");
+export const VistaNcf = lazyComponent("vistas-contable", "VistaNcf");
+export const VistaDgiiCatalog = lazyComponent("vistas-contable", "VistaDgiiCatalog");
+
+// vistas-tecnico
+export const VistaAgenda = lazyComponent("vistas-tecnico", "VistaAgenda");
+export const VistaOrders = lazyComponent("vistas-tecnico", "VistaOrders");
+export const VistaIncidents = lazyComponent("vistas-tecnico", "VistaIncidents");
+export const VistaProjects = lazyComponent("vistas-tecnico", "VistaProjects");
+export const VistaEquipment = lazyComponent("vistas-tecnico", "VistaEquipment");
+export const VistaTechnicians = lazyComponent("vistas-tecnico", "VistaTechnicians");
+export const VistaTools = lazyComponent("vistas-tecnico", "VistaTools");
+export const VistaMaterials = lazyComponent("vistas-tecnico", "VistaMaterials");
+export const VistaMaintenanceSchedule = lazyComponent("vistas-tecnico", "VistaMaintenanceSchedule");
+export const VistaBranches = lazyComponent("vistas-tecnico", "VistaBranches");
+export const VistaWarranty = lazyComponent("vistas-tecnico", "VistaWarranty");
+export const VistaChecklists = lazyComponent("vistas-tecnico", "VistaChecklists");
+export const VistaReports = lazyComponent("vistas-tecnico", "VistaReports");
+
+// vistas-ventas
+export const VistaClients = lazyComponent("vistas-ventas", "VistaClients");
+export const VistaSalesReports = lazyComponent("vistas-ventas", "VistaSalesReports");
+export const VistaReceivables = lazyComponent("vistas-ventas", "VistaReceivables");
+export const VistaQuotes = lazyComponent("vistas-ventas", "VistaQuotes");
+export const VistaSalesOrders = lazyComponent("vistas-ventas", "VistaSalesOrders");
+export const VistaInvoices = lazyComponent("vistas-ventas", "VistaInvoices");
+export const VistaCaja = lazyComponent("vistas-ventas", "VistaCaja");
+export const VistaCreditNotes = lazyComponent("vistas-ventas", "VistaCreditNotes");
+export const VistaRecurringContracts = lazyComponent("vistas-ventas", "VistaRecurringContracts");
+
 // Qué archivo necesita cada sección del menú (para precargar en segundo plano).
 const CHUNK_OF_VIEW = {
   agenda: "tecnico",
@@ -176,8 +231,53 @@ const CHUNK_OF_VIEW = {
   payroll: "nomina"
 };
 
+// Archivo con la pantalla de cada sección (fase 2).
+const VIEW_CHUNK_OF_VIEW = {
+  agenda: "vistas-tecnico",
+  orders: "vistas-tecnico",
+  incidents: "vistas-tecnico",
+  projects: "vistas-tecnico",
+  equipment: "vistas-tecnico",
+  technicians: "vistas-tecnico",
+  tools: "vistas-tecnico",
+  materials: "vistas-tecnico",
+  maintenanceSchedule: "vistas-tecnico",
+  branches: "vistas-tecnico",
+  warranty: "vistas-tecnico",
+  checklists: "vistas-tecnico",
+  reports: "vistas-tecnico",
+  clients: "vistas-ventas",
+  products: "vistas-compras",
+  services: "vistas-compras",
+  suppliers: "vistas-compras",
+  purchases: "vistas-compras",
+  purchaseOrders: "vistas-compras",
+  deliveryNotes: "vistas-compras",
+  otherExpenses: "vistas-compras",
+  chartOfAccounts: "vistas-contable",
+  taxRates: "vistas-contable",
+  fiscalReports: "vistas-contable",
+  salesReports: "vistas-ventas",
+  financialReports: "vistas-contable",
+  bankReconciliation: "vistas-contable",
+  supplierReceipts: "vistas-compras",
+  purchaseLedger: "vistas-compras",
+  receivables: "vistas-ventas",
+  payables: "vistas-compras",
+  ncf: "vistas-contable",
+  dgiiCatalog: "vistas-contable",
+  quotes: "vistas-ventas",
+  salesOrders: "vistas-ventas",
+  invoices: "vistas-ventas",
+  caja: "vistas-ventas",
+  creditNotes: "vistas-ventas",
+  recurringContracts: "vistas-ventas",
+  users: "vistas-admin",
+  activityLog: "vistas-admin"
+};
+
 // Precarga silenciosa: si falla (sin internet), no recarga ni avisa; se reintenta al usar la sección.
 export function prefetchForViews(viewKeys) {
-  const chunks = new Set((viewKeys || []).map((k) => CHUNK_OF_VIEW[k]).filter(Boolean));
+  const chunks = new Set((viewKeys || []).flatMap((k) => [CHUNK_OF_VIEW[k], VIEW_CHUNK_OF_VIEW[k]]).filter(Boolean));
   chunks.forEach((f) => { IMPORTERS[f]().catch(() => {}); });
 }
