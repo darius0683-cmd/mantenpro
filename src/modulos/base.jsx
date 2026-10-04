@@ -199,7 +199,7 @@ export const techWorksAtBranch = (t, branchId) => t.branch_id === branchId || (t
 
 export const ROLE_DEFAULT_PERMISSIONS = {
   supervisor: {
-    ...Object.fromEntries(["dashboard", "agenda", "orders", "projects", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),
+    ...Object.fromEntries(["dashboard", "agenda", "orders", "projects", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "serviceContracts", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),
     activityLog: "view",
   },
   vendedor: { dashboard: "edit", agenda: "edit", orders: "edit", quotes: "edit", invoices: "edit", caja: "edit" },
@@ -221,6 +221,7 @@ export const PERMISSION_CATALOG = [
     { key: "tools", label: "Herramientas" },
     { key: "materials", label: "Almacén" },
     { key: "maintenanceSchedule", label: "Mantenimiento programado" },
+    { key: "serviceContracts", label: "Contratos de servicio (SLA)" },
   ] },
   { section: "Catálogo", items: [
     { key: "clients", label: "Clientes" },

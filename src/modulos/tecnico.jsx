@@ -6,6 +6,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { ImageIcon, FileText, X, Plus, Pencil, Trash2, CheckCircle2, Unlink, Link2, Upload, Layers, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { OrderVisitsSection } from "./visitas.jsx";
+import { SlaDetail } from "./sla.jsx";
 import { getOrderDetails, hasPendingFor, isNetworkError, isOnline, newId, patchOrderDetails, perform, useOfflineState } from "./offline.jsx";
 import { ActivityHistorySection, C, Field, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 
@@ -1572,7 +1573,7 @@ export function IncidentFormModal({ branches, equipment, clients, technicians, i
   );
 }
 
-export function IncidentDetailModal({ incident, branchName, equipName, clientName, techName, technicians, orders, quotes, canEdit, canDelete, isTecnico, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete, onSaveProgress, onComplete, onEdit, onAssignTechnician, onReopen }) {
+export function IncidentDetailModal({ contractLabel, incident, branchName, equipName, clientName, techName, technicians, orders, quotes, canEdit, canDelete, isTecnico, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete, onSaveProgress, onComplete, onEdit, onAssignTechnician, onReopen }) {
   const s = INCIDENT_STATUS_CFG[incident.status] || INCIDENT_STATUS_CFG.abierto;
   const p = PRIORITY_CFG[incident.priority] || PRIORITY_CFG.media;
   const linkedOrder = incident.work_order_id ? orders.find((o) => o.id === incident.work_order_id) : null;
@@ -1633,6 +1634,7 @@ export function IncidentDetailModal({ incident, branchName, equipName, clientNam
         </div>
       </div>
 
+      <SlaDetail incident={incident} contractLabel={contractLabel} />
       {(incident.attended_at || incident.completed_at) && (
         <div className="flex gap-4 text-xs mb-4" style={{ color: C.muted }}>
           {incident.attended_at && <div>Atendido en <span style={{ color: C.text }}>{((new Date(incident.attended_at) - new Date(incident.created_at)) / 3600000).toFixed(1)} h</span></div>}
@@ -2040,7 +2042,7 @@ export function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave, hi
   );
 }
 
-export function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist, myTechnicianId, canManageVisits, onOrderStatusChange, onVisitsChanged }) {
+export function OrderDetailModal({ contractLabel, order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist, myTechnicianId, canManageVisits, onOrderStatusChange, onVisitsChanged }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [uploadingStage, setUploadingStage] = useState(null);
@@ -2248,6 +2250,15 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
         <Pill label={p.label} color={p.color} />
         <Pill label={s.label} color={s.color} />
       </div>
+      {order.service_contract_id && (
+        <div className="text-xs mb-3 px-3 py-2" style={{ background: C.panelAlt, color: order.contract_coverage === "fuera" ? C.red : C.blue }}>
+          {order.contract_coverage === "fuera"
+            ? `Fuera de contrato: el cliente tiene el contrato ${contractLabel || ""}, pero los correctivos no están incluidos (se cobran aparte).`
+            : order.contract_coverage === "emergencia"
+              ? `Emergencia del contrato ${contractLabel || ""}: salió de una avería y cuenta para su SLA.`
+              : `Incluida en el contrato de servicio ${contractLabel || ""}.`}
+        </div>
+      )}
       {!offlineState.online && (
         <div className="text-xs mb-3 px-3 py-2" style={{ background: C.orange + "22", color: C.orange }}>
           Sin señal: lo que hagas en esta orden se guarda en el teléfono y se envía solo cuando vuelva la conexión. Las fotos que ya estaban enviadas se ven cuando haya señal.

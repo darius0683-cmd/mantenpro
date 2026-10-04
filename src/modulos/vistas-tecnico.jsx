@@ -7,6 +7,7 @@ import { C, Dot, Field, INCIDENT_STATUS_CFG, KpiCard, LEFTOVER_CONDITIONS, PRIOR
 import { TechnicianToolRow, ToolListCard, UsageQuickUpdate } from "./lazy.jsx";
 import { EquipmentExcelButtons } from "./equipos-excel.jsx";
 import { printEquipmentQrLabels } from "./equipos-qr.jsx";
+import { SlaBadge } from "./sla.jsx";
 import { AlertTriangle, Ban, Boxes, Building2, Clock, ChevronLeft, ChevronRight, ClipboardList, FileText, History, Layers, MapPin, Paperclip, Pencil, Plus, QrCode, RotateCcw, Search, Trash2, Upload, UserCheck, X } from "lucide-react";
 import { Bar, BarChart, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
@@ -164,7 +165,7 @@ export function VistaAgenda({ agendaTechFilter, agendaViewMode, agendaWeekAnchor
 }
 
 // Pantalla: orders
-export function VistaOrders({ onSiteOrderIds, branchName, canDelete, canEdit, canManage, companyName, deleteOrder, equipName, equipment, filteredOrders, isTecnico, openEditOrder, openOrderDetail, orderAttachmentIds, orderDateFrom, orderDateTo, orderEquipmentFilter, orderTechnicians, orders, search, selectedOrders, setOrderDateFrom, setOrderDateTo, setOrderEquipmentFilter, setOrderStatus, setSearch, setSelectedOrders, setStatusFilter, setTechnicianFilter, setTypeFilter, statusFilter, techName, technicianFilter, technicians, todayStr, typeFilter }) {
+export function VistaOrders({ contractCodeOf, onSiteOrderIds, branchName, canDelete, canEdit, canManage, companyName, deleteOrder, equipName, equipment, filteredOrders, isTecnico, openEditOrder, openOrderDetail, orderAttachmentIds, orderDateFrom, orderDateTo, orderEquipmentFilter, orderTechnicians, orders, search, selectedOrders, setOrderDateFrom, setOrderDateTo, setOrderEquipmentFilter, setOrderStatus, setSearch, setSelectedOrders, setStatusFilter, setTechnicianFilter, setTypeFilter, statusFilter, techName, technicianFilter, technicians, todayStr, typeFilter }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-3">
@@ -245,7 +246,15 @@ export function VistaOrders({ onSiteOrderIds, branchName, canDelete, canEdit, ca
                         </div>
                         <Pill label={t.label} color={t.color} />
                       </div>
-                      <div className="text-xs mb-3" style={{ color: C.muted }}>{equipName(o.equipment_id)}</div>
+                      <div className="text-xs mb-3 flex items-center justify-between gap-2" style={{ color: C.muted }}>
+                        <span className="truncate">{equipName(o.equipment_id)}</span>
+                        {o.service_contract_id && (() => {
+                          const code = contractCodeOf ? contractCodeOf(o.service_contract_id) : "";
+                          const [label, color] = o.contract_coverage === "fuera" ? ["Fuera de contrato", C.red]
+                            : o.contract_coverage === "emergencia" ? [`Emergencia ${code}`, C.orange] : [`Contrato ${code}`, C.blue];
+                          return <span className="flex-shrink-0 px-1.5 py-0.5 text-[11px] font-semibold" style={{ color, border: `1px solid ${color}60` }}>{label}</span>;
+                        })()}
+                      </div>
                       <div className="grid grid-cols-2 gap-2 text-xs mb-3" style={{ color: C.muted }}>
                         <div>Sucursal<br /><span style={{ color: C.text }}>{branchName(o.branch_id)}</span></div>
                         <div>
@@ -315,7 +324,7 @@ export function VistaOrders({ onSiteOrderIds, branchName, canDelete, canEdit, ca
 }
 
 // Pantalla: incidents
-export function VistaIncidents({ branchName, canReportIncident, clients, companyName, equipment, incidentCompletedFrom, incidentCompletedTo, incidentDateFrom, incidentDateTo, incidentEquipmentFilter, incidentTechnicianFilter, incidentsFiltered, isTecnico, selectedIncidents, setIncidentCompletedFrom, setIncidentCompletedTo, setIncidentDateFrom, setIncidentDateTo, setIncidentDetail, setIncidentEquipmentFilter, setIncidentTechnicianFilter, setSelectedIncidents, setShowAddIncident, techName, technicians }) {
+export function VistaIncidents({ contractCodeOf, branchName, canReportIncident, clients, companyName, equipment, incidentCompletedFrom, incidentCompletedTo, incidentDateFrom, incidentDateTo, incidentEquipmentFilter, incidentTechnicianFilter, incidentsFiltered, isTecnico, selectedIncidents, setIncidentCompletedFrom, setIncidentCompletedTo, setIncidentDateFrom, setIncidentDateTo, setIncidentDetail, setIncidentEquipmentFilter, setIncidentTechnicianFilter, setSelectedIncidents, setShowAddIncident, techName, technicians }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
@@ -399,8 +408,10 @@ export function VistaIncidents({ branchName, canReportIncident, clients, company
                         <div>Cliente<br /><span style={{ color: C.text }}>{inc.client_id ? (clients.find((c) => c.id === inc.client_id)?.name || "—") : "—"}</span></div>
                         <div>Fecha<br /><span style={{ color: C.text }}>{fmtDate(inc.created_at?.slice(0, 10))}</span></div>
                       </div>
-                      <div className="pt-2" style={{ borderTop: `1px solid ${C.border}` }}>
+                      <div className="pt-2 flex flex-wrap items-center gap-2" style={{ borderTop: `1px solid ${C.border}` }}>
                         <Pill label={p.label} color={p.color} />
+                        {inc.service_contract_id && <span className="text-[11px] font-mono" style={{ color: C.muted }}>{contractCodeOf ? contractCodeOf(inc.service_contract_id) : ""}</span>}
+                        <SlaBadge incident={inc} />
                       </div>
                     </div>
                   );

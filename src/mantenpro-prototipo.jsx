@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
-import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine } from "lucide-react";
+import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine, ScrollText } from "lucide-react";
 import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
-import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, prefetchForViews } from "./modulos/lazy.jsx";
+import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, VistaServiceContracts, ServiceContractFormModal, ServiceContractDetailModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 import { NoCopyScreen, OfflineBar, checkSession, clearStoredAuth, clearUserCopy, discardOp, findStoredAuthUser, getOrderDetails, hasPendingFor, isNetworkError, isOnline, listPendingOps, loadDataSnapshot, loadProfileCache, localBlobUrl, newId, onSynced, patchOrderDetails, perform, prefetchOrderDetails, saveDataSnapshot, saveProfileCache, setOfflineUser, startOfflineSync, useOfflineState } from "./modulos/offline.jsx";
 
@@ -32,7 +32,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const MODULE_OF_KEY = {
     orders: "tecnico", agenda: "tecnico", incidents: "tecnico", projects: "tecnico", equipment: "tecnico",
     checklists: "tecnico", technicians: "tecnico", tools: "tecnico", materials: "tecnico", maintenanceSchedule: "tecnico",
-    reports: "tecnico",
+    reports: "tecnico", serviceContracts: "tecnico",
     suppliers: "comercial", purchaseOrders: "comercial", deliveryNotes: "comercial", purchases: "comercial",
     supplierReceipts: "comercial", otherExpenses: "comercial", purchaseLedger: "comercial", quotes: "comercial",
     salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
@@ -345,6 +345,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [cardAcquirers, setCardAcquirers] = useState([]);
   const [voidingInvoice, setVoidingInvoice] = useState(null);
   const [productStock, setProductStock] = useState([]); // existencia por producto y sucursal
+  // Contratos de servicio con SLA (contratos-servicio.sql)
+  const [serviceContracts, setServiceContracts] = useState([]);
+  const [serviceContractEquipment, setServiceContractEquipment] = useState([]);
+  const [contractForm, setContractForm] = useState(null); // { initial?, equipmentIds }
+  const [contractDetail, setContractDetail] = useState(null);
   const [showStockTransfer, setShowStockTransfer] = useState(false);
   const [stockAdjustFor, setStockAdjustFor] = useState(null); // producto (o true) para el ajuste
   const [stockMovementsFor, setStockMovementsFor] = useState(null); // producto para el kárdex
@@ -391,6 +396,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // dataReadyRef: ya hay datos de verdad en pantalla (del servidor o de la copia); antes de eso
   // no se guarda la copia, para no pisarla con listas vacías.
   const dataReadyRef = useRef(false);
+  const [dataReadyTick, setDataReadyTick] = useState(0); // avisa al guardado de la copia que ya hay datos
   const [snapshotAt, setSnapshotAt] = useState(null);
   const restoreSnapshot = async () => {
     const snap = await loadDataSnapshot(session.user.id);
@@ -414,6 +420,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       setOrderChecklistSummary(new Map(d.checklistSummary || []));
       setSnapshotAt(snap.savedAt);
       dataReadyRef.current = true;
+      setDataReadyTick((t) => t + 1);
     } else {
       setErrorMsg("Sin conexión y sin datos guardados en este teléfono. Conéctate para cargar tus órdenes.");
     }
@@ -529,9 +536,17 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     // Existencia por sucursal (tabla product_stock; puede no existir si no se corrió la migración)
     const ps = await fetchAllRows(() => supabase.from("product_stock").select("product_id, branch_id, quantity").eq("company_id", companyId));
     setProductStock(ps.error ? [] : (ps.data || []));
+    // Contratos de servicio (si todavía no se corrió contratos-servicio.sql, quedan vacíos)
+    const [scs, sce] = await Promise.all([
+      fetchAllRows(() => supabase.from("service_contracts").select("*").eq("company_id", companyId)),
+      supabase.from("service_contract_equipment").select("contract_id, equipment_id").eq("company_id", companyId).limit(5000),
+    ]);
+    setServiceContracts(scs.error ? [] : (scs.data || []));
+    setServiceContractEquipment(sce.error ? [] : (sce.data || []));
     setLoadingScope(false);
     if (isTecnico) {
       dataReadyRef.current = true;
+      setDataReadyTick((t) => t + 1);
       setSnapshotAt(null);
       // Detalle de las órdenes abiertas del técnico, para poder abrirlas sin señal
       const myTech = profile.technician_id;
@@ -590,7 +605,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }, 1000);
     return () => clearTimeout(t);
     /* eslint-disable-next-line */
-  }, [isTecnico, orders, equipment, branches, locations, technicians, clients, checklistTemplates, orderTechnicians, materials, products, productStock, incidents, tools, orderAttachmentIds, orderChecklistSummary]);
+  }, [isTecnico, dataReadyTick, orders, equipment, branches, locations, technicians, clients, checklistTemplates, orderTechnicians, materials, products, productStock, incidents, tools, orderAttachmentIds, orderChecklistSummary]);
 
   // Volvió la señal después de trabajar con la copia: se traen los datos del servidor
   // (órdenes nuevas, cambios del supervisor). Si había cambios en la cola, eso lo hace onSynced.
@@ -1789,6 +1804,47 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const data = res.data || { ...order, client_signature_url: dataUrl, client_signature_path: path, client_signature_name: signerName, client_signature_at: at };
     setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
     setDetailOrder((prev) => (prev ? data : prev));
+  };
+
+  // ---- Contratos de servicio con SLA ----
+  const contractById = useMemo(() => new Map(serviceContracts.map((c) => [c.id, c])), [serviceContracts]);
+  const contractCodeOf = (id) => contractById.get(id)?.code || "";
+  const openContractForm = (contract) => {
+    setContractDetail(null);
+    setContractForm({
+      initial: contract || null,
+      equipmentIds: contract ? serviceContractEquipment.filter((x) => x.contract_id === contract.id).map((x) => x.equipment_id) : [],
+    });
+  };
+  const saveServiceContract = async (payload, equipmentIds) => {
+    setSaving(true);
+    const editing = contractForm?.initial;
+    const q = editing
+      ? supabase.from("service_contracts").update(payload).eq("id", editing.id).select().single()
+      : supabase.from("service_contracts").insert({ ...payload, company_id: companyId }).select().single();
+    const { data, error } = await q;
+    if (error) { setSaving(false); setErrorMsg(/service_contracts/.test(error.message) && /exist|schema cache/.test(error.message) ? "Falta correr contratos-servicio.sql en Supabase." : error.message); return; }
+    // Equipos cubiertos: se reemplaza la lista
+    const { error: delErr } = await supabase.from("service_contract_equipment").delete().eq("contract_id", data.id);
+    if (delErr) { setSaving(false); setErrorMsg(delErr.message); return; }
+    if (!payload.covers_all_equipment && equipmentIds.length > 0) {
+      const { error: insErr } = await supabase.from("service_contract_equipment").insert(equipmentIds.map((equipment_id) => ({ contract_id: data.id, equipment_id, company_id: companyId })));
+      if (insErr) { setSaving(false); setErrorMsg(insErr.message); return; }
+    }
+    // Las averías abiertas y las órdenes desde el inicio del contrato toman el contrato y su SLA
+    const { error: apErr } = await supabase.rpc("service_contract_apply", { p_contract: data.id });
+    setSaving(false);
+    if (apErr) setErrorMsg(`El contrato se guardó, pero no se pudo aplicar a las averías y órdenes: ${apErr.message}`);
+    setContractForm(null);
+    await loadAll();
+  };
+  const deleteServiceContract = async (contract) => {
+    if (!window.confirm(`¿Eliminar el contrato ${contract.code}? Las averías y órdenes se quedan, pero sin contrato ni SLA.`)) return;
+    const { data, error } = await supabase.from("service_contracts").delete().eq("id", contract.id).select();
+    if (error) { setErrorMsg(error.message); return; }
+    if (!data || data.length === 0) { setErrorMsg("No se pudo eliminar el contrato (sin permiso)."); return; }
+    setContractDetail(null);
+    await loadAll();
   };
 
   // ---- Perfil de la empresa ----
@@ -3996,6 +4052,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       ],
     },
     { key: "maintenanceSchedule", label: "Mantenimiento programado", Icon: CalendarDays },
+    { key: "serviceContracts", label: "Contratos de servicio", Icon: ScrollText },
     { section: "Comercial" },
     {
       key: "catalog", label: "Catálogo", Icon: Boxes,
@@ -4455,11 +4512,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("orders") && view === "orders" && (
-            <VistaOrders onSiteOrderIds={onSiteOrderIds} branchName={branchName} canDelete={canDelete} canEdit={canEdit} canManage={canManage} companyName={companyName} deleteOrder={deleteOrder} equipName={equipName} equipment={equipment} filteredOrders={filteredOrders} isTecnico={isTecnico} openEditOrder={openEditOrder} openOrderDetail={openOrderDetail} orderAttachmentIds={orderAttachmentIds} orderDateFrom={orderDateFrom} orderDateTo={orderDateTo} orderEquipmentFilter={orderEquipmentFilter} orderTechnicians={orderTechnicians} orders={orders} search={search} selectedOrders={selectedOrders} setOrderDateFrom={setOrderDateFrom} setOrderDateTo={setOrderDateTo} setOrderEquipmentFilter={setOrderEquipmentFilter} setOrderStatus={setOrderStatus} setSearch={setSearch} setSelectedOrders={setSelectedOrders} setStatusFilter={setStatusFilter} setTechnicianFilter={setTechnicianFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} techName={techName} technicianFilter={technicianFilter} technicians={technicians} todayStr={todayStr} typeFilter={typeFilter} />
+            <VistaOrders contractCodeOf={contractCodeOf} onSiteOrderIds={onSiteOrderIds} branchName={branchName} canDelete={canDelete} canEdit={canEdit} canManage={canManage} companyName={companyName} deleteOrder={deleteOrder} equipName={equipName} equipment={equipment} filteredOrders={filteredOrders} isTecnico={isTecnico} openEditOrder={openEditOrder} openOrderDetail={openOrderDetail} orderAttachmentIds={orderAttachmentIds} orderDateFrom={orderDateFrom} orderDateTo={orderDateTo} orderEquipmentFilter={orderEquipmentFilter} orderTechnicians={orderTechnicians} orders={orders} search={search} selectedOrders={selectedOrders} setOrderDateFrom={setOrderDateFrom} setOrderDateTo={setOrderDateTo} setOrderEquipmentFilter={setOrderEquipmentFilter} setOrderStatus={setOrderStatus} setSearch={setSearch} setSelectedOrders={setSelectedOrders} setStatusFilter={setStatusFilter} setTechnicianFilter={setTechnicianFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} techName={techName} technicianFilter={technicianFilter} technicians={technicians} todayStr={todayStr} typeFilter={typeFilter} />
           )}
 
           {!loadingScope && hasPerm("incidents") && view === "incidents" && (
-            <VistaIncidents branchName={branchName} canReportIncident={canReportIncident} clients={clients} companyName={companyName} equipment={equipment} incidentCompletedFrom={incidentCompletedFrom} incidentCompletedTo={incidentCompletedTo} incidentDateFrom={incidentDateFrom} incidentDateTo={incidentDateTo} incidentEquipmentFilter={incidentEquipmentFilter} incidentTechnicianFilter={incidentTechnicianFilter} incidentsFiltered={incidentsFiltered} isTecnico={isTecnico} selectedIncidents={selectedIncidents} setIncidentCompletedFrom={setIncidentCompletedFrom} setIncidentCompletedTo={setIncidentCompletedTo} setIncidentDateFrom={setIncidentDateFrom} setIncidentDateTo={setIncidentDateTo} setIncidentDetail={setIncidentDetail} setIncidentEquipmentFilter={setIncidentEquipmentFilter} setIncidentTechnicianFilter={setIncidentTechnicianFilter} setSelectedIncidents={setSelectedIncidents} setShowAddIncident={setShowAddIncident} techName={techName} technicians={technicians} />
+            <VistaIncidents contractCodeOf={contractCodeOf} branchName={branchName} canReportIncident={canReportIncident} clients={clients} companyName={companyName} equipment={equipment} incidentCompletedFrom={incidentCompletedFrom} incidentCompletedTo={incidentCompletedTo} incidentDateFrom={incidentDateFrom} incidentDateTo={incidentDateTo} incidentEquipmentFilter={incidentEquipmentFilter} incidentTechnicianFilter={incidentTechnicianFilter} incidentsFiltered={incidentsFiltered} isTecnico={isTecnico} selectedIncidents={selectedIncidents} setIncidentCompletedFrom={setIncidentCompletedFrom} setIncidentCompletedTo={setIncidentCompletedTo} setIncidentDateFrom={setIncidentDateFrom} setIncidentDateTo={setIncidentDateTo} setIncidentDetail={setIncidentDetail} setIncidentEquipmentFilter={setIncidentEquipmentFilter} setIncidentTechnicianFilter={setIncidentTechnicianFilter} setSelectedIncidents={setSelectedIncidents} setShowAddIncident={setShowAddIncident} techName={techName} technicians={technicians} />
           )}
 
           {!loadingScope && hasPerm("projects") && view === "projects" && (
@@ -4484,6 +4541,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
           {!loadingScope && hasPerm("maintenanceSchedule") && view === "maintenanceSchedule" && (
             <VistaMaintenanceSchedule branchName={branchName} canEdit={canEdit} clients={clients} dueClientAssets={dueClientAssets} dueEquipment={dueEquipment} generateAllDueMaintenance={generateAllDueMaintenance} generateOneMaintenanceOrder={generateOneMaintenanceOrder} saving={saving} techName={techName} todayStr={todayStr} upcomingClientAssets={upcomingClientAssets} upcomingEquipment={upcomingEquipment} updateUsageReading={updateUsageReading} />
+          )}
+
+          {!loadingScope && hasPerm("serviceContracts") && view === "serviceContracts" && (
+            <VistaServiceContracts contracts={serviceContracts} contractEquipment={serviceContractEquipment} clients={clients} equipment={equipment} orders={orders} incidents={incidents} canEdit={canEdit} canDelete={canDelete} onNew={() => openContractForm(null)} onEdit={openContractForm} onDelete={deleteServiceContract} onOpen={setContractDetail} />
           )}
 
           {!loadingScope && hasPerm("branches") && view === "branches" && (
@@ -4657,6 +4718,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {detailOrder && (
         <OrderDetailModal
           order={detailOrder}
+          contractLabel={contractCodeOf(detailOrder.service_contract_id)}
           attachments={detailOrderAttachments}
           checklistItems={detailOrderChecklist}
           checklistTemplates={checklistTemplates}
@@ -4714,6 +4776,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             setDetailOrder((prev) => (prev && prev.id === o.id ? { ...prev, status: st } : prev));
           }}
         />
+      )}
+      {contractForm && (
+        <ServiceContractFormModal initial={contractForm.initial} initialEquipmentIds={contractForm.equipmentIds} clients={clients} equipment={equipment} recurringContracts={recurringContracts} showIguala={companyHasModule("comercial")} onClose={() => setContractForm(null)} onSave={saveServiceContract} saving={saving} />
+      )}
+      {contractDetail && (
+        <ServiceContractDetailModal contract={contractById.get(contractDetail.id) || contractDetail} contractEquipment={serviceContractEquipment} clients={clients} equipment={equipment} orders={orders} incidents={incidents} recurringContracts={recurringContracts} companyName={companyName} companyLogo={company?.logo_url} techName={techName} equipName={equipName} canEdit={canEdit("serviceContracts")} onEdit={openContractForm}
+          onOpenOrder={(o) => { setContractDetail(null); openOrderDetail(o); }} onOpenIncident={(i) => { setContractDetail(null); setIncidentDetail(i); }} onClose={() => setContractDetail(null)} />
       )}
       {showVisitsReport && <VisitsReportModal technicians={technicians} orders={orders} companyName={companyName} onClose={() => setShowVisitsReport(false)} />}
       {showAddChecklist && <ChecklistTemplateFormModal onClose={() => setShowAddChecklist(false)} onSave={saveChecklistTemplate} saving={saving} />}
@@ -5054,6 +5123,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {incidentDetail && (
         <IncidentDetailModal
           incident={incidentDetail}
+          contractLabel={contractCodeOf(incidentDetail.service_contract_id)}
           branchName={branchName}
           equipName={equipName}
           clientName={(id) => clients.find((c) => c.id === id)?.name || "—"}

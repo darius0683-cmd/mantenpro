@@ -18,6 +18,7 @@ const IMPORTERS = {
   admin: () => import("./admin.jsx"),
   ayuda: () => import("./ayuda.jsx"),
   compras: () => import("./compras.jsx"),
+  contratos: () => import("./contratos.jsx"),
   "equipos-qr": () => import("./equipos-qr.jsx"),
   nomina: () => import("./nomina.jsx"),
   portal: () => import("./portal.jsx"),
@@ -105,6 +106,11 @@ export const QrScannerModal = lazyComponent("equipos-qr", "QrScannerModal");
 
 // nomina
 export const PayrollSection = lazyComponent("nomina", "PayrollSection");
+
+// contratos de servicio
+export const VistaServiceContracts = lazyComponent("contratos", "VistaServiceContracts");
+export const ServiceContractFormModal = lazyComponent("contratos", "ServiceContractFormModal");
+export const ServiceContractDetailModal = lazyComponent("contratos", "ServiceContractDetailModal");
 
 // visitas
 export const VisitsReportModal = lazyComponent("visitas", "VisitsReportModal");
@@ -222,6 +228,7 @@ const CHUNK_OF_VIEW = {
   tools: "tecnico",
   materials: "tecnico",
   maintenanceSchedule: "tecnico",
+  serviceContracts: "contratos",
   reports: "tecnico",
   warranty: "tecnico",
   branches: "tecnico",
