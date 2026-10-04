@@ -16,6 +16,7 @@ const IMPORTERS = {
   "vistas-tecnico": () => import("./vistas-tecnico.jsx"),
   "vistas-ventas": () => import("./vistas-ventas.jsx"),
   admin: () => import("./admin.jsx"),
+  ayuda: () => import("./ayuda.jsx"),
   compras: () => import("./compras.jsx"),
   nomina: () => import("./nomina.jsx"),
   soporte: () => import("./soporte.jsx"),
@@ -189,6 +190,9 @@ export const VistaInvoices = lazyComponent("vistas-ventas", "VistaInvoices");
 export const VistaCaja = lazyComponent("vistas-ventas", "VistaCaja");
 export const VistaCreditNotes = lazyComponent("vistas-ventas", "VistaCreditNotes");
 export const VistaRecurringContracts = lazyComponent("vistas-ventas", "VistaRecurringContracts");
+
+// ayuda
+export const HelpCenter = lazyComponent("ayuda", "HelpCenter");
 
 // Qué archivo necesita cada sección del menú (para precargar en segundo plano).
 const CHUNK_OF_VIEW = {
