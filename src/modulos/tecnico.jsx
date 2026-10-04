@@ -2020,7 +2020,7 @@ export function SignaturePad({ onSave, saving }) {
 // Horas de un técnico adicional en una orden multi-técnico. Estado local propio para no
 // disparar un guardado en cada tecla — se guarda al salir del campo (onBlur), igual que
 // los demás campos de texto del detalle de la orden.
-export function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave }) {
+export function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave, hideCost }) {
   const [hours, setHours] = useState(row.hours ?? "");
   const cost = (Number(hours) || 0) * (Number(hourlyRate) || 0);
   return (
@@ -2034,7 +2034,7 @@ export function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave }) 
         onBlur={(e) => onSave(row, e.target.value)}
         placeholder="Horas"
       />
-      <div className="text-xs font-mono text-right" style={{ color: C.muted, width: 90 }}>{fmtMoney(cost)}</div>
+      {!hideCost && <div className="text-xs font-mono text-right" style={{ color: C.muted, width: 90 }}>{fmtMoney(cost)}</div>}
     </div>
   );
 }
@@ -2055,6 +2055,12 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
   const technician = technicians.find((tc) => tc.id === order.technician_id);
   const [laborHours, setLaborHours] = useState(order.labor_hours ?? "");
   const [laborRate, setLaborRate] = useState(order.labor_rate_used ?? (technician?.hourly_rate ?? ""));
+  // Las horas se recalculan solas al cerrar una visita (llegada y salida): se refrescan aquí.
+  useEffect(() => { setLaborHours(order.labor_hours ?? ""); }, [order.labor_hours]);
+  useEffect(() => { if (order.labor_rate_used != null) setLaborRate(order.labor_rate_used); }, [order.labor_rate_used]);
+  // El técnico no ve ni guarda la tarifa ni las horas (las pone la llegada y salida / el supervisor)
+  const laborForSave = isTecnico ? undefined : laborHours;
+  const rateForSave = isTecnico ? undefined : laborRate;
 
   const [usedMaterials, setUsedMaterials] = useState([]);
   const [loadingMaterials, setLoadingMaterials] = useState(true);
@@ -2250,14 +2256,6 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
         readOnly={readOnly}
         onOrderStatusChange={onOrderStatusChange}
         onVisitsChanged={onVisitsChanged}
-        onApplyHours={(totals) => {
-          const primary = totals.find((x) => x.techId === order.technician_id);
-          if (primary) setLaborHours(String(primary.hours));
-          (extraTechnicianRows || []).forEach((row) => {
-            const x = totals.find((tt) => tt.techId === row.technician_id);
-            if (x && onUpdateTechnicianHours) onUpdateTechnicianHours(row, x.hours);
-          });
-        }}
       />
 
       {!isTecnico && !readOnly && checklistItems && checklistItems.length === 0 && checklistTemplates && checklistTemplates.length > 0 && (
@@ -2540,14 +2538,24 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
         <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>
           Mano de obra{extraTechnicianRows && extraTechnicianRows.length > 0 ? ` — ${techName(order.technician_id)} (técnico principal)` : ""}
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Horas trabajadas">
-            <input type="number" step="0.25" min="0" disabled={readOnly} className={inputClass} style={inputStyle} value={laborHours} onChange={(e) => setLaborHours(e.target.value)} placeholder="Ej. 2.5" />
-          </Field>
-          <Field label="Tarifa por hora (RD$)">
-            <input type="number" step="0.01" min="0" disabled={readOnly} className={inputClass} style={inputStyle} value={laborRate} onChange={(e) => setLaborRate(e.target.value)} placeholder={technician?.hourly_rate ? String(technician.hourly_rate) : "0.00"} />
-          </Field>
-        </div>
+        {isTecnico ? (
+          <div className="text-sm px-3 py-2" style={{ background: C.panelAlt }}>
+            Horas trabajadas: <span className="font-mono font-semibold">{laborHours === "" || laborHours == null ? "—" : `${Number(laborHours).toLocaleString("es-DO", { maximumFractionDigits: 2 })} h`}</span>
+            <div className="text-xs mt-0.5" style={{ color: C.muted }}>Se calculan solas con tu llegada y salida.</div>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Horas trabajadas">
+                <input type="number" step="0.01" min="0" disabled={readOnly} className={inputClass} style={inputStyle} value={laborHours} onChange={(e) => setLaborHours(e.target.value)} placeholder="Ej. 2.5" />
+              </Field>
+              <Field label="Tarifa por hora (RD$)">
+                <input type="number" step="0.01" min="0" disabled={readOnly} className={inputClass} style={inputStyle} value={laborRate} onChange={(e) => setLaborRate(e.target.value)} placeholder={technician?.hourly_rate ? String(technician.hourly_rate) : "0.00"} />
+              </Field>
+            </div>
+            <div className="text-xs -mt-1" style={{ color: C.muted }}>Las horas se llenan solas cuando el técnico marca llegada y salida; si cambias el número a mano, la próxima visita cerrada lo vuelve a calcular.</div>
+          </>
+        )}
       </div>
 
       {extraTechnicianRows && extraTechnicianRows.length > 0 && (
@@ -2560,7 +2568,8 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
                 row={row}
                 name={techName(row.technician_id)}
                 hourlyRate={technicians.find((t) => t.id === row.technician_id)?.hourly_rate}
-                readOnly={readOnly}
+                readOnly={readOnly || isTecnico}
+                hideCost={isTecnico}
                 onSave={onUpdateTechnicianHours}
               />
             ))}
@@ -2568,10 +2577,12 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
         </div>
       )}
 
-      <div className="mt-2 p-3 flex justify-between items-center text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-        <span style={{ color: C.muted }}>Costo de mano de obra{extraTechnicianRows && extraTechnicianRows.length > 0 ? " (total, todos los técnicos)" : ""}</span>
-        <div className="font-mono font-bold">{fmtMoney(totalLaborCost)}</div>
-      </div>
+      {!isTecnico && (
+        <div className="mt-2 p-3 flex justify-between items-center text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+          <span style={{ color: C.muted }}>Costo de mano de obra{extraTechnicianRows && extraTechnicianRows.length > 0 ? " (total, todos los técnicos)" : ""}</span>
+          <div className="font-mono font-bold">{fmtMoney(totalLaborCost)}</div>
+        </div>
+      )}
 
       <div className="mt-3 pt-3" style={{ borderTop: `1px solid ${C.border}` }}>
         <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Firma del cliente</div>
@@ -2646,7 +2657,7 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{readOnly ? "Cerrar" : "Cancelar"}</button>
         {!readOnly && (
-          <button onClick={() => onSave(order, notes, null, undefined, laborHours, laborRate)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          <button onClick={() => onSave(order, notes, null, undefined, laborForSave, rateForSave)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
             {saving ? "Guardando..." : "Guardar"}
           </button>
         )}
@@ -2655,7 +2666,7 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
             onClick={() => {
               if (!canCloseOrder) return;
               if (!window.confirm("¿Cerrar esta orden de trabajo? Se guardará la nota y la foto, y quedará marcada como Completada.")) return;
-              onSave(order, notes, null, "completada", laborHours, laborRate);
+              onSave(order, notes, null, "completada", laborForSave, rateForSave);
             }}
             disabled={saving || !canCloseOrder}
             title={canCloseOrder ? undefined : `Falta: ${closeRequirements.join(", ")}`}
@@ -2669,7 +2680,7 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
           <button
             onClick={() => {
               if (!window.confirm("¿Reabrir esta orden de trabajo? Volverá a estado \"En progreso\" y el checklist quedará editable.")) return;
-              onSave(order, notes, null, "en_progreso", laborHours, laborRate);
+              onSave(order, notes, null, "en_progreso", laborForSave, rateForSave);
             }}
             disabled={saving}
             className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50"

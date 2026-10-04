@@ -1390,7 +1390,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
         const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
         if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
-        const { error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: upFile.name });
+        const { error: attError } = await supabase.rpc("add_order_attachment", { p_order: data.id, p_file_url: signed.signedUrl, p_file_path: path, p_file_name: upFile.name, p_stage: null });
         if (attError) setErrorMsg(`Se subió ${file.name} pero no se pudo vincular a la orden: ${attError.message}`);
         else setOrderAttachmentIds((prev) => new Set(prev).add(data.id));
       }
@@ -1475,7 +1475,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         if (upError) { setErrorMsg(`No se pudo subir ${file.name}: ${upError.message}`); continue; }
         const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
         if (signError) { setErrorMsg(`Se subió ${file.name} pero no se pudo generar el enlace: ${signError.message}`); continue; }
-        const { data: attRow, error: attError } = await supabase.from("work_order_attachments").insert({ work_order_id: data.id, file_url: signed.signedUrl, file_path: path, file_name: upFile.name }).select().single();
+        const { data: attRow, error: attError } = await supabase.rpc("add_order_attachment", { p_order: data.id, p_file_url: signed.signedUrl, p_file_path: path, p_file_name: upFile.name, p_stage: null });
         if (attError) { setErrorMsg(`Se subió ${file.name} pero no se pudo vincular a la orden: ${attError.message}`); continue; }
         setOrderAttachmentIds((prev) => new Set(prev).add(data.id));
         setEditingOrderAttachments((prev) => [...prev, attRow]);
@@ -1542,8 +1542,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (upError) { setErrorMsg(`No se pudo subir la foto: ${upError.message}`); return; }
     const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
     if (signError) { setErrorMsg(`Se subió la foto pero no se pudo generar el enlace: ${signError.message}`); return; }
-    const { data: attRow, error: attError } = await supabase.from("work_order_attachments")
-      .insert({ work_order_id: order.id, file_url: signed.signedUrl, file_path: path, file_name: upFile.name, stage }).select().single();
+    // La función de la base de datos pone la empresa y revisa que el técnico esté asignado (horas-y-fotos.sql)
+    const { data: attRow, error: attError } = await supabase.rpc("add_order_attachment", { p_order: order.id, p_file_url: signed.signedUrl, p_file_path: path, p_file_name: upFile.name, p_stage: stage });
     if (attError) { setErrorMsg(`Se subió la foto pero no se pudo vincular a la orden: ${attError.message}`); return; }
     setDetailOrderAttachments((prev) => [...prev, attRow]);
     setOrderAttachmentIds((prev) => new Set(prev).add(order.id));
@@ -4552,7 +4552,20 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onClearChecklist={clearOrderChecklist}
           myTechnicianId={profile.technician_id}
           canManageVisits={canManage}
-          onVisitsChanged={reloadOpenVisits}
+          onVisitsChanged={async () => {
+            reloadOpenVisits();
+            // Las horas trabajadas las recalcula la base de datos al cerrar/corregir una visita
+            const id = detailOrder.id;
+            const [{ data: o }, { data: wts }] = await Promise.all([
+              supabase.from("work_orders").select("*").eq("id", id).maybeSingle(),
+              supabase.from("work_order_technicians").select("*").eq("work_order_id", id),
+            ]);
+            if (o) {
+              setOrders((prev) => prev.map((x) => (x.id === id ? { ...x, labor_hours: o.labor_hours, labor_rate_used: o.labor_rate_used, status: o.status } : x)));
+              setDetailOrder((prev) => (prev && prev.id === id ? { ...prev, labor_hours: o.labor_hours, labor_rate_used: o.labor_rate_used, status: o.status } : prev));
+            }
+            if (wts) setOrderTechnicians((prev) => [...prev.filter((x) => x.work_order_id !== id), ...wts]);
+          }}
           onOrderStatusChange={(o, st) => {
             setOrders((prev) => prev.map((x) => (x.id === o.id ? { ...x, status: st } : x)));
             setDetailOrder((prev) => (prev && prev.id === o.id ? { ...prev, status: st } : prev));

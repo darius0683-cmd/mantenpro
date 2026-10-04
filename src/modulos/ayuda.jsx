@@ -10,7 +10,7 @@ import { C } from "./base.jsx";
 
 // Subir este número cuando se reemplacen imágenes con el mismo nombre (evita que el navegador
 // muestre la versión vieja guardada en caché).
-const IMG_VERSION = "1";
+const IMG_VERSION = "2";
 // Las imágenes están en la raíz de "public" (ot-1.webp, mat-1.webp, …).
 const imgUrl = (name) => `/${name}.webp?v=${IMG_VERSION}`;
 
@@ -74,12 +74,13 @@ export const HELP_TOPICS = [
       { text: "Mientras trabaja ve el tiempo **en sitio** (1). Al terminar toca **Terminé** (2). Cada visita queda con su enlace al mapa (3) para comprobar dónde estaba.", img: "vis-2" },
       { text: "El supervisor ve en **Técnicos** quién está en sitio y en qué orden (1). Con **Horas en sitio** (2) abre el reporte.", img: "vis-3" },
       { text: "En el reporte eliges las fechas (1) y ves las horas de cada técnico (2), listas para la **nómina**. Se puede imprimir o bajar en **Excel** (3) con el detalle de cada visita.", img: "vis-4" },
-      { text: "Si un técnico olvidó marcar la salida, el supervisor le pone la hora con **poner salida** desde la orden; queda marcada como **salida puesta a mano** (1). Con **Usar estas horas en mano de obra** (2) las horas reales pasan al costo de la orden (recuerda guardar).", img: "vis-5" },
+      { text: "Si un técnico olvidó marcar la salida, el supervisor le pone la hora con **poner salida** desde la orden; queda marcada como **salida puesta a mano** (1). Al cerrarse cada visita, las horas pasan **solas** a la mano de obra de la orden (2) con la tarifa del técnico, y el administrador ve el costo.", img: "vis-5" },
     ],
     tips: [
       "Un técnico solo puede estar en sitio en **una orden a la vez**: para llegar a otra, primero marca Terminé en la anterior.",
       "Si el celular no da la ubicación (permiso negado o sin señal), la llegada igual se marca, pero queda como **sin ubicación**.",
       "Una orden puede tener varias visitas (varios días o varios técnicos); las horas se suman por técnico.",
+      "El técnico ve sus horas, pero **no ve la tarifa ni el costo** de la mano de obra; eso solo lo ven administradores y supervisores.",
       "Solo el técnico asignado marca su llegada, y su usuario tiene que estar **vinculado a su ficha de técnico** (Administración → Usuarios). Corregir o borrar visitas lo hacen supervisores y administradores.",
     ],
   },

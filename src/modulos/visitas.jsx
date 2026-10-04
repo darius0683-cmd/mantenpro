@@ -41,7 +41,7 @@ function Where({ lat, lng, accuracy, label }) {
   );
 }
 
-export function OrderVisitsSection({ order, techName, myTechnicianId, assignedTechIds, canManage, readOnly, onApplyHours, onOrderStatusChange, onVisitsChanged }) {
+export function OrderVisitsSection({ order, techName, myTechnicianId, assignedTechIds, canManage, onOrderStatusChange, onVisitsChanged }) {
   const [visits, setVisits] = useState(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
@@ -148,9 +148,7 @@ export function OrderVisitsSection({ order, techName, myTechnicianId, assignedTe
             <div className="text-xs" style={{ color: C.muted }}>
               Horas en sitio: {totals.map((t) => <span key={t.techId} className="mr-2"><span style={{ color: C.text }}>{techName(t.techId)}</span> {t.hours} h</span>)}
             </div>
-            {allClosed && onApplyHours && !readOnly && (
-              <button onClick={() => onApplyHours(totals)} className="text-xs font-semibold" style={{ color: C.amber }}>Usar estas horas en mano de obra</button>
-            )}
+            {allClosed && <div className="text-xs" style={{ color: C.green }}>Pasan solas a la mano de obra</div>}
           </div>
         </div>
       )}
