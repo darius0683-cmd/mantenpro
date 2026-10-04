@@ -5,7 +5,7 @@
 // Para agregar un tema: añadirlo a HELP_TOPICS (module, group, title, summary, steps con su
 // imagen, tips). Las capturas se generan con datos de demostración (sin datos reales).
 import React, { useMemo, useState } from "react";
-import { BookOpen, ChevronLeft, Lightbulb, Search, X } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, Lightbulb, Search, X } from "lucide-react";
 import { C } from "./base.jsx";
 
 // Subir este número cuando se reemplacen imágenes con el mismo nombre (evita que el navegador
@@ -298,6 +298,174 @@ export const HELP_TOPICS = [
       "El uso de checklist al cierre muestra cuántas órdenes se cerraron con checklist y cuántas quedaron 100% respondidas.",
     ],
   },
+  // ================================================================== COMERCIAL — VENTAS
+  {
+    id: "clientes",
+    module: "comercial",
+    group: "Clientes y productos",
+    title: "Agregar clientes",
+    summary: "Registra a tus clientes con su RNC o cédula para cotizar y facturar.",
+    keywords: "cliente agregar rnc cedula dgii razon social correo telefono",
+    steps: [
+      { text: "En **Catálogo → Clientes** toca **Agregar cliente** (1). Con el buscador (2) encuentras cualquier cliente por nombre, RNC, teléfono o correo.", img: "cli-1" },
+      { text: "Si tienes cargado el catálogo de la DGII, escribe el nombre de la empresa en el buscador de arriba (1) y se llenan solos el nombre y el RNC. Si no, escribe la **razón social** (2) y el **RNC o cédula** (3); con **Buscar en DGII** compruebas el nombre. Completa el teléfono, el **correo** (4), que se usa para enviar documentos, y la dirección.", img: "cli-2" },
+    ],
+    tips: [
+      "Para emitir una factura de **crédito fiscal (B01)**, el cliente debe tener un RNC o una cédula válida.",
+      "El catálogo de la DGII se carga en Gestión Contable → Catálogo RNC (DGII).",
+    ],
+  },
+  {
+    id: "productos-inventario",
+    module: "comercial",
+    group: "Clientes y productos",
+    title: "Productos, servicios e inventario",
+    summary: "Tu catálogo de lo que vendes, con precio, costo y existencia por sucursal.",
+    keywords: "producto servicio precio costo margen inventario existencia stock sucursal transferir ajustar kardex movimientos kit compuesto",
+    steps: [
+      { text: "En **Catálogo → Productos** toca **Agregar producto** (1): nombre, unidad, costo, % de ganancia (el precio se calcula solo) y stock inicial. **Transferir** (2) mueve existencia entre sucursales, **Ajustar inventario** (3) corrige cantidades con su motivo, y el ícono del kárdex (4) muestra todos los movimientos del producto.", img: "prods-1" },
+    ],
+    tips: [
+      "Los **servicios** (mano de obra, visitas) se crean en Catálogo → Servicios y no llevan existencia.",
+      "Un **producto compuesto (kit)** se vende como un solo renglón, pero al facturarlo descuenta cada componente.",
+      "La existencia sube con las compras y las notas de entrega, y baja con las facturas y lo que usa el Departamento Técnico.",
+      "El costo es promedio: cada compra lo recalcula.",
+    ],
+  },
+  {
+    id: "cotizacion",
+    module: "comercial",
+    group: "Cotizaciones y órdenes de venta",
+    title: "Hacer una cotización",
+    summary: "Prepara la propuesta para el cliente, imprímela y, cuando la apruebe, pásala a orden de venta.",
+    keywords: "cotizacion presupuesto proforma aprobar rechazar capitulos descuento dolares imprimir duplicar",
+    steps: [
+      { text: "En **Ventas → Cotizaciones** toca **Nueva cotización** (1). Cada tarjeta muestra su estado (2): Pendiente, Aprobada, Rechazada o En orden de venta.", img: "quo-1" },
+      { text: "Elige el **cliente** (1) y la fecha de validez. En cada renglón busca el **producto o servicio** (2), o escribe una descripción libre, y pon la cantidad y el precio. **Agregar línea** (3) suma renglones y **Agregar capítulo** (4) los agrupa (por ejemplo, Materiales y Mano de obra), con subtotal por capítulo. Puedes poner descuento, cotizar en dólares y agregar observaciones. Toca **Crear cotización** (5).", img: "quo-2" },
+      { text: "Al abrirla: **Marcar aprobada** (1) cuando el cliente la acepte, y después aparece **Pasar a Orden de Venta**. Puedes imprimir la **Pro-Forma** (2) o la **cotización** (3), y también **Editar** o **Duplicar** para hacer una parecida.", img: "quo-3" },
+    ],
+    tips: [
+      "Arrastra los renglones para cambiar el orden en que salen impresos.",
+      "Cada usuario tiene un descuento máximo permitido; el administrador lo configura en Usuarios.",
+      "Un incidente se puede convertir directamente en cotización.",
+    ],
+  },
+  {
+    id: "orden-venta",
+    module: "comercial",
+    group: "Cotizaciones y órdenes de venta",
+    title: "Orden de venta: del trabajo aprobado a la factura",
+    summary: "La cotización aprobada se convierte en orden de venta, que genera la orden de trabajo para el técnico y luego la factura.",
+    keywords: "orden de venta ov generar factura orden de trabajo cancelar",
+    steps: [
+      { text: "En **Ventas → Órdenes de Venta** abre la orden. **Generar orden de trabajo** (1) crea el trabajo para el Departamento Técnico. Cuando esté listo para cobrar, toca **Generar factura** (2): se abre la factura con los mismos renglones.", img: "so-1" },
+    ],
+    tips: [
+      "Las órdenes de venta nacen de una cotización aprobada (botón \"Pasar a Orden de Venta\").",
+      "Una orden cancelada ya no se puede facturar.",
+    ],
+  },
+  {
+    id: "factura",
+    module: "comercial",
+    group: "Facturación y cobros",
+    title: "Emitir una factura con NCF",
+    summary: "Factura a un cliente con su comprobante fiscal, forma de pago, ITBIS y retenciones.",
+    keywords: "factura facturar ncf b01 b02 credito fiscal consumidor itbis retencion norma 02-05 exenta dolares 607 garantia",
+    steps: [
+      { text: "En **Ventas → Facturación** toca **Nueva factura** (1). Con el filtro de cobro (2) ves las pendientes, las parciales y las cobradas. **Estado de cuenta** (3) imprime todo lo que debe un cliente.", img: "inv-1" },
+      { text: "Elige el **cliente** (1) y la **secuencia NCF** (2): B01 para crédito fiscal o B02 para consumidor final. Pon la **forma de pago** (3) y el **tipo de ingreso** para el 607 (4). Agrega los **renglones** (5) igual que en la cotización. Al final puedes marcar la factura como **exenta de ITBIS** o aplicar la **retención del 30% del ITBIS (Norma 02-05)**. Toca **Emitir factura**.", img: "inv-2" },
+    ],
+    tips: [
+      "Antes de facturar necesitas al menos una secuencia NCF en Gestión Contable → Secuencia NCF.",
+      "El NCF se asigna solo, en orden, al emitir. La factura descuenta el inventario de los productos.",
+      "En un renglón puedes marcar \"Registrar este renglón como activo en garantía\": el equipo vendido queda en Activos en Garantía.",
+      "Facturas en dólares: se pone la tasa del día y la factura muestra el equivalente en pesos para el NCF.",
+      "Una factura emitida no se edita: para corregirla se anula o se emite una nota de crédito.",
+    ],
+  },
+  {
+    id: "cobro",
+    module: "comercial",
+    group: "Facturación y cobros",
+    title: "Registrar un cobro y dar recibo",
+    summary: "Anota lo que pagó el cliente (total o parcial) e imprime el recibo de ingreso.",
+    keywords: "cobro pago abono parcial recibo ingreso efectivo transferencia tarjeta voucher retencion isr saldo pendiente",
+    steps: [
+      { text: "Abre la factura. Arriba ves el **saldo pendiente** (1). Toca **Registrar pago** (2). Desde aquí también puedes **Anular** (3) o **Imprimir** (4) la factura.", img: "inv-3" },
+      { text: "Escribe el **monto pagado** (1); puede ser un abono parcial. Elige el **método** (2): efectivo, tarjeta, transferencia u otro. En transferencia eliges la cuenta a la que llegó; en tarjeta se piden los datos del voucher. Puedes adjuntar la foto del comprobante. Toca **Guardar pago** (3).", img: "inv-4" },
+    ],
+    tips: [
+      "La factura pasa sola a **Parcialmente cobrada** o **Cobrada**.",
+      "Cada pago tiene su **Imprimir recibo de ingreso**.",
+      "Si el cliente te **retuvo ISR**, regístralo con la opción de retención: rebaja el saldo, pero no es dinero en caja.",
+      "Los cobros quedan registrados en la **Caja** abierta de la sucursal.",
+      "Pagos en dólares: se pone la tasa del día y la app calcula la diferencia cambiaria.",
+    ],
+  },
+  {
+    id: "anular-nota-credito",
+    module: "comercial",
+    group: "Facturación y cobros",
+    title: "Anular una factura o emitir una nota de crédito",
+    summary: "Cómo corregir una factura ya emitida, según el caso.",
+    keywords: "anular factura 608 nota de credito b04 devolucion correccion error",
+    steps: [
+      { text: "**Anular** se usa cuando la factura no debió existir (cliente equivocado, error grave) y todavía no tiene cobros. Abre la factura, toca **Anular factura** y elige el **motivo** (1), que va al reporte 608. El NCF queda consumido y el inventario se devuelve.", img: "void-1" },
+      { text: "La **nota de crédito** se usa para devoluciones, descuentos o correcciones parciales. En **Ventas → Notas de Crédito → Nueva nota de crédito** busca la **factura** (1), elige la secuencia **B04** (2), desmarca las líneas que no aplican, ajusta las cantidades y toca **Emitir nota de crédito** (3). Rebaja el saldo de la factura.", img: "cn-1" },
+    ],
+    tips: [
+      "Solo un administrador puede anular facturas.",
+      "Si la factura tiene cobros o notas de crédito aplicadas no se puede anular: usa una nota de crédito.",
+      "Necesitas una secuencia **B04** activa para emitir notas de crédito.",
+    ],
+  },
+  {
+    id: "caja",
+    module: "comercial",
+    group: "Facturación y cobros",
+    title: "Caja: abrir, cobrar y cuadrar",
+    summary: "El control del dinero que entra cada día en una sucursal, con su cuadre al cerrar.",
+    keywords: "caja abrir cerrar cuadre fondo inicial efectivo tarjeta transferencia diferencia faltante sobrante adquirente comision",
+    steps: [
+      { text: "En **Ventas → Caja** abre la caja con su **fondo inicial**. Mientras está abierta ves lo **esperado** (1) en efectivo, tarjeta y transferencia según los cobros registrados. Al final del día toca **Cerrar caja** (2). Abajo queda el **historial de cuadres** (3).", img: "cash-1" },
+      { text: "Al cerrar, escribe lo que **contaste** de verdad (1) en efectivo, tarjeta y transferencia. La app calcula la **diferencia** (2) contra lo esperado. Si hay faltante o sobrante, explícalo en las **notas** (3). Toca **Cerrar caja**.", img: "cash-2" },
+    ],
+    tips: [
+      "Cada sucursal tiene su propia caja. El vendedor ve la de su sucursal.",
+      "En **Adquirentes de tarjeta** configuras la comisión y la retención de cada procesador (CardNET, Azul…). La caja muestra cuánto se va a depositar neto.",
+      "Si se cobran dólares en efectivo, la caja los cuenta aparte.",
+    ],
+  },
+  {
+    id: "contratos-recurrentes",
+    module: "comercial",
+    group: "Facturación y cobros",
+    title: "Contratos recurrentes (igualas)",
+    summary: "Facturas que se repiten cada cierto tiempo, como el mantenimiento mensual, sin tener que hacerlas a mano.",
+    keywords: "contrato recurrente iguala mensual facturar automatico frecuencia proxima factura",
+    steps: [
+      { text: "En **Ventas → Contratos recurrentes** toca **Nuevo contrato** (1). Cuando a un contrato le toca facturar, sale en rojo y con **Facturar** (2) emites su factura. **Generar todas las vencidas** (3) las hace todas de una vez.", img: "rc-1" },
+      { text: "Elige el cliente y el título del servicio, que sale en la factura. Pon el **monto** sin ITBIS (1), **cada cuántos días** se factura (2), por ejemplo 30, y la **próxima fecha de facturación** (3). Elige la secuencia NCF y marca si aplica ITBIS o retención.", img: "rc-2" },
+    ],
+    tips: [
+      "Después de cada factura, la próxima fecha avanza sola según la frecuencia.",
+      "Contratos en dólares: al facturar, la app pide la tasa del día.",
+      "Desmarca \"Contrato activo\" para pausarlo sin borrarlo. Con fecha de término, se finaliza solo.",
+    ],
+  },
+  {
+    id: "reportes-ventas",
+    module: "comercial",
+    group: "Reportes",
+    title: "Reportes de ventas",
+    summary: "Cuánto facturaste y cobraste, cuánto cotizaste y quiénes son tus mejores clientes.",
+    keywords: "reportes ventas facturado cobrado pendiente cotizado conversion clientes mensual",
+    steps: [
+      { text: "En **Reportes de Ventas** elige el rango de fechas (1). Arriba ves el **total facturado**, lo **cobrado y pendiente**, lo **cotizado** y la **tasa de conversión** de cotizaciones (2). Más abajo están la facturación de los últimos 6 meses, los 5 mejores clientes y las cotizaciones por estado.", img: "srep-1" },
+    ],
+    tips: ["La tasa de conversión solo cuenta las cotizaciones ya decididas (aprobadas o rechazadas)."],
+  },
 ];
 
 const norm = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -330,33 +498,76 @@ export function HelpCenter({ enabledModules, onClose }) {
   }, [query, topics]);
 
   const current = topics.find((t) => t.id === currentId) || null;
-  const grouped = useMemo(() => {
+
+  // Índice por departamento → grupo → tema
+  const tree = useMemo(() => {
     const out = [];
     filtered.forEach((t) => {
-      const key = `${t.module}||${t.group}`;
-      let g = out.find((x) => x.key === key);
-      if (!g) { g = { key, module: t.module, group: t.group, items: [] }; out.push(g); }
+      let m = out.find((x) => x.module === t.module);
+      if (!m) { m = { module: t.module, groups: [], count: 0 }; out.push(m); }
+      let g = m.groups.find((x) => x.group === t.group);
+      if (!g) { g = { key: `${t.module}||${t.group}`, group: t.group, items: [] }; m.groups.push(g); }
       g.items.push(t);
+      m.count += 1;
     });
     return out;
   }, [filtered]);
 
+  // Plegables: todo cerrado al abrir la ayuda (si la empresa tiene un solo departamento, ese queda abierto).
+  // Mientras se busca, todo se muestra abierto para ver los resultados.
+  const [openMods, setOpenMods] = useState(() => {
+    const mods = [...new Set(topics.map((t) => t.module))];
+    return mods.length === 1 ? mods : [];
+  });
+  const [openGroups, setOpenGroups] = useState([]);
+  const searching = norm(query).trim() !== "";
+  const toggle = (setter, key) => setter((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
+  const ensureOpen = (setter, key) => setter((prev) => (prev.includes(key) ? prev : [...prev, key]));
+  const openTopic = (t) => {
+    ensureOpen(setOpenMods, t.module);
+    ensureOpen(setOpenGroups, `${t.module}||${t.group}`);
+    setCurrentId(t.id);
+  };
+  const openModule = (mod) => setOpenMods([mod]);
+
   const list = (
-    <div className="space-y-4">
-      {grouped.map((g, i) => (
-        <div key={g.key}>
-          {(i === 0 || grouped[i - 1].module !== g.module) && (
-            <div className="text-[10px] uppercase tracking-wide mb-1" style={{ color: C.amber }}>{MODULE_TITLES[g.module] || g.module}</div>
-          )}
-          <div className="text-xs font-semibold mb-1" style={{ color: C.muted }}>{g.group}</div>
-          {g.items.map((t) => (
-            <button key={t.id} onClick={() => setCurrentId(t.id)} className="w-full text-left text-sm px-3 py-2 mb-1"
-              style={{ background: currentId === t.id ? C.panelAlt : "transparent", borderLeft: `2px solid ${currentId === t.id ? C.amber : "transparent"}`, color: currentId === t.id ? C.text : C.muted }}>
-              {t.title}
+    <div className="space-y-2">
+      {tree.map((m) => {
+        const modOpen = searching || openMods.includes(m.module);
+        return (
+          <div key={m.module} style={{ border: `1px solid ${C.border}` }}>
+            <button onClick={() => toggle(setOpenMods, m.module)} disabled={searching}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-left" style={{ background: modOpen ? C.panelAlt : "transparent" }}>
+              {modOpen ? <ChevronDown size={15} color={C.amber} /> : <ChevronRight size={15} color={C.amber} />}
+              <span className="flex-1 text-xs font-bold uppercase tracking-wide" style={{ color: C.amber }}>{MODULE_TITLES[m.module] || m.module}</span>
+              <span className="text-[11px]" style={{ color: C.muted }}>{m.count}</span>
             </button>
-          ))}
-        </div>
-      ))}
+            {modOpen && (
+              <div className="py-1">
+                {m.groups.map((g) => {
+                  const groupOpen = searching || openGroups.includes(g.key);
+                  return (
+                    <div key={g.key}>
+                      <button onClick={() => toggle(setOpenGroups, g.key)} disabled={searching}
+                        className="w-full flex items-center gap-1.5 pl-4 pr-3 py-1.5 text-left">
+                        {groupOpen ? <ChevronDown size={13} color={C.muted} /> : <ChevronRight size={13} color={C.muted} />}
+                        <span className="flex-1 text-xs font-semibold" style={{ color: groupOpen ? C.text : C.muted }}>{g.group}</span>
+                        <span className="text-[11px]" style={{ color: C.muted }}>{g.items.length}</span>
+                      </button>
+                      {groupOpen && g.items.map((t) => (
+                        <button key={t.id} onClick={() => openTopic(t)} className="w-full text-left text-sm pl-9 pr-3 py-1.5 mb-0.5"
+                          style={{ background: currentId === t.id ? C.panelAlt : "transparent", borderLeft: `2px solid ${currentId === t.id ? C.amber : "transparent"}`, color: currentId === t.id ? C.text : C.muted }}>
+                          {t.title}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
       {filtered.length === 0 && (
         <div className="text-sm px-1" style={{ color: C.muted }}>
           {topics.length === 0 ? "Todavía no hay temas de ayuda para los módulos de tu empresa. Pronto los agregaremos." : "No encontré temas con esas palabras. Prueba con otras (por ejemplo: excel, sobrante, imprimir)."}
@@ -364,6 +575,18 @@ export function HelpCenter({ enabledModules, onClose }) {
       )}
     </div>
   );
+
+  // Para la portada: departamentos con sus grupos
+  const modules = useMemo(() => {
+    const out = [];
+    topics.forEach((t) => {
+      let m = out.find((x) => x.module === t.module);
+      if (!m) { m = { module: t.module, groups: [], count: 0 }; out.push(m); }
+      if (!m.groups.includes(t.group)) m.groups.push(t.group);
+      m.count += 1;
+    });
+    return out;
+  }, [topics]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch md:items-center justify-center md:p-6" style={{ background: "rgba(0,0,0,0.6)" }}>
@@ -391,12 +614,16 @@ export function HelpCenter({ enabledModules, onClose }) {
             {!current ? (
               <div className="max-w-xl" style={{ color: C.muted }}>
                 <div className="text-lg font-semibold mb-2" style={{ color: C.text }}>¿En qué te ayudamos?</div>
-                <div className="text-sm mb-4">Elige un tema a la izquierda o escribe en el buscador lo que necesitas hacer. Cada tema explica los pasos con imágenes de la app.</div>
+                <div className="text-sm mb-4">Elige un departamento a la izquierda (o aquí abajo) y abre el grupo que te interesa, o escribe en el buscador lo que necesitas hacer. Cada tema explica los pasos con imágenes de la app.</div>
                 <div className="grid sm:grid-cols-2 gap-2">
-                  {topics.slice(0, 6).map((t) => (
-                    <button key={t.id} onClick={() => setCurrentId(t.id)} className="text-left p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-                      <div className="text-sm font-semibold" style={{ color: C.text }}>{t.title}</div>
-                      <div className="text-xs mt-1">{t.summary}</div>
+                  {modules.map((m) => (
+                    <button key={m.module} onClick={() => openModule(m.module)} className="text-left p-3"
+                      style={{ background: C.panelAlt, border: `1px solid ${openMods.includes(m.module) ? C.amber : C.border}` }}>
+                      <div className="flex items-center gap-2">
+                        <span className="flex-1 text-sm font-semibold" style={{ color: C.text }}>{MODULE_TITLES[m.module] || m.module}</span>
+                        <span className="text-[11px]" style={{ color: C.muted }}>{m.count} {m.count === 1 ? "tema" : "temas"}</span>
+                      </div>
+                      <div className="text-xs mt-1">{m.groups.join(" · ")}</div>
                     </button>
                   ))}
                 </div>

@@ -1145,7 +1145,7 @@ export function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, 
           items={invoices.filter((i) => i.status !== "anulada")}
           value={invoiceId}
           onChange={setInvoiceId}
-          getLabel={(i) => `${i.invoice_number || i.ncf} — ${clients.find((c) => c.id === i.client_id)?.name || "Cliente"}`}
+          getLabel={(i) => `${[i.invoice_number, i.ncf].filter(Boolean).join(" · ")} — ${clients.find((c) => c.id === i.client_id)?.name || "Cliente"}`}
           placeholder="Buscar factura por NCF o cliente..."
         />
       </Field>
