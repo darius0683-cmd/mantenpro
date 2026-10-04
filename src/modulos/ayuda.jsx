@@ -1,5 +1,5 @@
 // Manual de ayuda: se abre desde el botón "Ayuda" del pie del menú (junto a Tema).
-// Se carga solo cuando alguien lo abre (ver lazy.jsx). Las imágenes viven en public/ayuda/*.webp
+// Se carga solo cuando alguien lo abre (ver lazy.jsx). Las imágenes viven en public/*.webp
 // y se descargan al ver cada tema. Cada empresa ve solo la ayuda de los módulos que tiene.
 //
 // Para agregar un tema: añadirlo a HELP_TOPICS (module, group, title, summary, steps con su
@@ -11,7 +11,8 @@ import { C } from "./base.jsx";
 // Subir este número cuando se reemplacen imágenes con el mismo nombre (evita que el navegador
 // muestre la versión vieja guardada en caché).
 const IMG_VERSION = "1";
-const imgUrl = (name) => `/ayuda/${name}.webp?v=${IMG_VERSION}`;
+// Las imágenes están en la raíz de "public" (ot-1.webp, mat-1.webp, …).
+const imgUrl = (name) => `/${name}.webp?v=${IMG_VERSION}`;
 
 const MODULE_TITLES = {
   tecnico: "Departamento Técnico",
