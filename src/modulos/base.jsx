@@ -579,6 +579,38 @@ export async function compressImage(file, { maxDimension = 1600, quality = 0.82 
     return file;
   }
 }
+// Logo de la empresa: se guarda como imagen pequeña dentro del propio registro de la empresa
+// (data URL). Así sale siempre en facturas, cotizaciones, recibos e informes, sin depender de
+// enlaces de almacenamiento que vencen o que no se pueden abrir desde la ventana de impresión.
+export async function logoToDataUrl(file, maxDimension = 320) {
+  const readAsDataUrl = (blob) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error("No se pudo leer la imagen"));
+    r.readAsDataURL(blob);
+  });
+  if (!file || !file.type || !file.type.startsWith("image/")) throw new Error("El logo debe ser una imagen (PNG, JPG o SVG).");
+  if (file.type === "image/svg+xml") {
+    if (file.size > 150 * 1024) throw new Error("El logo SVG es muy pesado (máximo 150 KB).");
+    return readAsDataUrl(file);
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w; canvas.height = h;
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  if (bitmap.close) bitmap.close();
+  // PNG conserva el fondo transparente; si queda pesado, se prueba WebP
+  let url = canvas.toDataURL("image/png");
+  if (url.length > 180 * 1024) {
+    const webp = canvas.toDataURL("image/webp", 0.9);
+    if (webp.startsWith("data:image/webp") && webp.length < url.length) url = webp;
+  }
+  if (url.length > 300 * 1024) throw new Error("El logo es muy pesado incluso reducido. Prueba con una imagen más simple.");
+  return url;
+}
 export const invoiceReminderText = (companyName, clientName, inv, balance, days) =>
   `Hola ${clientName}, le saluda ${companyName}. Le recordamos que tiene un saldo pendiente de ${fmtMoney(balance)} correspondiente a la factura NCF ${inv.ncf || inv.id} con fecha ${fmtDate(inv.invoice_date)} (${days} días de emitida). Agradecemos su pronto pago. Cualquier duda, quedamos atentos.`;
 
