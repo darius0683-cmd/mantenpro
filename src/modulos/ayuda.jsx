@@ -336,6 +336,8 @@ export const HELP_TOPICS = [
       { text: "Más abajo está el **desempeño por técnico** (órdenes por tipo, incidentes, reabiertas y costo de mano de obra) y el **historial por equipo**, con los equipos que más fallan. Con **Ver** (1) abres todas las órdenes de ese técnico o equipo.", img: "rep-2" },
     ],
     tips: [
+      "Con el filtro **Técnico** ves los informes de una sola persona (órdenes donde fue principal o adicional, y sus incidentes).",
+      "**Imprimir / PDF** saca el informe completo con los filtros que tengas puestos; con un técnico elegido incluye el detalle de cada orden y sus horas. En la ventana de impresión elige **Guardar como PDF**.",
       "También verás los tiempos promedio de atención y de resolución de incidentes por prioridad (SLA).",
       "El uso de checklist al cierre muestra cuántas órdenes se cerraron con checklist y cuántas quedaron 100% respondidas.",
     ],

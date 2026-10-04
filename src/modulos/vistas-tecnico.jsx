@@ -1263,7 +1263,46 @@ export function VistaChecklists({ canDelete, canEdit, checklistTemplates, delete
 }
 
 // Pantalla: reports
-export function VistaReports({ avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
+export function VistaReports({ technicians = [], companyName, equipName, techReportTechFilter = "all", setTechReportTechFilter, avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
+  const oneTech = techReportTechFilter !== "all" ? technicians.find((t) => t.id === techReportTechFilter) : null;
+  // Informe imprimible (en la ventana de impresión se elige "Guardar como PDF")
+  const printReport = () => {
+    const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const pct = (v) => (v === null || v === undefined ? "—" : `${v.toFixed(0)}%`);
+    const range = techReportDateFrom || techReportDateTo ? `${techReportDateFrom ? fmtDate(techReportDateFrom) : "inicio"} al ${techReportDateTo ? fmtDate(techReportDateTo) : "hoy"}` : "Todo el historial";
+    const kpis = [
+      ["Cumplimiento del preventivo", pct(preventiveCompliance.pct), `${preventiveCompliance.done} de ${preventiveCompliance.total} programadas`],
+      ["MTTR (tiempo promedio de reparación)", avgRepairTime.label, `${avgRepairTime.n} correctivas cerradas`],
+      ["MTBF (tiempo medio entre fallas)", mtbf.label, `${mtbf.nEquip} equipos con 2+ fallas`],
+      ["Cumplimiento de fecha límite", pct(deadlineCompliance.pct), `${deadlineCompliance.onTime} a tiempo de ${deadlineCompliance.total}`],
+      ["Órdenes vencidas", String(overdueOpenOrders.length), "abiertas y fuera de fecha"],
+      ["Tasa de reapertura", pct(reopenStats.pct), `${reopenStats.reopened} de ${reopenStats.everCompleted}`],
+      ["Uso de checklist al cierre", pct(checklistCompliance.usagePct), `${checklistCompliance.withChecklist} de ${checklistCompliance.closedTotal} cerradas`],
+      ["Checklist completado al cierre", pct(checklistCompliance.completePct), `${checklistCompliance.complete} de ${checklistCompliance.withChecklist}`],
+    ].map((k) => `<tr><td>${k[0]}</td><td style="text-align:right"><b>${esc(k[1])}</b></td><td class="muted">${esc(k[2])}</td></tr>`).join("");
+    const inc = (st) => reportsIncidents.filter((i) => i.status === st).length;
+    const techRows = techStats.map((t) => `<tr><td>${esc(t.name)}</td><td style="text-align:center">${t.preventivo}</td><td style="text-align:center">${t.correctivo}</td><td style="text-align:center">${t.predictivo}</td><td style="text-align:center">${t.incidentesTotal}</td><td style="text-align:center">${t.total}</td><td style="text-align:center">${t.reopened}</td><td style="text-align:right">${fmtMoney(t.laborCost)}</td></tr>`).join("");
+    const equipRows = equipStats.filter((e) => e.total > 0 || e.incidentesTotal > 0).map((e) => `<tr><td>${esc(e.name)}</td><td>${esc(branchName(e.branch_id))}</td><td style="text-align:center">${e.open}</td><td style="text-align:center">${e.correctivo}</td><td style="text-align:center">${e.incidentesTotal}</td><td style="text-align:center">${e.total}</td><td style="text-align:right">${fmtMoney(e.laborCost)}</td></tr>`).join("");
+    const overdueRows = overdueOpenOrders.map((o) => `<tr><td style="white-space:nowrap">${esc(o.code)}</td><td>${esc(o.title)}</td><td>${esc(techName(o.technician_id))}</td><td>${fmtDate(o.deadline)}</td><td style="text-align:right">${o.daysOverdue}</td></tr>`).join("");
+    const slaRows = incidentSlaStats.map((x) => `<tr><td>${esc(x.label)}</td><td>${esc(x.responseLabel)} (${x.nResponse})</td><td>${esc(x.resolutionLabel)} (${x.nResolution})</td></tr>`).join("");
+    const detail = oneTech ? reportsOrders.slice().sort((a, b) => String(a.scheduled || "").localeCompare(String(b.scheduled || ""))).map((o) => {
+      const role = o.technician_id === oneTech.id ? "Principal" : "Adicional";
+      return `<tr><td style="white-space:nowrap">${esc(o.code)}</td><td style="white-space:nowrap">${o.scheduled ? fmtDate(o.scheduled) : "—"}</td><td>${esc(o.title)}</td><td>${esc(equipName ? equipName(o.equipment_id) : "")}</td><td>${esc(TYPE_CFG[o.type]?.label || o.type)}</td><td>${esc(STATUS_CFG[o.status]?.label || o.status)}</td><td>${role}</td><td style="text-align:right">${o.technician_id === oneTech.id && o.labor_hours != null ? Number(o.labor_hours).toFixed(2) : ""}</td></tr>`;
+    }).join("") : "";
+    const sec = (title, head, rows, empty) => `<div style="margin-top:18px;font-weight:bold;font-size:14px">${title}</div>${rows ? `<table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>` : `<div class="muted" style="margin-top:4px">${empty}</div>`}`;
+    printDocument(oneTech ? `Informe técnico — ${oneTech.name}` : "Informe técnico", `
+      <div class="header-row"><div><h1>${esc(companyName || "")}</h1><div class="muted">Informe técnico${oneTech ? ` · <b>${esc(oneTech.name)}</b>${oneTech.specialty ? ` (${esc(oneTech.specialty)})` : ""}` : " · todos los técnicos"}</div></div>
+      <div class="muted" style="text-align:right">Sucursal: ${branchFilter === "all" ? "Todas" : esc(branchName(branchFilter))}<br/>Período: ${esc(range)}<br/>Emitido: ${fmtDate(todayStrRD())}</div></div>
+      ${sec("Indicadores clave", ["Indicador", "Valor", "Detalle"], kpis)}
+      <div style="margin-top:18px;font-weight:bold;font-size:14px">Incidentes</div>
+      <div class="muted">Abiertos: ${inc("abierto")} · En revisión: ${inc("en_revision")} · Completados: ${inc("resuelto")} · Descartados: ${inc("descartado")} · Total: ${reportsIncidents.length}</div>
+      ${sec("SLA — tiempos promedio por prioridad", ["Prioridad", "Atención", "Resolución"], slaRows, "Sin datos.")}
+      ${sec("Órdenes vencidas — pendientes de cerrar", ["Orden", "Título", "Técnico", "Fecha límite", "Días vencida"], overdueRows, "No hay órdenes vencidas.")}
+      ${sec(oneTech ? "Resumen del técnico" : "Desempeño por técnico", ["Técnico", "Prev.", "Correc.", "Predic.", "Incidentes", "Total OT", "Reabiertas", "Costo M.O."], techRows, "Sin técnicos.")}
+      ${oneTech ? sec(`Órdenes de ${esc(oneTech.name)} (${reportsOrders.length})`, ["Orden", "Fecha", "Trabajo", "Equipo", "Tipo", "Estado", "Rol", "Horas"], detail, "No tiene órdenes en este período.") : ""}
+      ${sec("Por equipo", ["Equipo", "Sucursal", "Abiertas", "Correctivas", "Incidentes", "Total OT", "Costo M.O."], equipRows, "Sin órdenes en equipos.")}
+    `);
+  };
   return (
           <div>
               <div className="flex flex-wrap items-end gap-3 mb-4 p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
@@ -1279,7 +1318,23 @@ export function VistaReports({ avgRepairTime, branchFilter, branchName, checklis
                 {(techReportDateFrom || techReportDateTo) && (
                   <button onClick={() => { setTechReportDateFrom(""); setTechReportDateTo(""); }} className="px-3 py-2 text-xs" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Quitar fechas</button>
                 )}
+                {setTechReportTechFilter && (
+                  <Field label="Técnico">
+                    <select className={inputClass} style={inputStyle} value={techReportTechFilter} onChange={(e) => setTechReportTechFilter(e.target.value)}>
+                      <option value="all">Todos los técnicos</option>
+                      {technicians.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_active === false ? " (de baja)" : ""}</option>)}
+                    </select>
+                  </Field>
+                )}
+                <button onClick={printReport} title="Abre el informe para imprimir. En la ventana de impresión puedes elegir «Guardar como PDF»." className="ml-auto flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+                  <FileText size={14} /> Imprimir / PDF
+                </button>
               </div>
+              {oneTech && (
+                <div className="text-sm mb-4 px-3 py-2" style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, color: C.text }}>
+                  Viendo solo a <b>{oneTech.name}</b>: {reportsOrders.length} {reportsOrders.length !== 1 ? "órdenes" : "orden"} (como principal o adicional) y {reportsIncidents.length} incidente{reportsIncidents.length !== 1 ? "s" : ""} en el período.
+                </div>
+              )}
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Indicadores clave</div>
               <div className="flex flex-wrap gap-3 mb-6">

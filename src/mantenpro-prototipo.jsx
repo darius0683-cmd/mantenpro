@@ -383,6 +383,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [orderDateFrom, setOrderDateFrom] = useState("");
   const [orderDateTo, setOrderDateTo] = useState("");
   const [techReportDateFrom, setTechReportDateFrom] = useState("");
+  const [techReportTechFilter, setTechReportTechFilter] = useState("all");
   const [techReportDateTo, setTechReportDateTo] = useState("");
 
   const loadAll = async () => {
@@ -1030,17 +1031,25 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // Los informes técnicos respetan el filtro de sucursal de arriba (branchFilter) y el rango
   // de fechas propio de esta pantalla (techReportDateFrom/To), en vez de usar siempre todo el
   // histórico sin importar qué sucursal esté seleccionada.
+  // Filtro por técnico (principal o adicional en la orden; en incidentes, el asignado)
+  const orderHasTech = (o, techId) => o.technician_id === techId || orderTechnicians.some((wt) => wt.work_order_id === o.id && wt.technician_id === techId);
   const reportsOrders = useMemo(() => orders.filter((o) =>
     (branchFilter === "all" || o.branch_id === branchFilter) &&
+    (techReportTechFilter === "all" || orderHasTech(o, techReportTechFilter)) &&
     (!techReportDateFrom || (o.scheduled && o.scheduled >= techReportDateFrom)) &&
     (!techReportDateTo || (o.scheduled && o.scheduled <= techReportDateTo))
-  ), [orders, branchFilter, techReportDateFrom, techReportDateTo]);
+    // eslint-disable-next-line
+  ), [orders, branchFilter, techReportDateFrom, techReportDateTo, techReportTechFilter, orderTechnicians]);
   const reportsIncidents = useMemo(() => incidents.filter((i) =>
     (branchFilter === "all" || i.branch_id === branchFilter) &&
+    (techReportTechFilter === "all" || i.technician_id === techReportTechFilter) &&
     (!techReportDateFrom || (i.created_at && i.created_at.slice(0, 10) >= techReportDateFrom)) &&
     (!techReportDateTo || (i.created_at && i.created_at.slice(0, 10) <= techReportDateTo))
-  ), [incidents, branchFilter, techReportDateFrom, techReportDateTo]);
-  const reportsEquipment = useMemo(() => equipment.filter((eq) => branchFilter === "all" || eq.branch_id === branchFilter), [equipment, branchFilter]);
+  ), [incidents, branchFilter, techReportDateFrom, techReportDateTo, techReportTechFilter]);
+  // Con un técnico elegido, solo los equipos en los que trabajó (o tiene incidentes)
+  const reportsEquipment = useMemo(() => equipment.filter((eq) => (branchFilter === "all" || eq.branch_id === branchFilter) &&
+    (techReportTechFilter === "all" || reportsOrders.some((o) => o.equipment_id === eq.id) || reportsIncidents.some((i) => i.equipment_id === eq.id))),
+  [equipment, branchFilter, techReportTechFilter, reportsOrders, reportsIncidents]);
 
   // Costo de mano de obra de una orden: técnico principal (labor_hours × labor_rate_used) +
   // técnicos adicionales (horas por técnico × tarifa por hora de cada uno). No incluye materiales
@@ -1054,7 +1063,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return primary + extra;
   };
 
-  const techStats = useMemo(() => technicians.map((t) => {
+  const techStats = useMemo(() => technicians.filter((t) => techReportTechFilter === "all" || t.id === techReportTechFilter).map((t) => {
     const own = reportsOrders.filter((o) => o.technician_id === t.id || orderTechnicians.some((wt) => wt.work_order_id === o.id && wt.technician_id === t.id));
     const ownIncidents = reportsIncidents.filter((i) => i.technician_id === t.id);
     return {
@@ -1071,7 +1080,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       reopened: own.filter((o) => (o.reopened_count || 0) > 0).length,
       laborCost: own.reduce((sum, o) => sum + (o.technician_id === t.id ? (Number(o.labor_hours) || 0) * (Number(o.labor_rate_used) || 0) : 0) + (Number(orderTechnicians.find((wt) => wt.work_order_id === o.id && wt.technician_id === t.id)?.hours) || 0) * (Number(t.hourly_rate) || 0), 0),
     };
-  }), [technicians, reportsOrders, reportsIncidents, orderTechnicians]);
+  }), [technicians, reportsOrders, reportsIncidents, orderTechnicians, techReportTechFilter]);
 
   const equipStats = useMemo(() => reportsEquipment.map((eq) => {
     const own = reportsOrders.filter((o) => o.equipment_id === eq.id);
@@ -1151,10 +1160,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const overdueOpenOrders = useMemo(() => {
     const today = new Date().toISOString().slice(0, 10);
     return orders
-      .filter((o) => (branchFilter === "all" || o.branch_id === branchFilter) && o.status !== "completada" && o.deadline && o.deadline < today)
+      .filter((o) => (branchFilter === "all" || o.branch_id === branchFilter) && (techReportTechFilter === "all" || orderHasTech(o, techReportTechFilter)) && o.status !== "completada" && o.deadline && o.deadline < today)
       .map((o) => ({ ...o, daysOverdue: Math.round((new Date(today) - new Date(o.deadline)) / 86400000) }))
       .sort((a, b) => b.daysOverdue - a.daysOverdue);
-  }, [orders, branchFilter]);
+    // eslint-disable-next-line
+  }, [orders, branchFilter, techReportTechFilter, orderTechnicians]);
 
   // Tasa de reapertura: de las órdenes que en algún momento se completaron (lo están
   // ahora, o reopened_count dice que lo estuvieron antes de reabrirse), cuántas se
@@ -4357,7 +4367,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("reports") && view === "reports" && (
-            <VistaReports avgRepairTime={avgRepairTime} branchFilter={branchFilter} branchName={branchName} checklistCompliance={checklistCompliance} deadlineCompliance={deadlineCompliance} equipChartData={equipChartData} equipStats={equipStats} incidentEquipChartData={incidentEquipChartData} incidentSlaStats={incidentSlaStats} mtbf={mtbf} overdueOpenOrders={overdueOpenOrders} preventiveCompliance={preventiveCompliance} reopenStats={reopenStats} reportsIncidents={reportsIncidents} reportsOrders={reportsOrders} setHistoryFor={setHistoryFor} setTechReportDateFrom={setTechReportDateFrom} setTechReportDateTo={setTechReportDateTo} techChartData={techChartData} techName={techName} techReportDateFrom={techReportDateFrom} techReportDateTo={techReportDateTo} techStats={techStats} />
+            <VistaReports technicians={technicians} companyName={companyName} equipName={equipName} techReportTechFilter={techReportTechFilter} setTechReportTechFilter={setTechReportTechFilter} avgRepairTime={avgRepairTime} branchFilter={branchFilter} branchName={branchName} checklistCompliance={checklistCompliance} deadlineCompliance={deadlineCompliance} equipChartData={equipChartData} equipStats={equipStats} incidentEquipChartData={incidentEquipChartData} incidentSlaStats={incidentSlaStats} mtbf={mtbf} overdueOpenOrders={overdueOpenOrders} preventiveCompliance={preventiveCompliance} reopenStats={reopenStats} reportsIncidents={reportsIncidents} reportsOrders={reportsOrders} setHistoryFor={setHistoryFor} setTechReportDateFrom={setTechReportDateFrom} setTechReportDateTo={setTechReportDateTo} techChartData={techChartData} techName={techName} techReportDateFrom={techReportDateFrom} techReportDateTo={techReportDateTo} techStats={techStats} />
           )}
 
           {!loadingScope && hasPerm("clients") && view === "clients" && (
