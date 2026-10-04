@@ -21,6 +21,7 @@ const COLS = {
   branch: "Sucursal *",
   location: "Ubicación",
   tech: "Técnico por defecto",
+  client: "Cliente (dueño)",
   freq: "Frecuencia mantenimiento (días)",
   next: "Próximo mantenimiento",
   unit: "Unidad de uso",
@@ -67,11 +68,12 @@ const sameVal = (a, b) => (a ?? null) === (b ?? null) || (a != null && b != null
 // ---------------------------------------------------------------------------
 // Descargar
 // ---------------------------------------------------------------------------
-export async function downloadEquipmentExcel({ list, branches, locations, technicians, companyName }) {
+export async function downloadEquipmentExcel({ list, branches, locations, technicians, clients = [], companyName }) {
   const XLSX = await loadXlsx();
   const branchName = (id) => branches.find((b) => b.id === id)?.name || "";
   const locName = (id) => locations.find((l) => l.id === id)?.name || "";
   const techName = (id) => technicians.find((t) => t.id === id)?.name || "";
+  const clientName = (id) => clients.find((c) => c.id === id)?.name || "";
   const rows = list.slice().sort((a, b) => (a.name || "").localeCompare(b.name || "", "es")).map((e) => ({
     [COLS.id]: e.id,
     [COLS.name]: e.name || "",
@@ -84,6 +86,7 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
     [COLS.branch]: branchName(e.branch_id),
     [COLS.location]: locName(e.location_id),
     [COLS.tech]: techName(e.default_technician_id),
+    [COLS.client]: clientName(e.client_id),
     [COLS.freq]: e.maintenance_frequency_days ?? "",
     [COLS.next]: e.next_maintenance_date || "",
     [COLS.unit]: e.usage_unit || "",
@@ -91,16 +94,17 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
     [COLS.interval]: e.usage_interval ?? "",
   }));
   const ws = XLSX.utils.json_to_sheet(rows, { header: HEADERS });
-  ws["!cols"] = [38, 30, 16, 16, 14, 16, 18, 14, 18, 18, 20, 14, 14, 10, 10, 12].map((wch) => ({ wch }));
-  ws["!autofilter"] = { ref: `A1:P${Math.max(rows.length, 1) + 1}` };
+  ws["!cols"] = [38, 30, 16, 16, 14, 16, 18, 14, 18, 18, 20, 26, 14, 14, 10, 10, 12].map((wch) => ({ wch }));
+  ws["!autofilter"] = { ref: `A1:Q${Math.max(rows.length, 1) + 1}` };
 
-  const listas = [["Sucursales", "Ubicaciones (sucursal → ubicación)", "Técnicos activos", "Estado", "Unidad de uso"]];
+  const listas = [["Sucursales", "Ubicaciones (sucursal → ubicación)", "Técnicos activos", "Estado", "Unidad de uso", "Clientes"]];
   const locRows = locations.map((l) => `${branchName(l.branch_id)} → ${l.name}`).sort();
   const techRows = technicians.filter((t) => t.is_active !== false).map((t) => t.name).sort();
-  const n = Math.max(branches.length, locRows.length, techRows.length, 2);
-  for (let i = 0; i < n; i++) listas.push([branches[i]?.name || "", locRows[i] || "", techRows[i] || "", ["Operativo", "Fuera de servicio"][i] || "", ["horas", "km"][i] || ""]);
+  const clientRows = clients.map((c) => c.name).filter(Boolean).sort((a, b) => a.localeCompare(b, "es"));
+  const n = Math.max(branches.length, locRows.length, techRows.length, clientRows.length, 2);
+  for (let i = 0; i < n; i++) listas.push([branches[i]?.name || "", locRows[i] || "", techRows[i] || "", ["Operativo", "Fuera de servicio"][i] || "", ["horas", "km"][i] || "", clientRows[i] || ""]);
   const wsListas = XLSX.utils.aoa_to_sheet(listas);
-  wsListas["!cols"] = [{ wch: 24 }, { wch: 40 }, { wch: 28 }, { wch: 18 }, { wch: 14 }];
+  wsListas["!cols"] = [{ wch: 24 }, { wch: 40 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 34 }];
 
   const ayuda = [
     ["Cómo usar este archivo"],
@@ -115,6 +119,7 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
     ["Estado: Operativo o Fuera de servicio (vacío = Operativo)."],
     ["Ubicación: si no existe en esa sucursal, se crea al subir el archivo."],
     ["Técnico por defecto: debe existir, estar activo y trabajar en esa sucursal (hoja \"Listas\")."],
+    ["Cliente (dueño): el cliente al que pertenece el equipo, escrito igual que en la hoja \"Listas\". Vacío = equipo propio. Con cliente, el equipo sale en el portal de ese cliente."],
     ["Fechas: AAAA-MM-DD (2026-10-03) o DD/MM/AAAA (03/10/2026)."],
     ["Unidad de uso: horas o km. Si la dejas vacía, no se guardan Lectura actual ni Cada cuántas unidades."],
     [""],
@@ -135,7 +140,7 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
 // ---------------------------------------------------------------------------
 // Leer y validar el Excel (sin guardar nada)
 // ---------------------------------------------------------------------------
-export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, technicians }) {
+export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, technicians, clients = [] }) {
   const byId = new Map(equipment.map((e) => [e.id, e]));
   const bySerial = new Map();
   equipment.forEach((e) => { const k = norm(e.serial_number); if (k) bySerial.set(k, [...(bySerial.get(k) || []), e]); });
@@ -143,6 +148,8 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
   branches.forEach((b) => { const k = norm(b.name); branchesByName.set(k, [...(branchesByName.get(k) || []), b]); });
   const techsByName = new Map();
   technicians.forEach((t) => { const k = norm(t.name); techsByName.set(k, [...(techsByName.get(k) || []), t]); });
+  const clientsByName = new Map();
+  clients.forEach((c) => { const k = norm(c.name); clientsByName.set(k, [...(clientsByName.get(k) || []), c]); });
 
   const result = { creates: [], updates: [], unchanged: 0, errors: [], newLocations: [], possibleDuplicates: [] };
   const existingNameBranch = new Map();
@@ -206,6 +213,19 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
       }
     }
 
+    // Cliente (dueño). Un Excel viejo sin esta columna no toca el cliente que ya tenga el equipo.
+    const hasClientCol = Object.prototype.hasOwnProperty.call(raw, COLS.client) || Object.prototype.hasOwnProperty.call(raw, "Cliente");
+    let clientId = null;
+    if (hasClientCol) {
+      const clientText = text(raw[COLS.client] ?? raw["Cliente"]);
+      if (clientText) {
+        const m = clientsByName.get(norm(clientText)) || [];
+        if (m.length === 1) clientId = m[0].id;
+        else if (m.length > 1) errs.push(`hay ${m.length} clientes llamados "${clientText}"`);
+        else errs.push(`el cliente "${clientText}" no existe (créalo primero en Clientes)`);
+      }
+    }
+
     // Fechas y números
     const installed = parseDate(get("installed"));
     if (installed === undefined) errs.push("fecha de instalación no válida");
@@ -260,9 +280,10 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
       serial_number: serial, installed_at: installed, branch_id: branch.id, location_id: locationId,
       default_technician_id: techId, maintenance_frequency_days: freq, next_maintenance_date: next,
       usage_unit: unit, current_usage: usage, usage_interval: interval,
+      ...(hasClientCol ? { client_id: clientId } : {}),
     };
     if (target) {
-      const changed = locationKey || FIELDS.some((f) => !sameVal(payload[f], target[f]));
+      const changed = locationKey || (hasClientCol ? [...FIELDS, "client_id"] : FIELDS).some((f) => !sameVal(payload[f], target[f]));
       if (!changed) { result.unchanged++; return; }
       result.updates.push({ row: rowNum, id: target.id, payload, locationKey, before: target });
     } else {
@@ -277,7 +298,7 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
 // ---------------------------------------------------------------------------
 // Botones + ventana de carga
 // ---------------------------------------------------------------------------
-export function EquipmentExcelButtons({ canUpload, companyId, companyName, equipment, downloadList, branches, locations, technicians, setEquipment, setLocations }) {
+export function EquipmentExcelButtons({ canUpload, companyId, companyName, equipment, downloadList, branches, locations, technicians, clients = [], setEquipment, setLocations }) {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(null); // { fileName, analysis }
   const [saving, setSaving] = useState(false);
@@ -286,7 +307,7 @@ export function EquipmentExcelButtons({ canUpload, companyId, companyName, equip
 
   const download = async () => {
     setBusy(true);
-    try { await downloadEquipmentExcel({ list: downloadList, branches, locations, technicians, companyName }); }
+    try { await downloadEquipmentExcel({ list: downloadList, branches, locations, technicians, clients, companyName }); }
     catch (err) { window.alert("No se pudo generar el Excel: " + err.message); }
     finally { setBusy(false); }
   };
@@ -303,7 +324,7 @@ export function EquipmentExcelButtons({ canUpload, companyId, companyName, equip
         window.alert("Este archivo no tiene el formato de equipos. Usa \"Descargar Excel\" para obtener el formato correcto (columnas \"Nombre *\" y \"Sucursal *\" como mínimo).");
         return;
       }
-      setPreview({ fileName: file.name, analysis: analyzeEquipmentRows(rows, { equipment, branches, locations, technicians }) });
+      setPreview({ fileName: file.name, analysis: analyzeEquipmentRows(rows, { equipment, branches, locations, technicians, clients }) });
     } catch (err) {
       window.alert("No se pudo leer el Excel: " + err.message);
     } finally {

@@ -501,7 +501,7 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
 }
 
 // Pantalla: equipment
-export function VistaEquipment({ companyLogo, openEquipmentCard, branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+export function VistaEquipment({ clients = [], companyLogo, openEquipmentCard, branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
   // Imprime lo que se ve en pantalla (filtros aplicados) o, si hay equipos marcados, solo esos.
   const printEquipment = (mode) => {
     const list = selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered;
@@ -554,6 +554,7 @@ export function VistaEquipment({ companyLogo, openEquipmentCard, branchFilter, b
                     branches={branches}
                     locations={locations}
                     technicians={technicians}
+                    clients={clients}
                     setEquipment={setEquipment}
                     setLocations={setLocations}
                   />
@@ -637,6 +638,7 @@ export function VistaEquipment({ companyLogo, openEquipmentCard, branchFilter, b
                         {eq.serial_number && <div className="font-mono">S/N: <span style={{ color: C.text }}>{eq.serial_number}</span></div>}
                         {eq.installed_at && <div>Instalado: <span style={{ color: C.text }}>{fmtDate(eq.installed_at)}</span></div>}
                         {locationName(eq.location_id) && <div>Ubicación: <span style={{ color: C.text }}>{locationName(eq.location_id)}</span></div>}
+                        {eq.client_id && <div>Cliente: <span style={{ color: C.text }}>{clients.find((c) => c.id === eq.client_id)?.name || "—"}</span></div>}
                         <div>Técnico: <span style={{ color: eq.default_technician_id ? C.text : C.muted }}>{eq.default_technician_id ? (technicians.find((t) => t.id === eq.default_technician_id)?.name || "—") : "Sin asignar"}</span></div>
                       </div>
                       <div className="flex items-center justify-between mt-3">

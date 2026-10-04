@@ -144,12 +144,13 @@ export const HELP_TOPICS = [
     keywords: "equipos excel cargar subir descargar plantilla campo importar masivo",
     steps: [
       { text: "En **Gestión de Equipos** toca **Descargar Excel** (1). Baja los equipos que se ven con los filtros puestos, o solo los que tengas marcados. Cuando el archivo esté listo, súbelo con **Subir Excel** (2).", img: "xls-1" },
-      { text: "En el archivo: para **agregar** equipos escribe filas nuevas al final **dejando vacía la columna ID**, porque la app le pone el ID sola. Para **corregir**, cambia los datos en su fila sin tocar el ID. La hoja **Listas** trae los nombres exactos de las sucursales, ubicaciones y técnicos.", img: "xls-2" },
+      { text: "En el archivo: para **agregar** equipos escribe filas nuevas al final **dejando vacía la columna ID**, porque la app le pone el ID sola. Para **corregir**, cambia los datos en su fila sin tocar el ID. La hoja **Listas** trae los nombres exactos de las sucursales, ubicaciones, técnicos y clientes.", img: "xls-2" },
       { text: "Al subirlo, la app muestra un resumen antes de guardar: cuántos equipos son nuevos, cuántos se actualizan, cuántos no cambian y qué filas tienen errores, con el motivo. Toca **Cargar** (1) para guardar. Las filas con error no se cargan: corrígelas y vuelve a subir el mismo archivo.", img: "xls-3" },
     ],
     tips: [
       "Borrar una fila del Excel **no** borra el equipo de la app.",
       "Una celda vacía deja ese dato vacío en el equipo (por ejemplo, sin técnico).",
+      "La columna **Cliente (dueño)** dice de quién es cada equipo; así sale en el **portal** de ese cliente. Si subes un Excel viejo que no tiene esa columna, los clientes ya asignados no se tocan.",
       "Si escribes una ubicación que no existe en esa sucursal, la app la crea.",
       "Si una fila nueva tiene el mismo nombre que un equipo de la misma sucursal, la app avisa antes de cargar, por si subiste el archivo dos veces.",
     ],
@@ -344,7 +345,7 @@ export const HELP_TOPICS = [
     steps: [
       { text: "En **Catálogo → Clientes**, toca el ícono de enlace (1) del cliente y luego **Crear enlace del portal**.", img: "portal-1" },
       { text: "**Copia** el enlace (1) o mándalo directo por **WhatsApp** (2) o correo. Abajo ves si el cliente ya lo abrió (3). Si el enlace se filtra, **desactívalo** (4) o crea uno nuevo; el anterior deja de funcionar.", img: "portal-2" },
-      { text: "Así lo ve tu cliente: arriba un resumen (1) de averías abiertas, trabajos en curso y saldo pendiente. Reporta una avería (2) eligiendo el equipo y la envía (3): entra como **incidente abierto** y a los administradores y supervisores les llega el aviso en la campana. En las pestañas (4) ve sus trabajos con el **informe de servicio**, sus equipos y sus **facturas** para imprimir.", img: "portal-3" },
+      { text: "Así lo ve tu cliente: arriba un resumen (1) de averías abiertas, trabajos en curso y saldo pendiente. Reporta una avería (2) eligiendo el equipo y la envía (3): entra como **incidente abierto** y a los administradores y supervisores les llega el aviso en la campana, por correo y al celular (push). En las pestañas (4) ve sus trabajos con el **informe de servicio**, sus equipos y sus **facturas** para imprimir.", img: "portal-3" },
     ],
     tips: [
       "Para que un equipo salga en el portal, ponle el **cliente dueño** en el formulario del equipo. Las órdenes también tienen ahora el campo **Cliente**; se llena solo al elegir un equipo que tiene dueño.",

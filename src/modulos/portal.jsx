@@ -124,6 +124,8 @@ export function ClientPortal({ token }) {
     const { data: res, error } = await supabase.rpc("portal_report_incident", { p_token: token, p_equipment_id: eqId || null, p_title: title.trim(), p_description: desc.trim() || null, p_reported_by: who.trim() || null, p_phone: phone.trim() || null });
     setSending(false);
     if (error) { setFormError(error.message || "No se pudo enviar el reporte."); return; }
+    // Aviso por correo y push a administradores y supervisores (si falla, el reporte igual quedó guardado y avisado en la campana)
+    if (res?.id) supabase.functions.invoke("portal-notify", { body: { token, incident_id: res.id } }).catch(() => {});
     try { localStorage.setItem("mp-portal-who", who.trim()); localStorage.setItem("mp-portal-phone", phone.trim()); } catch { /* sin almacenamiento */ }
     setSentAt(res?.created_at || new Date().toISOString());
     setTitle(""); setDesc(""); setEqId("");
