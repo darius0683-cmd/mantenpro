@@ -24,6 +24,7 @@ const IMPORTERS = {
   soporte: () => import("./soporte.jsx"),
   tecnico: () => import("./tecnico.jsx"),
   ventas: () => import("./ventas.jsx"),
+  visitas: () => import("./visitas.jsx"),
 };
 
 const RELOAD_KEY = "mantenpro-chunk-reload";
@@ -103,6 +104,9 @@ export const QrScannerModal = lazyComponent("equipos-qr", "QrScannerModal");
 
 // nomina
 export const PayrollSection = lazyComponent("nomina", "PayrollSection");
+
+// visitas
+export const VisitsReportModal = lazyComponent("visitas", "VisitsReportModal");
 
 // portal
 export const ClientPortal = lazyComponent("portal", "ClientPortal");

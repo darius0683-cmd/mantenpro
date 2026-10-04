@@ -63,6 +63,27 @@ export const HELP_TOPICS = [
     ],
   },
   {
+    id: "llegada-salida",
+    module: "tecnico",
+    group: "Órdenes de trabajo",
+    title: "Marcar llegada y salida en una orden",
+    summary: "El técnico marca \"Llegué\" y \"Terminé\" desde el celular; queda la hora y la ubicación, y las horas reales pasan a la mano de obra y a la nómina.",
+    keywords: "llegada salida llegue termine check in check out gps ubicacion hora horas reales en sitio visita nomina mano de obra",
+    steps: [
+      { text: "El técnico abre su orden en el celular y toca **Llegué** (1). La app toma la hora (la del sistema, no la del teléfono) y la ubicación del celular. Si la orden estaba **Pendiente**, pasa sola a **En progreso**.", img: "vis-1" },
+      { text: "Mientras trabaja ve el tiempo **en sitio** (1). Al terminar toca **Terminé** (2). Cada visita queda con su enlace al mapa (3) para comprobar dónde estaba.", img: "vis-2" },
+      { text: "El supervisor ve en **Técnicos** quién está en sitio y en qué orden (1). Con **Horas en sitio** (2) abre el reporte.", img: "vis-3" },
+      { text: "En el reporte eliges las fechas (1) y ves las horas de cada técnico (2), listas para la **nómina**. Se puede imprimir o bajar en **Excel** (3) con el detalle de cada visita.", img: "vis-4" },
+      { text: "Si un técnico olvidó marcar la salida, el supervisor le pone la hora con **poner salida** desde la orden; queda marcada como **salida puesta a mano** (1). Con **Usar estas horas en mano de obra** (2) las horas reales pasan al costo de la orden (recuerda guardar).", img: "vis-5" },
+    ],
+    tips: [
+      "Un técnico solo puede estar en sitio en **una orden a la vez**: para llegar a otra, primero marca Terminé en la anterior.",
+      "Si el celular no da la ubicación (permiso negado o sin señal), la llegada igual se marca, pero queda como **sin ubicación**.",
+      "Una orden puede tener varias visitas (varios días o varios técnicos); las horas se suman por técnico.",
+      "Solo el técnico asignado marca su llegada, y su usuario tiene que estar **vinculado a su ficha de técnico** (Administración → Usuarios). Corregir o borrar visitas lo hacen supervisores y administradores.",
+    ],
+  },
+  {
     id: "agenda",
     module: "tecnico",
     group: "Órdenes de trabajo",
@@ -231,7 +252,7 @@ export const HELP_TOPICS = [
     ],
     tips: [
       "Si un técnico ya tiene historial (órdenes o incidentes), al eliminarlo queda **dado de baja**: no se le puede asignar trabajo, pero se conserva su historial. El mismo botón lo reactiva.",
-      "Para que el técnico entre a la app con su propio usuario, invítalo desde Administración → Usuarios y vincúlalo a su ficha de técnico.",
+      "Para que el técnico entre a la app con su propio usuario, invítalo desde Administración → Usuarios y vincúlalo a su ficha de técnico. Si ya tiene usuario, ábrelo en Usuarios y elige su **Ficha de técnico vinculada**.",
     ],
   },
   {

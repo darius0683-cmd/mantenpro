@@ -197,8 +197,9 @@ export function BankAccountsManager({ accounts, onSave, onDelete, onSetDefault, 
   );
 }
 
-export function UserPermissionsModal({ user, branches, onClose, onSave, onUpdateBranch, onUpdateRole, onToggleActive, saving }) {
+export function UserPermissionsModal({ user, branches, technicians, profiles, onUpdateTechnician, onClose, onSave, onUpdateBranch, onUpdateRole, onToggleActive, saving }) {
   const [role, setRole] = useState(user.role);
+  const [techId, setTechId] = useState(user.technician_id || "");
   const [permissions, setPermissions] = useState((user.permissions && typeof user.permissions === "object" && !Array.isArray(user.permissions)) ? user.permissions : (ROLE_DEFAULT_PERMISSIONS[user.role] || {}));
   const [branchId, setBranchId] = useState(user.branch_id || "");
   const [extraBranchIds, setExtraBranchIds] = useState(user.extra_branch_ids || []);
@@ -215,6 +216,12 @@ export function UserPermissionsModal({ user, branches, onClose, onSave, onUpdate
     if (role !== user.role) {
       const roleResult = await onUpdateRole(user.id, role);
       if (roleResult !== true) { setLocalError(`No se pudo cambiar el rol. Error de Supabase: ${roleResult}`); return; }
+    }
+    // Ficha de técnico: solo aplica a usuarios técnicos (si deja de ser técnico, se desvincula)
+    const nextTech = role === "tecnico" ? techId : "";
+    if (onUpdateTechnician && nextTech !== (user.technician_id || "")) {
+      const techResult = await onUpdateTechnician(user.id, nextTech || null);
+      if (techResult !== true) { setLocalError(`No se pudo vincular la ficha de técnico: ${techResult}`); return; }
     }
     const nextExtra = branchId ? extraBranchIds : [];
     if (branchId !== (user.branch_id || "") || JSON.stringify(nextExtra) !== JSON.stringify(user.extra_branch_ids || [])) {
@@ -243,6 +250,20 @@ export function UserPermissionsModal({ user, branches, onClose, onSave, onUpdate
         <div className="text-xs mb-3 px-3 py-2" style={{ background: C.amber + "15", border: `1px solid ${C.amber}40`, color: C.amber }}>
           Vas a cambiar el rol de {ROLE_CFG[user.role]?.label || user.role} a {ROLE_CFG[role]?.label || role}. Sus permisos se van a reiniciar a los que trae ese rol por defecto{role !== "admin" ? " (los puedes ajustar abajo antes de guardar)" : ""}. Este cambio se aplica al hacer clic en "Guardar cambios".
         </div>
+      )}
+      {role === "tecnico" && technicians && (
+        <Field label="Ficha de técnico vinculada">
+          <select className={inputClass} style={inputStyle} value={techId} onChange={(e) => setTechId(e.target.value)}>
+            <option value="">Sin vincular</option>
+            {technicians.filter((t) => t.is_active !== false || t.id === techId).map((t) => {
+              const owner = (profiles || []).find((p) => p.technician_id === t.id && p.id !== user.id);
+              return <option key={t.id} value={t.id} disabled={!!owner}>{t.name}{owner ? ` — ya vinculada a ${owner.full_name || owner.email}` : ""}</option>;
+            })}
+          </select>
+          <div className="text-xs mt-1" style={{ color: techId ? C.muted : C.orange }}>
+            {techId ? "Con esta ficha, el usuario ve sus órdenes, marca llegada y salida y recibe los avisos de sus trabajos." : "Sin vincular, este técnico no ve ninguna orden ni puede marcar llegada y salida."}
+          </div>
+        </Field>
       )}
       <Field label="Sucursal fija (opcional)">
         <select className={inputClass} style={inputStyle} value={branchId} onChange={(e) => { setBranchId(e.target.value); if (!e.target.value) setExtraBranchIds([]); }}>

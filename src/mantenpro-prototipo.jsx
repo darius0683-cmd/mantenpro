@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine } from "lucide-react";
 import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
-import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, prefetchForViews } from "./modulos/lazy.jsx";
+import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
@@ -280,6 +280,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [orderPrefill, setOrderPrefill] = useState(null);
   const [incidentPrefill, setIncidentPrefill] = useState(null);
   const [portalClient, setPortalClient] = useState(null);
+  // Visitas abiertas (técnicos "en sitio"), para mostrarlo en Órdenes y Técnicos
+  const [openVisits, setOpenVisits] = useState([]);
+  const [showVisitsReport, setShowVisitsReport] = useState(false);
   const [showAddClient, setShowAddClient] = useState(false);
   // Último cliente creado desde el botón "+" de Cotizaciones/Facturación/
   // Incidentes/Activos de cliente, para seleccionarlo solo en ese formulario
@@ -505,6 +508,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const stockAt = (productId, branchId) => Number(productStock.find((r) => r.product_id === productId && r.branch_id === branchId)?.quantity || 0);
 
   useEffect(() => { loadAll(); /* eslint-disable-next-line */ }, [companyId]);
+  const reloadOpenVisits = async () => {
+    const { data, error } = await supabase.from("work_order_visits").select("id, work_order_id, technician_id, check_in_at").eq("company_id", companyId).is("check_out_at", null);
+    if (!error) setOpenVisits(data || []);
+  };
+  useEffect(() => { reloadOpenVisits(); /* eslint-disable-next-line */ }, [companyId]);
+  const onSiteOrderIds = useMemo(() => new Set(openVisits.map((v) => v.work_order_id)), [openVisits]);
 
   // Adquirentes de tarjeta (Azul, CardNET, VisaNet...) con su % de comisión y retención —
   // se cargan aparte de loadAll para no tocar ese Promise.all.
@@ -3755,6 +3764,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return true;
   };
 
+  const updateUserTechnician = async (userId, technicianId) => {
+    const { data, error } = await supabase.rpc("admin_update_user_technician", { p_user_id: userId, p_technician_id: technicianId });
+    if (error) return /admin_update_user_technician/.test(error.message) ? "falta correr vincular-usuario-tecnico.sql en Supabase." : error.message;
+    if (data) setProfiles((prev) => prev.map((p) => (p.id === data.id ? data : p)));
+    return true;
+  };
+
   const updateUserRole = async (userId, role) => {
     const { data, error } = await supabase.rpc("admin_update_user_role", { p_user_id: userId, p_role: role });
     if (error) return `${error.message}${error.code ? ` (código ${error.code})` : ""}`;
@@ -4297,7 +4313,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("orders") && view === "orders" && (
-            <VistaOrders branchName={branchName} canDelete={canDelete} canEdit={canEdit} canManage={canManage} companyName={companyName} deleteOrder={deleteOrder} equipName={equipName} equipment={equipment} filteredOrders={filteredOrders} isTecnico={isTecnico} openEditOrder={openEditOrder} openOrderDetail={openOrderDetail} orderAttachmentIds={orderAttachmentIds} orderDateFrom={orderDateFrom} orderDateTo={orderDateTo} orderEquipmentFilter={orderEquipmentFilter} orderTechnicians={orderTechnicians} orders={orders} search={search} selectedOrders={selectedOrders} setOrderDateFrom={setOrderDateFrom} setOrderDateTo={setOrderDateTo} setOrderEquipmentFilter={setOrderEquipmentFilter} setOrderStatus={setOrderStatus} setSearch={setSearch} setSelectedOrders={setSelectedOrders} setStatusFilter={setStatusFilter} setTechnicianFilter={setTechnicianFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} techName={techName} technicianFilter={technicianFilter} technicians={technicians} todayStr={todayStr} typeFilter={typeFilter} />
+            <VistaOrders onSiteOrderIds={onSiteOrderIds} branchName={branchName} canDelete={canDelete} canEdit={canEdit} canManage={canManage} companyName={companyName} deleteOrder={deleteOrder} equipName={equipName} equipment={equipment} filteredOrders={filteredOrders} isTecnico={isTecnico} openEditOrder={openEditOrder} openOrderDetail={openOrderDetail} orderAttachmentIds={orderAttachmentIds} orderDateFrom={orderDateFrom} orderDateTo={orderDateTo} orderEquipmentFilter={orderEquipmentFilter} orderTechnicians={orderTechnicians} orders={orders} search={search} selectedOrders={selectedOrders} setOrderDateFrom={setOrderDateFrom} setOrderDateTo={setOrderDateTo} setOrderEquipmentFilter={setOrderEquipmentFilter} setOrderStatus={setOrderStatus} setSearch={setSearch} setSelectedOrders={setSelectedOrders} setStatusFilter={setStatusFilter} setTechnicianFilter={setTechnicianFilter} setTypeFilter={setTypeFilter} statusFilter={statusFilter} techName={techName} technicianFilter={technicianFilter} technicians={technicians} todayStr={todayStr} typeFilter={typeFilter} />
           )}
 
           {!loadingScope && hasPerm("incidents") && view === "incidents" && (
@@ -4313,7 +4329,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("technicians") && view === "technicians" && (
-            <VistaTechnicians branchFilter={branchFilter} branchName={branchName} branches={branches} canDelete={canDelete} canEdit={canEdit} deleteTech={deleteTech} orders={orders} setEditingTech={setEditingTech} setShowAddTech={setShowAddTech} technicians={technicians} />
+            <VistaTechnicians openVisits={openVisits} onShowVisitsReport={canManage ? () => setShowVisitsReport(true) : undefined} branchFilter={branchFilter} branchName={branchName} branches={branches} canDelete={canDelete} canEdit={canEdit} deleteTech={deleteTech} orders={orders} setEditingTech={setEditingTech} setShowAddTech={setShowAddTech} technicians={technicians} />
           )}
 
           {!loadingScope && hasPerm("tools") && view === "tools" && (
@@ -4452,7 +4468,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("users") && view === "users" && (
-            <VistaUsers branches={branches} canDelete={canDelete} canEdit={canEdit} cancelInvite={cancelInvite} invites={invites} profiles={profiles} setEditingPermissionsFor={setEditingPermissionsFor} setShowInvite={setShowInvite} toggleUserActive={toggleUserActive} updateMaxDiscount={updateMaxDiscount} />
+            <VistaUsers technicians={technicians} branches={branches} canDelete={canDelete} canEdit={canEdit} cancelInvite={cancelInvite} invites={invites} profiles={profiles} setEditingPermissionsFor={setEditingPermissionsFor} setShowInvite={setShowInvite} toggleUserActive={toggleUserActive} updateMaxDiscount={updateMaxDiscount} />
           )}
 
           {!loadingScope && hasPerm("companyProfile") && view === "companyProfile" && (
@@ -4534,8 +4550,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onChecklistFieldChange={editChecklistItemField}
           onChecklistFieldBlur={saveChecklistItemField}
           onClearChecklist={clearOrderChecklist}
+          myTechnicianId={profile.technician_id}
+          canManageVisits={canManage}
+          onVisitsChanged={reloadOpenVisits}
+          onOrderStatusChange={(o, st) => {
+            setOrders((prev) => prev.map((x) => (x.id === o.id ? { ...x, status: st } : x)));
+            setDetailOrder((prev) => (prev && prev.id === o.id ? { ...prev, status: st } : prev));
+          }}
         />
       )}
+      {showVisitsReport && <VisitsReportModal technicians={technicians} orders={orders} companyName={companyName} onClose={() => setShowVisitsReport(false)} />}
       {showAddChecklist && <ChecklistTemplateFormModal onClose={() => setShowAddChecklist(false)} onSave={saveChecklistTemplate} saving={saving} />}
       {editingChecklist && <ChecklistTemplateFormModal initial={editingChecklist} onClose={() => setEditingChecklist(null)} onSave={saveChecklistTemplate} saving={saving} />}
       {showAddBranch && <BranchFormModal onClose={() => setShowAddBranch(false)} onSave={saveBranch} saving={saving} />}
@@ -4648,7 +4672,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {editingAccount && <AccountFormModal initial={editingAccount} onClose={() => setEditingAccount(null)} onSave={saveAccount} saving={saving} />}
       {showAddTaxRate && <TaxRateFormModal onClose={() => setShowAddTaxRate(false)} onSave={saveTaxRate} saving={saving} />}
       {editingTaxRate && <TaxRateFormModal initial={editingTaxRate} onClose={() => setEditingTaxRate(null)} onSave={saveTaxRate} saving={saving} />}
-      {editingPermissionsFor && <UserPermissionsModal user={editingPermissionsFor} branches={branches} onClose={() => setEditingPermissionsFor(null)} onSave={updateUserPermissions} onUpdateBranch={updateUserBranch} onUpdateRole={updateUserRole} onToggleActive={toggleUserActive} saving={saving} />}
+      {editingPermissionsFor && <UserPermissionsModal user={editingPermissionsFor} branches={branches} technicians={technicians} profiles={profiles} onUpdateTechnician={updateUserTechnician} onClose={() => setEditingPermissionsFor(null)} onSave={updateUserPermissions} onUpdateBranch={updateUserBranch} onUpdateRole={updateUserRole} onToggleActive={toggleUserActive} saving={saving} />}
       {showAddPurchase && (() => {
         const receipt = prefillReceiptId ? goodsReceipts.find((r) => r.id === prefillReceiptId) : null;
         const prefill = receipt

@@ -7,7 +7,7 @@ import { C, Dot, Field, INCIDENT_STATUS_CFG, KpiCard, LEFTOVER_CONDITIONS, PRIOR
 import { TechnicianToolRow, ToolListCard, UsageQuickUpdate } from "./lazy.jsx";
 import { EquipmentExcelButtons } from "./equipos-excel.jsx";
 import { printEquipmentQrLabels } from "./equipos-qr.jsx";
-import { AlertTriangle, Ban, Boxes, Building2, ChevronLeft, ChevronRight, ClipboardList, FileText, History, Layers, MapPin, Paperclip, Pencil, Plus, QrCode, RotateCcw, Search, Trash2, Upload, UserCheck, X } from "lucide-react";
+import { AlertTriangle, Ban, Boxes, Building2, Clock, ChevronLeft, ChevronRight, ClipboardList, FileText, History, Layers, MapPin, Paperclip, Pencil, Plus, QrCode, RotateCcw, Search, Trash2, Upload, UserCheck, X } from "lucide-react";
 import { Bar, BarChart, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 // Pantalla: agenda
@@ -164,7 +164,7 @@ export function VistaAgenda({ agendaTechFilter, agendaViewMode, agendaWeekAnchor
 }
 
 // Pantalla: orders
-export function VistaOrders({ branchName, canDelete, canEdit, canManage, companyName, deleteOrder, equipName, equipment, filteredOrders, isTecnico, openEditOrder, openOrderDetail, orderAttachmentIds, orderDateFrom, orderDateTo, orderEquipmentFilter, orderTechnicians, orders, search, selectedOrders, setOrderDateFrom, setOrderDateTo, setOrderEquipmentFilter, setOrderStatus, setSearch, setSelectedOrders, setStatusFilter, setTechnicianFilter, setTypeFilter, statusFilter, techName, technicianFilter, technicians, todayStr, typeFilter }) {
+export function VistaOrders({ onSiteOrderIds, branchName, canDelete, canEdit, canManage, companyName, deleteOrder, equipName, equipment, filteredOrders, isTecnico, openEditOrder, openOrderDetail, orderAttachmentIds, orderDateFrom, orderDateTo, orderEquipmentFilter, orderTechnicians, orders, search, selectedOrders, setOrderDateFrom, setOrderDateTo, setOrderEquipmentFilter, setOrderStatus, setSearch, setSelectedOrders, setStatusFilter, setTechnicianFilter, setTypeFilter, statusFilter, techName, technicianFilter, technicians, todayStr, typeFilter }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-3">
@@ -262,6 +262,7 @@ export function VistaOrders({ branchName, canDelete, canEdit, canManage, company
                       <div className="flex items-center justify-between gap-2 pt-2" style={{ borderTop: `1px solid ${C.border}` }} onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           <Pill label={p.label} color={p.color} />
+                          {onSiteOrderIds?.has(o.id) && <Pill label="En sitio" color={C.green} />}
                           {o.status === "completada" ? (
                             <Pill label={s.label} color={s.color} />
                           ) : (
@@ -659,14 +660,21 @@ export function VistaEquipment({ clients = [], companyLogo, openEquipmentCard, b
 }
 
 // Pantalla: technicians
-export function VistaTechnicians({ branchFilter, branchName, branches, canDelete, canEdit, deleteTech, orders, setEditingTech, setShowAddTech, technicians }) {
+export function VistaTechnicians({ openVisits = [], onShowVisitsReport, branchFilter, branchName, branches, canDelete, canEdit, deleteTech, orders, setEditingTech, setShowAddTech, technicians }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-4">
                 <div className="text-sm" style={{ color: C.muted }}>{technicians.length} técnicos</div>
+                <div className="flex gap-2">
+                {onShowVisitsReport && (
+                  <button onClick={onShowVisitsReport} className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                    <Clock size={14} /> Horas en sitio
+                  </button>
+                )}
                 <button onClick={() => setShowAddTech(true)} disabled={branches.length === 0 || !canEdit("technicians")} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                   <Plus size={14} /> Agregar técnico
                 </button>
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {technicians.filter((t) => branchFilter === "all" || techWorksAtBranch(t, branchFilter)).map((t) => {
@@ -704,6 +712,16 @@ export function VistaTechnicians({ branchFilter, branchName, branches, canDelete
                             {active} orden{active !== 1 ? "es" : ""} activa{active !== 1 ? "s" : ""}
                           </div>
                         )}
+                        {(() => {
+                          const ov = openVisits.find((v) => v.technician_id === t.id);
+                          if (!ov) return null;
+                          const o = orders.find((x) => x.id === ov.work_order_id);
+                          return (
+                            <div className="text-xs px-2 py-1 inline-flex items-center gap-1" style={{ background: C.green + "1A", color: C.green }}>
+                              <MapPin size={11} /> En sitio{o ? ` · ${o.code}` : ""} desde {new Date(ov.check_in_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit", timeZone: "America/Santo_Domingo" })}
+                            </div>
+                          );
+                        })()}
                         {t.can_create_incidents && (
                           <div className="text-xs px-2 py-1 inline-block" style={{ background: C.blue + "1A", color: C.blue }}>
                             Puede reportar incidentes

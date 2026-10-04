@@ -11,7 +11,7 @@ import { Ban, FileText, Mail, RotateCcw, Trash2 } from "lucide-react";
 const RESTORABLE_TABLES = new Set(["branches", "clients", "suppliers", "technicians", "equipment", "locations", "client_assets", "tools", "inventory_materials", "incidents", "chart_of_accounts", "tax_rates"]);
 
 // Pantalla: users
-export function VistaUsers({ branches, canDelete, canEdit, cancelInvite, invites, profiles, setEditingPermissionsFor, setShowInvite, toggleUserActive, updateMaxDiscount }) {
+export function VistaUsers({ technicians = [], branches, canDelete, canEdit, cancelInvite, invites, profiles, setEditingPermissionsFor, setShowInvite, toggleUserActive, updateMaxDiscount }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-4">
@@ -38,6 +38,11 @@ export function VistaUsers({ branches, canDelete, canEdit, cancelInvite, invites
                     <div className="text-xs mb-2" style={{ color: C.muted }}>
                       Sucursal: <span style={{ color: C.text }}>{branches.find((b) => b.id === p.branch_id)?.name || "Sin fijar (varias)"}</span>
                       {p.extra_branch_ids?.length > 0 && <span> · también en {p.extra_branch_ids.map((id) => branches.find((b) => b.id === id)?.name).filter(Boolean).join(", ")}</span>}
+                      {p.role === "tecnico" && (
+                        <div>Ficha de técnico: {p.technician_id
+                          ? <span style={{ color: C.text }}>{technicians.find((t) => t.id === p.technician_id)?.name || "—"}</span>
+                          : <span style={{ color: C.orange }}>sin vincular (no ve órdenes)</span>}</div>
+                      )}
                     </div>
                     <div className="flex items-center justify-between pt-2 mt-1" style={{ borderTop: `1px solid ${C.border}` }}>
                       {p.role === "supervisor" ? (

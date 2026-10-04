@@ -5,6 +5,7 @@ import React from "react";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { ImageIcon, FileText, X, Plus, Pencil, Trash2, CheckCircle2, Unlink, Link2, Upload, Layers, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { OrderVisitsSection } from "./visitas.jsx";
 import { ActivityHistorySection, C, Field, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 
 export function UsageQuickUpdate({ item, onUpdate }) {
@@ -2038,7 +2039,7 @@ export function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave }) 
   );
 }
 
-export function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist }) {
+export function OrderDetailModal({ order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist, myTechnicianId, canManageVisits, onOrderStatusChange, onVisitsChanged }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [uploadingStage, setUploadingStage] = useState(null);
@@ -2239,6 +2240,25 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
           <div>Fecha límite (deadline)<br /><span style={{ color: order.status !== "completada" && order.deadline < todayStrRD() ? C.red : C.text }}>{fmtDate(order.deadline)}</span></div>
         )}
       </div>
+
+      <OrderVisitsSection
+        order={order}
+        techName={techName}
+        myTechnicianId={myTechnicianId}
+        assignedTechIds={[order.technician_id, ...(extraTechnicianIds || [])].filter(Boolean)}
+        canManage={canManageVisits}
+        readOnly={readOnly}
+        onOrderStatusChange={onOrderStatusChange}
+        onVisitsChanged={onVisitsChanged}
+        onApplyHours={(totals) => {
+          const primary = totals.find((x) => x.techId === order.technician_id);
+          if (primary) setLaborHours(String(primary.hours));
+          (extraTechnicianRows || []).forEach((row) => {
+            const x = totals.find((tt) => tt.techId === row.technician_id);
+            if (x && onUpdateTechnicianHours) onUpdateTechnicianHours(row, x.hours);
+          });
+        }}
+      />
 
       {!isTecnico && !readOnly && checklistItems && checklistItems.length === 0 && checklistTemplates && checklistTemplates.length > 0 && (
         <div className="mb-4 px-3 py-2" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
@@ -2536,7 +2556,7 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
           <div className="space-y-1">
             {extraTechnicianRows.map((row) => (
               <TechnicianHoursRow
-                key={row.id}
+                key={`${row.id}:${row.hours ?? ""}`}
                 row={row}
                 name={techName(row.technician_id)}
                 hourlyRate={technicians.find((t) => t.id === row.technician_id)?.hourly_rate}
