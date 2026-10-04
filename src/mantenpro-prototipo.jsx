@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine } from "lucide-react";
 import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
-import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, prefetchForViews } from "./modulos/lazy.jsx";
+import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
@@ -279,6 +279,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [showQrScanner, setShowQrScanner] = useState(false);
   const [orderPrefill, setOrderPrefill] = useState(null);
   const [incidentPrefill, setIncidentPrefill] = useState(null);
+  const [portalClient, setPortalClient] = useState(null);
   const [showAddClient, setShowAddClient] = useState(false);
   // Último cliente creado desde el botón "+" de Cotizaciones/Facturación/
   // Incidentes/Activos de cliente, para seleccionarlo solo en ese formulario
@@ -3394,7 +3395,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   const convertSalesOrderToWorkOrder = (order) => {
-    setOrderFromSalesOrder({ salesOrderId: order.id, title: order.title || `Trabajo — ${order.order_number}`, branch_id: "", equipment_id: "" });
+    setOrderFromSalesOrder({ salesOrderId: order.id, title: order.title || `Trabajo — ${order.order_number}`, branch_id: "", equipment_id: "", client_id: order.client_id || "" });
     setSalesOrderDetail(null);
   };
 
@@ -3576,7 +3577,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   const convertIncidentToOrder = (incident) => {
-    setOrderFromIncident({ incidentId: incident.id, title: incident.title, branch_id: incident.branch_id || "", equipment_id: incident.equipment_id || "" });
+    setOrderFromIncident({ incidentId: incident.id, title: incident.title, branch_id: incident.branch_id || "", equipment_id: incident.equipment_id || "", client_id: incident.client_id || "" });
     setIncidentDetail(null);
   };
 
@@ -4344,7 +4345,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("clients") && view === "clients" && (
-            <VistaClients canDelete={canDelete} canEdit={canEdit} clientSearch={clientSearch} clients={clients} companyName={companyName} deleteClient={deleteClient} filteredClients={filteredClients} selectedClients={selectedClients} setClientSearch={setClientSearch} setEditingClient={setEditingClient} setSelectedClients={setSelectedClients} setShowAddClient={setShowAddClient} />
+            <VistaClients openClientPortal={setPortalClient} canDelete={canDelete} canEdit={canEdit} clientSearch={clientSearch} clients={clients} companyName={companyName} deleteClient={deleteClient} filteredClients={filteredClients} selectedClients={selectedClients} setClientSearch={setClientSearch} setEditingClient={setEditingClient} setSelectedClients={setSelectedClients} setShowAddClient={setShowAddClient} />
           )}
 
           {!loadingScope && (hasPerm("products") || hasPerm("services")) && (view === "products" || view === "services") && (
@@ -4468,15 +4469,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         </div>
       </div>
 
-      {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowOrderForm(false)} onSave={createOrder} saving={saving} />}
+      {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} onClose={() => setShowOrderForm(false)} onSave={createOrder} saving={saving} />}
       {showBulkOrders && <BulkOrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowBulkOrders(false)} onSave={createBulkOrders} saving={saving} />}
-      {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} initial={editingOrder} initialExtraTechIds={orderTechnicians.filter((wt) => wt.work_order_id === editingOrder.id).map((wt) => wt.technician_id)} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
+      {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} initial={editingOrder} initialExtraTechIds={orderTechnicians.filter((wt) => wt.work_order_id === editingOrder.id).map((wt) => wt.technician_id)} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
       {orderFromIncident && (
         <OrderFormModal
           branches={branches}
           equipment={equipment}
           technicians={technicians}
-          initial={{ title: orderFromIncident.title, branch_id: orderFromIncident.branch_id, equipment_id: orderFromIncident.equipment_id }}
+          clients={clients}
+          initial={{ title: orderFromIncident.title, branch_id: orderFromIncident.branch_id, equipment_id: orderFromIncident.equipment_id, client_id: orderFromIncident.client_id }}
           onClose={() => setOrderFromIncident(null)}
           onSave={(payload, files, extraTechIds) => createOrder(payload, files, extraTechIds, orderFromIncident.incidentId)}
           saving={saving}
@@ -4487,7 +4489,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           branches={branches}
           equipment={equipment}
           technicians={technicians}
-          initial={{ title: orderFromSalesOrder.title, branch_id: orderFromSalesOrder.branch_id, equipment_id: orderFromSalesOrder.equipment_id }}
+          clients={clients}
+          initial={{ title: orderFromSalesOrder.title, branch_id: orderFromSalesOrder.branch_id, equipment_id: orderFromSalesOrder.equipment_id, client_id: orderFromSalesOrder.client_id }}
           onClose={() => setOrderFromSalesOrder(null)}
           onSave={(payload, files, extraTechIds) => createOrder(payload, files, extraTechIds, null, orderFromSalesOrder.salesOrderId)}
           saving={saving}
@@ -4540,11 +4543,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {showAddTech && <TechFormModal branches={branches} onClose={() => setShowAddTech(false)} onSave={saveTech} saving={saving} />}
       {editingTech && <TechFormModal branches={branches} initial={editingTech} onClose={() => setEditingTech(null)} onSave={saveTech} saving={saving} />}
       {showAddEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {editingEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
@@ -4561,14 +4564,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           companyLogo={company?.logo_url}
           canCreateOrder={canEdit("orders") && branches.length > 0}
           canReportIncident={canReportIncident}
-          onNewOrder={(eq) => { closeQrEquipment(); setOrderPrefill({ branch_id: eq.branch_id, equipment_id: eq.id, type: "correctivo", technician_id: eq.default_technician_id || "", scheduled: todayStrRD() }); }}
-          onReportIncident={(eq) => { closeQrEquipment(); setIncidentPrefill({ branch_id: eq.branch_id, equipment_id: eq.id, technician_id: eq.default_technician_id || "" }); }}
+          onNewOrder={(eq) => { closeQrEquipment(); setOrderPrefill({ branch_id: eq.branch_id, equipment_id: eq.id, client_id: eq.client_id || "", type: "correctivo", technician_id: eq.default_technician_id || "", scheduled: todayStrRD() }); }}
+          onReportIncident={(eq) => { closeQrEquipment(); setIncidentPrefill({ branch_id: eq.branch_id, equipment_id: eq.id, client_id: eq.client_id || "", technician_id: eq.default_technician_id || "" }); }}
           onShowHistory={(eq, list) => setHistoryFor({ title: `Historial de ${eq.name}`, orders: list })}
           onClose={closeQrEquipment}
         />
       )}
+      {portalClient && <ClientPortalLinkModal client={portalClient} companyId={companyId} companyName={companyName} canManage={!isTecnico} onClose={() => setPortalClient(null)} />}
       {showQrScanner && <QrScannerModal onDetected={handleQrScan} onClose={() => setShowQrScanner(false)} />}
-      {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={createOrder} saving={saving} />}
+      {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={createOrder} saving={saving} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
       {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
       {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
@@ -4998,6 +5002,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 // ---------------------------------------------------------------------------
 export default function MantenProApp() {
   const [inviteToken] = useState(() => new URLSearchParams(window.location.search).get("invite"));
+  // Portal del cliente: con ?portal=<token> se muestra el portal sin pedir inicio de sesión.
+  const [portalToken] = useState(() => new URLSearchParams(window.location.search).get("portal"));
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(undefined);
@@ -5084,6 +5090,7 @@ export default function MantenProApp() {
 
   const signOut = () => supabase.auth.signOut();
 
+  if (portalToken) return <ClientPortal token={portalToken} />;
   if (authLoading || inviteInfo === undefined) return <FullScreenLoader label="Cargando..." />;
   if (!session) return <AuthScreen inviteInfo={inviteInfo} />;
 

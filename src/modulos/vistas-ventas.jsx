@@ -6,10 +6,10 @@ import React from "react";
 import { supabase } from "../supabaseClient";
 import { C, PAYMENT_STATUS_CFG, Pill, QUOTE_STATUS_CFG, SALES_ORDER_STATUS_CFG, cardDetailLine, fmtDate, fmtMoney, iconBtnStyle, invoiceReminderText, listHtml, mailtoLink, printDocument, waLink } from "./base.jsx";
 import { CardAcquirersPanel, CashCloseModal, CashOpenModal } from "./lazy.jsx";
-import { FileText, Mail, MessageCircle, Pencil, Plus, Search, Trash2, Wallet } from "lucide-react";
+import { FileText, Link2, Mail, MessageCircle, Pencil, Plus, Search, Trash2, Wallet } from "lucide-react";
 
 // Pantalla: clients
-export function VistaClients({ canDelete, canEdit, clientSearch, clients, companyName, deleteClient, filteredClients, selectedClients, setClientSearch, setEditingClient, setSelectedClients, setShowAddClient }) {
+export function VistaClients({ openClientPortal, canDelete, canEdit, clientSearch, clients, companyName, deleteClient, filteredClients, selectedClients, setClientSearch, setEditingClient, setSelectedClients, setShowAddClient }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-3">
@@ -50,6 +50,7 @@ export function VistaClients({ canDelete, canEdit, clientSearch, clients, compan
                         <div className="font-semibold truncate">{c.name}</div>
                       </div>
                       <div className="flex items-center gap-1 flex-shrink-0">
+                        {openClientPortal && <button onClick={() => openClientPortal(c)} title="Portal del cliente" style={iconBtnStyle}><Link2 size={14} /></button>}
                         {canEdit("clients") && <button onClick={() => setEditingClient(c)} style={iconBtnStyle}><Pencil size={14} /></button>}
                         {canDelete("clients") && <button onClick={() => deleteClient(c.id)} style={iconBtnStyle}><Trash2 size={14} /></button>}
                       </div>

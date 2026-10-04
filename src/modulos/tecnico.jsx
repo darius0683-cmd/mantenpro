@@ -33,7 +33,8 @@ export function UsageQuickUpdate({ item, onUpdate }) {
 // ---------------------------------------------------------------------------
 // Modales: sucursal / técnico / equipo / ubicación (con soporte de edición)
 // ---------------------------------------------------------------------------
-export function OrderFormModal({ branches, equipment, technicians, initial, initialExtraTechIds, attachments, onDeleteAttachment, onClose, onSave, saving }) {
+export function OrderFormModal({ branches, equipment, technicians, clients, initial, initialExtraTechIds, attachments, onDeleteAttachment, onClose, onSave, saving }) {
+  const [clientId, setClientId] = useState(initial?.client_id || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
   const [type, setType] = useState(initial?.type || "preventivo");
   const [priority, setPriority] = useState(initial?.priority || "media");
@@ -54,7 +55,7 @@ export function OrderFormModal({ branches, equipment, technicians, initial, init
   const submit = () => {
     if (!title.trim() || !branchId || !scheduled) return;
     if (deadline && deadline < scheduled) return;
-    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled, deadline: deadline || null }, files, extraTechIds.filter((id) => id !== technicianId));
+    onSave({ branch_id: branchId, equipment_id: equipmentId || null, technician_id: technicianId || null, type, priority, title: title.trim(), scheduled, deadline: deadline || null, ...(clients ? { client_id: clientId || null } : {}) }, files, extraTechIds.filter((id) => id !== technicianId));
   };
 
   return (
@@ -81,6 +82,13 @@ export function OrderFormModal({ branches, equipment, technicians, initial, init
         <Field label="Fecha límite / deadline (opcional)">
           <input type="date" className={inputClass} style={inputStyle} value={deadline} min={scheduled || undefined} onChange={(e) => setDeadline(e.target.value)} />
         </Field>
+        {clients && (
+          <div className="col-span-2">
+            <Field label="Cliente (opcional — la verá en su portal)">
+              <SearchSelect items={[{ id: "", name: "Sin cliente" }, ...clients]} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} />
+            </Field>
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Sucursal">
@@ -89,7 +97,7 @@ export function OrderFormModal({ branches, equipment, technicians, initial, init
           </select>
         </Field>
         <Field label="Equipo">
-          <select className={inputClass} style={inputStyle} value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)}>
+          <select className={inputClass} style={inputStyle} value={equipmentId} onChange={(e) => { setEquipmentId(e.target.value); const owner = equipment.find((x) => x.id === e.target.value)?.client_id; if (owner) setClientId(owner); }}>
             <option value="">Sin especificar</option>
             {branchEquip.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
           </select>
@@ -217,7 +225,8 @@ export function TechFormModal({ branches, initial, onClose, onSave, saving }) {
   );
 }
 
-export function EquipmentFormModal({ branches, locations, technicians, initial, onClose, onSave, saving, onRequestNewLocation }) {
+export function EquipmentFormModal({ branches, locations, technicians, clients, initial, onClose, onSave, saving, onRequestNewLocation }) {
+  const [clientId, setClientId] = useState(initial?.client_id || "");
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "");
   const [brand, setBrand] = useState(initial?.brand || "");
@@ -250,6 +259,7 @@ export function EquipmentFormModal({ branches, locations, technicians, initial, 
       usage_interval: usageInterval === "" ? null : Number(usageInterval),
       usage_last_maintenance: initial?.usage_last_maintenance ?? null,
       operational_status: operationalStatus,
+      ...(clients ? { client_id: clientId || null } : {}),
     });
   };
 
@@ -270,6 +280,11 @@ export function EquipmentFormModal({ branches, locations, technicians, initial, 
             <option value="fuera_servicio">Fuera de servicio</option>
           </select>
         </Field>
+        {clients && (
+          <Field label="Cliente dueño del equipo (opcional)">
+            <SearchSelect items={[{ id: "", name: "Equipo propio / sin cliente" }, ...clients]} value={clientId} onChange={setClientId} placeholder="Buscar cliente..." getLabel={(c) => c.name} />
+          </Field>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Marca">

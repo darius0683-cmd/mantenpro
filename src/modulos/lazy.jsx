@@ -20,6 +20,7 @@ const IMPORTERS = {
   compras: () => import("./compras.jsx"),
   "equipos-qr": () => import("./equipos-qr.jsx"),
   nomina: () => import("./nomina.jsx"),
+  portal: () => import("./portal.jsx"),
   soporte: () => import("./soporte.jsx"),
   tecnico: () => import("./tecnico.jsx"),
   ventas: () => import("./ventas.jsx"),
@@ -102,6 +103,10 @@ export const QrScannerModal = lazyComponent("equipos-qr", "QrScannerModal");
 
 // nomina
 export const PayrollSection = lazyComponent("nomina", "PayrollSection");
+
+// portal
+export const ClientPortal = lazyComponent("portal", "ClientPortal");
+export const ClientPortalLinkModal = lazyComponent("portal", "ClientPortalLinkModal");
 
 // soporte
 export const SupportViewer = lazyComponent("soporte", "SupportViewer");

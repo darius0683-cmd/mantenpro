@@ -803,9 +803,12 @@ export function ClientSearchSelect({ clients, value, onChange, onCreateFromDgii,
   );
 }
 
-export function printDocument(title, bodyHtml) {
-  const win = window.open("", "_blank", "width=800,height=900");
+// openedWindow: ventana ya abierta en el mismo clic (cuando antes hay que esperar datos del
+// servidor; si se abre después de esperar, Safari/iPhone la bloquea).
+export function printDocument(title, bodyHtml, openedWindow) {
+  const win = openedWindow || window.open("", "_blank", "width=800,height=900");
   if (!win) { alert("Tu navegador bloqueó la ventana emergente. Permite las ventanas emergentes para poder imprimir."); return; }
+  if (openedWindow) win.document.open();
   win.document.write(`<html><head><title>${title}</title><style>
     body { font-family: Arial, Helvetica, sans-serif; color: #111; padding: 28px; }
     h1 { font-size: 18px; margin: 0 0 2px; }

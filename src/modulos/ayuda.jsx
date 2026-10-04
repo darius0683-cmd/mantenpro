@@ -335,6 +335,25 @@ export const HELP_TOPICS = [
     ],
   },
   {
+    id: "portal-cliente",
+    module: "comercial",
+    group: "Clientes y productos",
+    title: "Portal del cliente",
+    summary: "Un enlace para que tu cliente reporte averías y vea sus trabajos, equipos y facturas, sin usuario ni contraseña.",
+    keywords: "portal cliente enlace link whatsapp reportar averia autoservicio facturas trabajos informe compartir desactivar",
+    steps: [
+      { text: "En **Catálogo → Clientes**, toca el ícono de enlace (1) del cliente y luego **Crear enlace del portal**.", img: "portal-1" },
+      { text: "**Copia** el enlace (1) o mándalo directo por **WhatsApp** (2) o correo. Abajo ves si el cliente ya lo abrió (3). Si el enlace se filtra, **desactívalo** (4) o crea uno nuevo; el anterior deja de funcionar.", img: "portal-2" },
+      { text: "Así lo ve tu cliente: arriba un resumen (1) de averías abiertas, trabajos en curso y saldo pendiente. Reporta una avería (2) eligiendo el equipo y la envía (3): entra como **incidente abierto** y a los administradores y supervisores les llega el aviso en la campana. En las pestañas (4) ve sus trabajos con el **informe de servicio**, sus equipos y sus **facturas** para imprimir.", img: "portal-3" },
+    ],
+    tips: [
+      "Para que un equipo salga en el portal, ponle el **cliente dueño** en el formulario del equipo. Las órdenes también tienen ahora el campo **Cliente**; se llena solo al elegir un equipo que tiene dueño.",
+      "El cliente solo ve lo suyo: sus equipos, las órdenes de esos equipos o de sus proyectos, sus averías y sus facturas (no ve costos internos ni facturas anuladas).",
+      "Cada enlace acepta hasta 20 reportes por día, para evitar abusos.",
+      "Los técnicos pueden ver el enlace, pero solo administradores, supervisores y vendedores lo crean o desactivan.",
+    ],
+  },
+  {
     id: "productos-inventario",
     module: "comercial",
     group: "Clientes y productos",
