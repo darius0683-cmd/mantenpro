@@ -1,14 +1,15 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
-import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus } from "lucide-react";
+import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp } from "lucide-react";
 import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
-import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, prefetchForViews } from "./modulos/lazy.jsx";
+import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const companyName = company?.name || "Tu empresa";
   const companyId = profile.company_id;
   const [showChangePassword, setShowChangePassword] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [passwordChanged, setPasswordChanged] = useState(false);
   const canManage = profile.role === "admin" || profile.role === "supervisor";
   const isAdmin = profile.role === "admin";
@@ -4081,6 +4082,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           <button onClick={() => { setShowChangePassword(true); setPasswordChanged(false); }} className="flex items-center gap-2 text-xs mb-2" style={{ color: C.muted }}>
             <ShieldCheck size={13} /> Cambiar contraseña
           </button>
+          <button onClick={() => setShowHelp(true)} className="flex items-center gap-2 text-xs mb-2" style={{ color: C.muted }}>
+            <CircleHelp size={13} /> Ayuda
+          </button>
           <ThemeToggleButton />
           <button onClick={onSignOut} className="flex items-center gap-2 text-xs" style={{ color: C.muted }}>
             <LogOut size={13} /> Cerrar sesión
@@ -4088,6 +4092,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         </div>
       </div>
 
+      {showHelp && <HelpCenter enabledModules={company?.enabled_modules || []} onClose={() => setShowHelp(false)} />}
       {showChangePassword && (
         <ChangePasswordModal
           onClose={() => setShowChangePassword(false)}
