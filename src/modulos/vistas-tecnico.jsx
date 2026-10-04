@@ -6,7 +6,8 @@ import React from "react";
 import { C, Dot, Field, INCIDENT_STATUS_CFG, KpiCard, LEFTOVER_CONDITIONS, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, TOOL_STATUS_CFG, TYPE_CFG, addDaysToDateStr, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, listHtml, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 import { TechnicianToolRow, ToolListCard, UsageQuickUpdate } from "./lazy.jsx";
 import { EquipmentExcelButtons } from "./equipos-excel.jsx";
-import { AlertTriangle, Ban, Boxes, Building2, ChevronLeft, ChevronRight, ClipboardList, FileText, History, Layers, MapPin, Paperclip, Pencil, Plus, RotateCcw, Search, Trash2, Upload, UserCheck, X } from "lucide-react";
+import { printEquipmentQrLabels } from "./equipos-qr.jsx";
+import { AlertTriangle, Ban, Boxes, Building2, ChevronLeft, ChevronRight, ClipboardList, FileText, History, Layers, MapPin, Paperclip, Pencil, Plus, QrCode, RotateCcw, Search, Trash2, Upload, UserCheck, X } from "lucide-react";
 import { Bar, BarChart, Cell, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 // Pantalla: agenda
@@ -500,7 +501,7 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
 }
 
 // Pantalla: equipment
-export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+export function VistaEquipment({ companyLogo, openEquipmentCard, branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
   // Imprime lo que se ve en pantalla (filtros aplicados) o, si hay equipos marcados, solo esos.
   const printEquipment = (mode) => {
     const list = selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered;
@@ -533,6 +534,15 @@ export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteE
                       className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
                     >
                       <FileText size={14} /> {selectedEquipment.size > 0 ? `Imprimir / PDF selección (${selectedEquipment.size})` : `Imprimir / PDF${equipmentStatusFilter === "operativo" ? " operativos" : equipmentStatusFilter === "fuera_servicio" ? " fuera de servicio" : ""}`}
+                    </button>
+                  )}
+                  {equipmentFiltered.length > 0 && (
+                    <button
+                      onClick={() => printEquipmentQrLabels({ list: selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered, companyName, companyLogo, branchName, locationName })}
+                      title="Etiquetas con código QR para pegar en cada equipo. Al escanearlas se abre la ficha del equipo."
+                      className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}
+                    >
+                      <QrCode size={14} /> {selectedEquipment.size > 0 ? `Etiquetas QR (${selectedEquipment.size})` : "Etiquetas QR"}
                     </button>
                   )}
                   <EquipmentExcelButtons
@@ -612,6 +622,7 @@ export function VistaEquipment({ branchFilter, branchName, branches, bulkDeleteE
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           {openOrders > 0 && <Pill label={`${openOrders} abierta${openOrders !== 1 ? "s" : ""}`} color={C.amber} />}
+                          {openEquipmentCard && <button onClick={() => openEquipmentCard(eq.id)} title="Ficha del equipo y etiqueta QR" style={iconBtnStyle}><QrCode size={13} /></button>}
                           <button onClick={() => setEditingEquipment(eq)} style={iconBtnStyle}><Pencil size={13} /></button>
                           {canDelete("equipment") && <button onClick={() => deleteEquipment(eq.id)} style={iconBtnStyle}><Trash2 size={13} /></button>}
                         </div>

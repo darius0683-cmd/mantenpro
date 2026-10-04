@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
-import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp } from "lucide-react";
+import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine } from "lucide-react";
 import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
-import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, prefetchForViews } from "./modulos/lazy.jsx";
+import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
@@ -274,6 +274,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [showInvite, setShowInvite] = useState(false);
   const [inviteLink, setInviteLink] = useState("");
   const [historyFor, setHistoryFor] = useState(null);
+  // Código QR de equipos: "eq" en el enlace abre la ficha del equipo (ver equipos-qr.jsx).
+  const [qrEquipmentId, setQrEquipmentId] = useState(() => new URLSearchParams(window.location.search).get("eq"));
+  const [showQrScanner, setShowQrScanner] = useState(false);
+  const [orderPrefill, setOrderPrefill] = useState(null);
+  const [incidentPrefill, setIncidentPrefill] = useState(null);
   const [showAddClient, setShowAddClient] = useState(false);
   // Último cliente creado desde el botón "+" de Cotizaciones/Facturación/
   // Incidentes/Activos de cliente, para seleccionarlo solo en ese formulario
@@ -999,6 +1004,18 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const equipName = (id) => equipment.find((e) => e.id === id)?.name || "—";
   const equipType = (id) => equipment.find((e) => e.id === id)?.type || "";
   const locationName = (id) => locations.find((l) => l.id === id)?.name || null;
+  const closeQrEquipment = () => {
+    setQrEquipmentId(null);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("eq")) { url.searchParams.delete("eq"); window.history.replaceState(window.history.state, "", url); }
+  };
+  const handleQrScan = async (text) => {
+    setShowQrScanner(false);
+    const { equipmentIdFromScan } = await import("./modulos/equipos-qr.jsx");
+    const id = equipmentIdFromScan(text);
+    if (!id) { setErrorMsg("Ese código QR no es de un equipo de MantenPro."); return; }
+    setQrEquipmentId(id);
+  };
 
   // Los informes técnicos respetan el filtro de sucursal de arriba (branchFilter) y el rango
   // de fechas propio de esta pantalla (techReportDateFrom/To), en vez de usar siempre todo el
@@ -1338,6 +1355,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setShowOrderForm(false);
     setOrderFromIncident(null);
     setOrderFromSalesOrder(null);
+    setOrderPrefill(null);
     if (extraTechIds && extraTechIds.length > 0) await syncOrderTechnicians(data.id, extraTechIds);
     await notifyManyTechnicians([data.technician_id, ...(extraTechIds || [])], {
       title: `Nueva orden asignada: ${data.code}`,
@@ -3482,6 +3500,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       if (error) { setErrorMsg(error.message); return; }
       setIncidents((prev) => [data, ...prev]);
       setShowAddIncident(false);
+      setIncidentPrefill(null);
     }
   };
 
@@ -4126,6 +4145,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             </select>
           </div>
           <div className="flex gap-2 items-center">
+            {companyHasModule("tecnico") && (
+              <button onClick={() => setShowQrScanner(true)} className="p-2" style={{ color: C.text }} title="Escanear el QR de un equipo">
+                <ScanLine size={20} />
+              </button>
+            )}
             <div className="relative">
               <button onClick={() => setShowNotifPanel((v) => !v)} className="relative p-2" style={{ color: C.text }}>
                 <Bell size={20} />
@@ -4284,7 +4308,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("equipment") && view === "equipment" && (
-            <VistaEquipment branchFilter={branchFilter} branchName={branchName} branches={branches} bulkDeleteEquipment={bulkDeleteEquipment} canDelete={canDelete} canEdit={canEdit} companyId={companyId} companyName={companyName} deleteEquipment={deleteEquipment} equipment={equipment} equipmentFiltered={equipmentFiltered} equipmentSearch={equipmentSearch} equipmentStatusFilter={equipmentStatusFilter} equipmentTechFilter={equipmentTechFilter} equipmentTypeFilter={equipmentTypeFilter} equipmentTypes={equipmentTypes} locationName={locationName} locations={locations} orders={orders} selectedEquipment={selectedEquipment} setBranchFilter={setBranchFilter} setEditingEquipment={setEditingEquipment} setEquipment={setEquipment} setEquipmentSearch={setEquipmentSearch} setEquipmentStatusFilter={setEquipmentStatusFilter} setEquipmentTechFilter={setEquipmentTechFilter} setEquipmentTypeFilter={setEquipmentTypeFilter} setHistoryFor={setHistoryFor} setLocations={setLocations} setPendingLocationBranch={setPendingLocationBranch} setSelectedEquipment={setSelectedEquipment} setShowAddEquipment={setShowAddEquipment} setShowAddLocation={setShowAddLocation} technicians={technicians} />
+            <VistaEquipment companyLogo={company?.logo_url} openEquipmentCard={setQrEquipmentId} branchFilter={branchFilter} branchName={branchName} branches={branches} bulkDeleteEquipment={bulkDeleteEquipment} canDelete={canDelete} canEdit={canEdit} companyId={companyId} companyName={companyName} deleteEquipment={deleteEquipment} equipment={equipment} equipmentFiltered={equipmentFiltered} equipmentSearch={equipmentSearch} equipmentStatusFilter={equipmentStatusFilter} equipmentTechFilter={equipmentTechFilter} equipmentTypeFilter={equipmentTypeFilter} equipmentTypes={equipmentTypes} locationName={locationName} locations={locations} orders={orders} selectedEquipment={selectedEquipment} setBranchFilter={setBranchFilter} setEditingEquipment={setEditingEquipment} setEquipment={setEquipment} setEquipmentSearch={setEquipmentSearch} setEquipmentStatusFilter={setEquipmentStatusFilter} setEquipmentTechFilter={setEquipmentTechFilter} setEquipmentTypeFilter={setEquipmentTypeFilter} setHistoryFor={setHistoryFor} setLocations={setLocations} setPendingLocationBranch={setPendingLocationBranch} setSelectedEquipment={setSelectedEquipment} setShowAddEquipment={setShowAddEquipment} setShowAddLocation={setShowAddLocation} technicians={technicians} />
           )}
 
           {!loadingScope && hasPerm("technicians") && view === "technicians" && (
@@ -4525,6 +4549,26 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
       {historyFor && <HistoryModal title={historyFor.title} orders={historyFor.orders} branchName={branchName} equipName={equipName} techName={techName} onClose={() => setHistoryFor(null)} />}
+      {qrEquipmentId && !loadingScope && companyHasModule("tecnico") && (
+        <EquipmentQrModal
+          equipment={equipment.find((e) => e.id === qrEquipmentId) || null}
+          orders={orders}
+          incidents={visibleIncidents}
+          branchName={branchName}
+          locationName={locationName}
+          techName={techName}
+          companyName={companyName}
+          companyLogo={company?.logo_url}
+          canCreateOrder={canEdit("orders") && branches.length > 0}
+          canReportIncident={canReportIncident}
+          onNewOrder={(eq) => { closeQrEquipment(); setOrderPrefill({ branch_id: eq.branch_id, equipment_id: eq.id, type: "correctivo", technician_id: eq.default_technician_id || "", scheduled: todayStrRD() }); }}
+          onReportIncident={(eq) => { closeQrEquipment(); setIncidentPrefill({ branch_id: eq.branch_id, equipment_id: eq.id, technician_id: eq.default_technician_id || "" }); }}
+          onShowHistory={(eq, list) => setHistoryFor({ title: `Historial de ${eq.name}`, orders: list })}
+          onClose={closeQrEquipment}
+        />
+      )}
+      {showQrScanner && <QrScannerModal onDetected={handleQrScan} onClose={() => setShowQrScanner(false)} />}
+      {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={createOrder} saving={saving} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
       {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
       {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
@@ -4793,13 +4837,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           autoSelectToken={autoSelectToken}
         />
       )}
-      {showAddIncident && (
+      {(showAddIncident || incidentPrefill) && (
         <IncidentFormModal
           branches={branches}
           equipment={equipment}
           clients={clients}
           technicians={technicians}
-          onClose={() => setShowAddIncident(false)}
+          initial={incidentPrefill || undefined}
+          onClose={() => { setShowAddIncident(false); setIncidentPrefill(null); }}
           onSave={saveIncident}
           saving={saving}
           onRequestNewClient={() => setShowAddClient(true)}

@@ -166,6 +166,25 @@ export const HELP_TOPICS = [
     ],
     tips: ["Si marcas algunos equipos con la casilla, se imprimen solo esos."],
   },  {
+    id: "equipos-qr",
+    module: "tecnico",
+    group: "Equipos",
+    title: "Etiquetas QR en los equipos",
+    summary: "Pega un QR en cada equipo. Al escanearlo se abre su ficha para ver el historial, abrir una orden o reportar una avería.",
+    keywords: "qr codigo etiqueta escanear camara celular sticker pegatina ficha equipo historial averia reportar orden",
+    steps: [
+      { text: "En **Gestión de Equipos** toca **Etiquetas QR** (1) para imprimir las de todos los equipos que ves en pantalla; si marcas algunos, salen solo esos. El ícono QR de cada tarjeta (2) abre la ficha de ese equipo. Para escanear, usa el botón de arriba (3).", img: "qr-1" },
+      { text: "Las etiquetas salen dos por fila con el logo, el nombre, la serie y la ubicación del equipo. Recórtalas por la línea punteada o imprímelas en papel adhesivo, y pégalas en un lugar visible del equipo.", img: "qr-2" },
+      { text: "Al escanear se abre la ficha: datos y **próximo mantenimiento** (1). Desde ahí puedes **reportar una avería** (2) o **abrir una orden de trabajo** (3), con el equipo, la sucursal y el técnico ya puestos. Abajo ves los **últimos trabajos** hechos al equipo (4).", img: "qr-3" },
+    ],
+    tips: [
+      "También funciona con la cámara normal del teléfono: abre MantenPro y, si la persona no ha iniciado sesión, se lo pide primero.",
+      "En iPhone, si usas MantenPro instalado en la pantalla de inicio, escanea con el botón de la app: así no te pide iniciar sesión en Safari.",
+      "Solo ven la ficha los usuarios de tu empresa; una etiqueta escaneada por alguien de fuera no muestra nada.",
+      "Para que dure en exteriores o cuartos de máquinas, cubre la etiqueta con cinta transparente o imprímela en vinil.",
+    ],
+  },
+  {
     id: "mantenimiento-programado",
     module: "tecnico",
     group: "Equipos",
