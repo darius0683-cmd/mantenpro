@@ -1294,7 +1294,7 @@ export function ProjectDetailModal({
 
   const linkedOrders = orders.filter((o) => o.project_id === project.id);
   // Costo real = mano de obra de las órdenes de trabajo vinculadas (técnico principal + adicionales).
-  // No incluye materiales porque el Almacén no guarda un costo unitario por material.
+  // No incluye materiales: el costo de lo tomado de Productos se muestra aparte (materialsCost).
   const projectLaborCost = linkedOrders.reduce((sum, o) => {
     const primary = (Number(o.labor_hours) || 0) * (Number(o.labor_rate_used) || 0);
     const extra = (orderTechnicians || []).filter((wt) => wt.work_order_id === o.id).reduce((s, wt) => {
@@ -1364,7 +1364,7 @@ export function ProjectDetailModal({
         ) : (
           <div className="text-xs" style={{ color: C.muted }}>Este proyecto no tiene presupuesto asignado (edítalo para agregar uno y comparar).</div>
         )}
-        <div className="text-xs mt-1" style={{ color: C.muted }}>Solo incluye mano de obra de las órdenes de trabajo vinculadas; no incluye materiales (el Almacén no registra costo unitario).</div>
+        <div className="text-xs mt-1" style={{ color: C.muted }}>Solo incluye mano de obra de las órdenes de trabajo vinculadas. El costo de los materiales tomados de Productos se muestra aparte, en "Materiales asignados" (los sobrantes no tienen costo).</div>
       </div>
 
       {/* Órdenes de trabajo */}

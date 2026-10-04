@@ -24,7 +24,6 @@ const MODULE_TITLES = {
 
 // requires: módulos que además debe tener la empresa para ver ese tema
 export const HELP_TOPICS = [
-  // ------------------------------------------------------------------ Órdenes
   {
     id: "crear-orden",
     module: "tecnico",
@@ -42,8 +41,196 @@ export const HELP_TOPICS = [
       "Si pasa la fecha límite y la orden no está completada, se marca en rojo como vencida.",
       "Con **Imprimir lista** sacas en papel o PDF las órdenes que se ven con los filtros puestos.",
     ],
+  },  {
+    id: "cerrar-orden",
+    module: "tecnico",
+    group: "Órdenes de trabajo",
+    title: "Completar y cerrar una orden (checklist, nota, fotos y firma)",
+    summary: "Lo que el técnico registra al terminar el trabajo, y cómo se cierra la orden con todo en regla.",
+    keywords: "cerrar orden completar checklist nota cierre fotos antes despues firma cliente informe servicio pdf correo reabrir",
+    steps: [
+      { text: "Abre la orden. Si tiene **checklist**, responde cada punto: **OK / No OK / N/A** (1), una **lectura numérica** (2) que se marca en rojo si sale del rango esperado, o la casilla de cotejo. Si un punto sale mal, puedes **Reportar como incidente** (3) desde ahí mismo.", img: "close-1" },
+      { text: "Escribe la **nota de solución / cierre** (1): qué se hizo, qué se encontró y qué se recomienda. Sube las **fotos de antes** (2) y **de después** (3) del trabajo.", img: "close-2" },
+      { text: "Para la **firma del cliente**, escribe el nombre de quien firma (1), que firme con el dedo o el mouse en el cuadro (2) y toca **Guardar firma** (3).", img: "close-3" },
+      { text: "Abajo, la app te dice qué falta para poder cerrar (1). Con **Imprimir / descargar PDF** (2) sacas el informe de servicio, o lo envías por correo al cliente. Cuando ya no falta nada, toca **Cerrar orden** (3) y la orden queda **Completada**.", img: "close-4" },
+    ],
+    tips: [
+      "Para cerrar una orden hacen falta tres cosas: el checklist completo (si tiene), la nota de cierre y la firma del cliente.",
+      "El informe de servicio incluye el checklist, los materiales usados, las horas, las fotos de antes y después y la firma.",
+      "Con **Guardar** registras el avance sin cerrar la orden.",
+      "Un supervisor o administrador puede **Reabrir** una orden completada: vuelve a \"En progreso\" y el checklist queda editable otra vez.",
+      "Si no aparece ningún checklist, el supervisor puede cargar uno al abrir la orden (se sugieren los del mismo tipo de equipo).",
+    ],
   },
-  // ------------------------------------------------------------------ Material
+  {
+    id: "agenda",
+    module: "tecnico",
+    group: "Órdenes de trabajo",
+    title: "Agenda: ver el trabajo del mes o de la semana",
+    summary: "El calendario con todas las órdenes programadas, por técnico, con colores según su situación.",
+    keywords: "agenda calendario mes semana programadas vencidas tecnico dia",
+    steps: [
+      { text: "Entra a **Agenda**. Arriba eliges ver por **Mes o Semana** (1) y filtras por **técnico** (2). Cada orden aparece en su día (3): tócala para abrirla.", img: "agenda-1" },
+      { text: "La vista de **Semana** muestra cada día con sus órdenes y el técnico asignado. Con las flechas cambias de semana y con **Hoy** regresas a la fecha actual.", img: "agenda-2" },
+    ],
+    tips: [
+      "Colores: **azul** = próxima, **amarillo** = hoy, **rojo** = vencida (la fecha ya pasó y no se completó), **verde** = completada.",
+      "Arriba sale un aviso rojo cuando hay órdenes vencidas.",
+      "Con el buscador de fecha saltas directo a un día.",
+      "El técnico ve en la Agenda solo sus propias órdenes.",
+    ],
+  },
+  {
+    id: "incidentes",
+    module: "tecnico",
+    group: "Incidentes",
+    title: "Reportar y atender un incidente",
+    summary: "Registra una falla o un reporte del cliente, asígnalo, anota lo encontrado y conviértelo en orden de trabajo o en cotización.",
+    keywords: "incidente reportar falla averia hallazgos revision completado convertir orden cotizacion sla prioridad",
+    steps: [
+      { text: "En **Incidentes** toca **Reportar incidente** (1). Cada tarjeta (2) muestra el estado, el técnico, la sucursal y la prioridad.", img: "inc-1" },
+      { text: "Escribe el **título** (1) y elige la **prioridad** (2). Si quieres, asígnalo a un **técnico** (3) y vincúlalo al **equipo** (4) y al cliente. Toca **Reportar incidente** (5).", img: "inc-2" },
+      { text: "Al abrir un incidente nuevo, el supervisor puede **Marcar en revisión** (1) cuando alguien lo empieza a atender, **Convertir en orden de trabajo** (2) si hay que hacer un trabajo, o **Convertir en cotización** (3) si hay que cobrarle al cliente.", img: "inc-3" },
+      { text: "En **Hallazgos** se escribe lo encontrado (1). Con **Guardar avance** (2) se guarda sin terminar. **Marcar como completado** (3) lo cierra.", img: "inc-4" },
+    ],
+    tips: [
+      "Estados: **Abierto** → **En revisión** → **Completado**. Si no procedía, se puede **Descartar**.",
+      "La app mide cuánto se tardó en atender y en resolver cada incidente. Lo ves en Reportes, por prioridad.",
+      "Un técnico solo puede reportar incidentes si en su ficha está marcado \"Puede reportar incidentes desde la app\".",
+      "Desde el checklist de una orden, un punto \"No OK\" se puede convertir en incidente con un toque.",
+    ],
+  },
+  {
+    id: "proyectos",
+    module: "tecnico",
+    group: "Proyectos",
+    title: "Proyectos: agrupar órdenes, materiales y costos",
+    summary: "Junta en un solo lugar todas las órdenes y materiales de un trabajo grande, y compáralo con el presupuesto.",
+    keywords: "proyecto obra presupuesto costo vincular ordenes materiales cliente responsable",
+    steps: [
+      { text: "En **Proyectos** toca **Nuevo proyecto** (1). Cada tarjeta (2) muestra el cliente, las fechas y cuántas órdenes, materiales y órdenes de venta tiene.", img: "proj-1" },
+      { text: "Escribe el **nombre** (1), elige el **cliente** (2), la sucursal y el técnico responsable, y si quieres pon el **presupuesto** (3) y las fechas. Toca **Crear proyecto**.", img: "proj-2" },
+      { text: "Dentro del proyecto: busca y **Vincula** las órdenes de trabajo (1). En **Materiales asignados** (2) ves lo usado y su costo. Para agregar material, búscalo, pon la cantidad y toca **Descontar y asignar** (3); se descuenta igual que en una orden.", img: "proj-3" },
+    ],
+    tips: [
+      "Arriba se compara el presupuesto con el costo real de mano de obra de las órdenes vinculadas.",
+      "Estados del proyecto: Activo, Pausado, Completado, Cancelado.",
+      "Si eliminas un proyecto, sus órdenes quedan sin proyecto y los materiales asignados regresan a su origen.",
+    ],
+  },
+  {
+    id: "agregar-equipo",
+    module: "tecnico",
+    group: "Equipos",
+    title: "Agregar un equipo y su plan de mantenimiento",
+    summary: "Registra un equipo con sus datos y dile a la app cada cuánto hay que darle mantenimiento.",
+    keywords: "agregar equipo nuevo plan mantenimiento preventivo frecuencia proximo horometro kilometraje ubicacion sucursal",
+    steps: [
+      { text: "En **Gestión de Equipos** toca **Agregar equipo**. Escribe el **nombre** (1) y el **tipo** (2): el tipo sirve para sugerir el checklist correcto. Elige la **sucursal** (3) y la ubicación; con **+** (4) creas una ubicación nueva. En el **plan de mantenimiento** pon cada cuántos días toca (5), la fecha del **próximo** (6) y el **técnico por defecto** (7). Si el equipo se controla por horas o kilómetros, elige la **unidad de uso** (8).", img: "eq-1" },
+    ],
+    tips: [
+      "Si dejas la frecuencia en blanco, el equipo no aparece en \"Mantenimiento programado\".",
+      "Con mantenimiento por uso (horómetro o kilometraje), toca mantenimiento cuando la lectura avanza lo indicado en \"Cada cuántas unidades\".",
+      "En cada tarjeta de equipo, **Historial** muestra todas sus órdenes.",
+      "Para muchos equipos a la vez, usa \"Cargar o actualizar equipos desde Excel\".",
+    ],
+  },
+  {
+    id: "equipos-excel",
+    module: "tecnico",
+    group: "Equipos",
+    title: "Cargar o actualizar equipos desde Excel",
+    summary: "Descarga la lista, llénala en campo y súbela para cargar muchos equipos de una vez.",
+    keywords: "equipos excel cargar subir descargar plantilla campo importar masivo",
+    steps: [
+      { text: "En **Gestión de Equipos** toca **Descargar Excel** (1). Baja los equipos que se ven con los filtros puestos, o solo los que tengas marcados. Cuando el archivo esté listo, súbelo con **Subir Excel** (2).", img: "xls-1" },
+      { text: "En el archivo: para **agregar** equipos escribe filas nuevas al final **dejando vacía la columna ID**, porque la app le pone el ID sola. Para **corregir**, cambia los datos en su fila sin tocar el ID. La hoja **Listas** trae los nombres exactos de las sucursales, ubicaciones y técnicos.", img: "xls-2" },
+      { text: "Al subirlo, la app muestra un resumen antes de guardar: cuántos equipos son nuevos, cuántos se actualizan, cuántos no cambian y qué filas tienen errores, con el motivo. Toca **Cargar** (1) para guardar. Las filas con error no se cargan: corrígelas y vuelve a subir el mismo archivo.", img: "xls-3" },
+    ],
+    tips: [
+      "Borrar una fila del Excel **no** borra el equipo de la app.",
+      "Una celda vacía deja ese dato vacío en el equipo (por ejemplo, sin técnico).",
+      "Si escribes una ubicación que no existe en esa sucursal, la app la crea.",
+      "Si una fila nueva tiene el mismo nombre que un equipo de la misma sucursal, la app avisa antes de cargar, por si subiste el archivo dos veces.",
+    ],
+  },  {
+    id: "equipos-imprimir",
+    module: "tecnico",
+    group: "Equipos",
+    title: "Imprimir o guardar en PDF la lista de equipos",
+    summary: "Saca la lista de equipos operativos, fuera de servicio o todos, en papel o PDF.",
+    keywords: "imprimir pdf equipos operativos fuera de servicio lista guardar",
+    steps: [
+      { text: "En **Gestión de Equipos** elige el estado en el filtro (1): **Operativos**, **Fuera de servicio** o **Todos los estados**. Puedes combinarlo con sucursal, técnico y tipo. Toca **Imprimir / PDF** (2).", img: "print-1" },
+      { text: "Se abre la hoja lista para imprimir. Con \"Todos\" trae un resumen, las dos listas por separado y el total. Para guardarla, en la ventana de impresión elige **Guardar como PDF** en vez de una impresora.", img: "print-2" },
+    ],
+    tips: ["Si marcas algunos equipos con la casilla, se imprimen solo esos."],
+  },  {
+    id: "mantenimiento-programado",
+    module: "tecnico",
+    group: "Equipos",
+    title: "Mantenimiento programado: generar las órdenes preventivas",
+    summary: "La lista de equipos a los que ya les toca (o les va a tocar) mantenimiento, para crear sus órdenes con un toque.",
+    keywords: "mantenimiento programado preventivo generar ordenes vencido proximo horometro lectura frecuencia",
+    steps: [
+      { text: "Entra a **Mantenimiento programado**. Con **Generar todas las vencidas** (1) se crean de una vez las órdenes de todos los equipos que ya tocan, o puedes usar **Generar orden** (2) equipo por equipo. Los vencidos salen en rojo (3) y los próximos 7 días en amarillo. En los equipos por uso, escribe la lectura nueva y toca **Actualizar** (4).", img: "maint-1" },
+    ],
+    tips: [
+      "Cada orden generada es preventiva, con fecha de hoy y asignada al técnico por defecto del equipo, que recibe el aviso.",
+      "Al generar la orden, la fecha del próximo mantenimiento avanza sola según la frecuencia (por ejemplo, 90 días).",
+      "Los equipos fuera de servicio no aparecen aquí.",
+      "Los activos instalados en clientes (Activos en Garantía) también salen en esta pantalla, en su propia lista.",
+    ],
+  },
+  {
+    id: "checklists",
+    module: "tecnico",
+    group: "Checklists",
+    title: "Crear un checklist",
+    summary: "Arma la lista de puntos que el técnico debe revisar en cada tipo de equipo.",
+    keywords: "checklist crear puntos temas revisar ok no ok numerico rango pdf excel plantilla",
+    steps: [
+      { text: "En **Checklists** toca **Nuevo checklist** (1). También puedes **descargar** (2) y **subir** (3) todos los checklists en Excel.", img: "ck-1" },
+      { text: "Escribe el **tipo de equipo** (1), igual que en el tipo del equipo, y el **nombre** del checklist (2). Puedes cargar los puntos desde un **PDF** (3). Para cada punto eliges cómo se responde (4): **Cotejo (✓)**, **OK / No OK / N/A** o **Numérico**, este último con su rango esperado. Agrega puntos (5) y agrúpalos por **temas** (6).", img: "ck-2" },
+    ],
+    tips: [
+      "En el PDF: una línea sin casilla es un tema y una línea con \"[ ]\" es un punto.",
+      "Al abrir una orden preventiva sin checklist se sugieren primero los del mismo tipo de equipo, pero se puede elegir cualquiera.",
+      "En el Excel, si el tipo y el nombre ya existen se actualizan sus puntos; si no, se crea un checklist nuevo.",
+    ],
+  },
+  {
+    id: "tecnicos",
+    module: "tecnico",
+    group: "Técnicos y herramientas",
+    title: "Agregar técnicos",
+    summary: "Registra a tu personal técnico para asignarle órdenes, equipos y herramientas.",
+    keywords: "tecnico agregar personal tarifa hora sucursal baja reactivar incidentes",
+    steps: [
+      { text: "En **Técnicos** toca **Agregar técnico**. Escribe el **nombre** (1), la especialidad y la **tarifa por hora** (2), que se usa para calcular el costo de mano de obra. Elige su sucursal principal y, si trabaja en otras, márcalas. Marca \"Puede reportar incidentes desde la app\" si le das ese permiso.", img: "tech-1" },
+    ],
+    tips: [
+      "Si un técnico ya tiene historial (órdenes o incidentes), al eliminarlo queda **dado de baja**: no se le puede asignar trabajo, pero se conserva su historial. El mismo botón lo reactiva.",
+      "Para que el técnico entre a la app con su propio usuario, invítalo desde Administración → Usuarios y vincúlalo a su ficha de técnico.",
+    ],
+  },
+  {
+    id: "herramientas",
+    module: "tecnico",
+    group: "Técnicos y herramientas",
+    title: "Herramientas: registrar, asignar y confirmar recepción",
+    summary: "Controla qué herramienta tiene cada técnico y si ya confirmó que la recibió.",
+    keywords: "herramientas asignar tecnico confirmar recepcion listado kit prestamo devolver baja carga masiva",
+    steps: [
+      { text: "En **Inventario → Herramientas** toca **Agregar herramienta** (1), o **Carga masiva** para muchas a la vez. Para asignarla, elige el técnico en la tarjeta (2): queda **Pendiente de confirmación** (3) hasta que el técnico, desde su usuario, toca **Confirmar recepción**. En **Listados** (4) armas kits.", img: "tools-1" },
+      { text: "Un **listado** agrupa varias herramientas (por ejemplo, \"Kit básico de refrigeración\"). Créalo con **Nuevo listado** (1). Desde ahí asignas cada herramienta a un técnico con **Asignar** (2) y la devuelves con **Devolver**.", img: "tools-2" },
+    ],
+    tips: [
+      "Estados: Disponible, Asignada, En mantenimiento y Dada de baja.",
+      "Con **Agrupar por técnico** ves de un vistazo lo que tiene cada uno.",
+      "Los técnicos pueden prestarse herramientas entre ellos desde su usuario, y queda registrado.",
+    ],
+  },
   {
     id: "material-en-orden",
     module: "tecnico",
@@ -64,8 +251,7 @@ export const HELP_TOPICS = [
       "Si se elimina una orden, todo el material que tenía asignado regresa a su origen.",
       "En empresas que solo tienen el Departamento Técnico, el material sale del almacén técnico y se devuelve ahí mismo.",
     ],
-  },
-  {
+  },  {
     id: "producto-para-tecnico",
     module: "tecnico",
     requires: ["comercial"],
@@ -80,8 +266,7 @@ export const HELP_TOPICS = [
       "Los servicios y los kits (productos compuestos) no se pueden usar como material porque no llevan existencia propia.",
       "Marca solo lo que de verdad usa el técnico (cables, filtros, refrigerante…). Así el buscador no se llena de mercancía de venta.",
     ],
-  },
-  {
+  },  {
     id: "almacen-sobrantes",
     module: "tecnico",
     group: "Almacén y materiales",
@@ -97,39 +282,21 @@ export const HELP_TOPICS = [
       "Los materiales que ya existían antes aparecen como **Material anterior**: se pueden usar en órdenes, pero su cantidad ya no se cambia a mano. El material nuevo se registra en Productos.",
       "En empresas que solo tienen el Departamento Técnico, aquí se lleva todo el inventario del técnico, con su stock mínimo y máximo.",
     ],
-  },
-  // ------------------------------------------------------------------ Equipos
-  {
-    id: "equipos-excel",
+  },  {
+    id: "reportes-tecnico",
     module: "tecnico",
-    group: "Equipos",
-    title: "Cargar o actualizar equipos desde Excel",
-    summary: "Descarga la lista, llénala en campo y súbela para cargar muchos equipos de una vez.",
-    keywords: "equipos excel cargar subir descargar plantilla campo importar masivo",
+    group: "Reportes",
+    title: "Reportes del Departamento Técnico",
+    summary: "Los indicadores para medir el trabajo: cumplimiento, tiempos, fallas y desempeño de cada técnico.",
+    keywords: "reportes indicadores kpi mttr mtbf cumplimiento preventivo vencidas reapertura desempeño tecnico costo mano de obra sla",
     steps: [
-      { text: "En **Gestión de Equipos** toca **Descargar Excel** (1). Baja los equipos que se ven con los filtros puestos, o solo los que tengas marcados. Cuando el archivo esté listo, súbelo con **Subir Excel** (2).", img: "xls-1" },
-      { text: "En el archivo: para **agregar** equipos escribe filas nuevas al final **dejando vacía la columna ID**, porque la app le pone el ID sola. Para **corregir**, cambia los datos en su fila sin tocar el ID. La hoja **Listas** trae los nombres exactos de las sucursales, ubicaciones y técnicos.", img: "xls-2" },
-      { text: "Al subirlo, la app muestra un resumen antes de guardar: cuántos equipos son nuevos, cuántos se actualizan, cuántos no cambian y qué filas tienen errores, con el motivo. Toca **Cargar** (1) para guardar. Las filas con error no se cargan: corrígelas y vuelve a subir el mismo archivo.", img: "xls-3" },
+      { text: "En **Reportes** elige el rango de fechas (1); la sucursal se cambia en el filtro de arriba. Los **indicadores clave** (2) muestran el cumplimiento del preventivo, el tiempo promedio de reparación (**MTTR**), el tiempo entre fallas (**MTBF**), el cumplimiento de fechas límite, las órdenes vencidas y la tasa de reapertura.", img: "rep-1" },
+      { text: "Más abajo está el **desempeño por técnico** (órdenes por tipo, incidentes, reabiertas y costo de mano de obra) y el **historial por equipo**, con los equipos que más fallan. Con **Ver** (1) abres todas las órdenes de ese técnico o equipo.", img: "rep-2" },
     ],
     tips: [
-      "Borrar una fila del Excel **no** borra el equipo de la app.",
-      "Una celda vacía deja ese dato vacío en el equipo (por ejemplo, sin técnico).",
-      "Si escribes una ubicación que no existe en esa sucursal, la app la crea.",
-      "Si una fila nueva tiene el mismo nombre que un equipo de la misma sucursal, la app avisa antes de cargar, por si subiste el archivo dos veces.",
+      "También verás los tiempos promedio de atención y de resolución de incidentes por prioridad (SLA).",
+      "El uso de checklist al cierre muestra cuántas órdenes se cerraron con checklist y cuántas quedaron 100% respondidas.",
     ],
-  },
-  {
-    id: "equipos-imprimir",
-    module: "tecnico",
-    group: "Equipos",
-    title: "Imprimir o guardar en PDF la lista de equipos",
-    summary: "Saca la lista de equipos operativos, fuera de servicio o todos, en papel o PDF.",
-    keywords: "imprimir pdf equipos operativos fuera de servicio lista guardar",
-    steps: [
-      { text: "En **Gestión de Equipos** elige el estado en el filtro (1): **Operativos**, **Fuera de servicio** o **Todos los estados**. Puedes combinarlo con sucursal, técnico y tipo. Toca **Imprimir / PDF** (2).", img: "print-1" },
-      { text: "Se abre la hoja lista para imprimir. Con \"Todos\" trae un resumen, las dos listas por separado y el total. Para guardarla, en la ventana de impresión elige **Guardar como PDF** en vez de una impresora.", img: "print-2" },
-    ],
-    tips: ["Si marcas algunos equipos con la casilla, se imprimen solo esos."],
   },
 ];
 
@@ -219,7 +386,8 @@ export function HelpCenter({ enabledModules, onClose }) {
             {list}
           </div>
 
-          <div className={`${current ? "block" : "hidden md:block"} flex-1 overflow-y-auto p-4 md:p-6`}>
+          {/* key: al cambiar de tema, el artículo empieza desde arriba */}
+          <div key={currentId || "inicio"} className={`${current ? "block" : "hidden md:block"} flex-1 overflow-y-auto p-4 md:p-6`}>
             {!current ? (
               <div className="max-w-xl" style={{ color: C.muted }}>
                 <div className="text-lg font-semibold mb-2" style={{ color: C.text }}>¿En qué te ayudamos?</div>
