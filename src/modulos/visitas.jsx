@@ -7,6 +7,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Clock, Download, LogIn, LogOut, MapPin, Printer, Trash2, X } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { C, Field, Modal, addDaysToDateStr, fmtDate, inputClass, inputStyle, loadXlsx, printDocument, todayStrRD } from "./base.jsx";
+import { findMyOpenVisit, getOrderDetails, hasPendingFor, isNetworkError, isOnline, newId, patchOrderDetails, perform } from "./offline.jsx";
 
 // Ubicación del celular. Si no hay permiso o no responde, se sigue sin ubicación.
 export function getPosition() {
@@ -48,10 +49,15 @@ export function OrderVisitsSection({ order, techName, myTechnicianId, assignedTe
   const [err, setErr] = useState("");
   const [now, setNow] = useState(Date.now());
 
+  // Sin señal (o con marcas de esta orden todavía en la cola) se usa la copia del teléfono
+  const fromCopy = async () => { const d = await getOrderDetails(order.id); setVisits(d?.visits || []); };
   const load = async () => {
+    if (!isOnline() || (await hasPendingFor(order.id))) { await fromCopy(); return; }
     const { data, error } = await supabase.from("work_order_visits").select("*").eq("work_order_id", order.id).order("check_in_at");
+    if (error && isNetworkError(error)) { await fromCopy(); return; }
     if (error) { setVisits([]); if (/work_order_visits/.test(error.message)) setErr("Falta correr visitas-tecnicos.sql en Supabase."); return; }
     setVisits(data || []);
+    patchOrderDetails(order.id, (d) => ({ ...d, visits: data || [] }));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [order.id]);
   const hasOpen = (visits || []).some((v) => !v.check_out_at);
@@ -66,12 +72,32 @@ export function OrderVisitsSection({ order, techName, myTechnicianId, assignedTe
 
   const mark = async (kind) => {
     setBusy(true); setErr(""); setMsg("Obteniendo tu ubicación…");
+    if (kind === "in" && !isOnline()) {
+      // Sin señal no se puede preguntar al servidor: se revisa en la copia del teléfono
+      const other = await findMyOpenVisit(myTechnicianId);
+      if (other && other.orderId !== order.id) { setBusy(false); setMsg(""); setErr("Tienes otra orden con llegada marcada. Marca \"Terminé\" allí primero."); return; }
+    }
     const pos = await getPosition();
     setMsg(kind === "in" ? "Marcando llegada…" : "Marcando salida…");
-    const fn = kind === "in" ? "visit_check_in" : "visit_check_out";
-    const { data, error } = await supabase.rpc(fn, { p_order: order.id, p_lat: pos.lat ?? null, p_lng: pos.lng ?? null, p_accuracy: pos.accuracy ?? null });
+    // La hora es la del momento en que toca el botón; si no hay señal se envía después con esa hora
+    const at = new Date().toISOString();
+    const ref = newId();
+    const res = await perform("visit", order.id, { kind, at, ref, lat: pos.lat ?? null, lng: pos.lng ?? null, accuracy: pos.accuracy ?? null },
+      `${order.code} · ${kind === "in" ? "Llegué" : "Terminé"} ${fmtTime(at)}`);
     setBusy(false);
-    if (error) { setMsg(""); setErr(error.message); return; }
+    if (res.error) { setMsg(""); setErr(res.error.message); return; }
+    if (res.queued) {
+      const base = visits || [];
+      const next = kind === "in"
+        ? [...base, { id: `local-${ref}`, work_order_id: order.id, technician_id: myTechnicianId, check_in_at: at, check_in_lat: pos.lat ?? null, check_in_lng: pos.lng ?? null, check_in_accuracy: pos.accuracy ?? null, check_out_at: null, check_in_offline: true, pending: true }]
+        : base.map((v) => (v.technician_id === myTechnicianId && !v.check_out_at ? { ...v, check_out_at: at, check_out_lat: pos.lat ?? null, check_out_lng: pos.lng ?? null, check_out_accuracy: pos.accuracy ?? null, check_out_offline: true, pending: true } : v));
+      setVisits(next);
+      await patchOrderDetails(order.id, (d) => ({ ...d, visits: next }));
+      setMsg(`${kind === "in" ? "Llegada" : "Salida"} guardada sin señal a las ${fmtTime(at)}. Se envía sola cuando vuelva la conexión.`);
+      if (kind === "in" && order.status === "pendiente") onOrderStatusChange && onOrderStatusChange(order, "en_progreso");
+      return;
+    }
+    const data = res.data;
     setMsg(pos.error ? `${kind === "in" ? "Llegada" : "Salida"} marcada, pero ${pos.error.toLowerCase()}.` : `${kind === "in" ? "Llegada" : "Salida"} marcada con tu ubicación.`);
     if (kind === "in" && data?.order_status && data.order_status !== order.status) onOrderStatusChange && onOrderStatusChange(order, data.order_status);
     await load();
@@ -125,7 +151,7 @@ export function OrderVisitsSection({ order, techName, myTechnicianId, assignedTe
           </button>
         )
       )}
-      {!busy && msg && <div className="text-xs mb-2" style={{ color: /pero/.test(msg) ? C.orange : C.green }}>{msg}</div>}
+      {!busy && msg && <div className="text-xs mb-2" style={{ color: /pero|sin señal/.test(msg) ? C.orange : C.green }}>{msg}</div>}
       {err && <div className="text-xs mb-2" style={{ color: C.red }}>{err}</div>}
 
       {visits.length > 0 && (
@@ -136,6 +162,8 @@ export function OrderVisitsSection({ order, techName, myTechnicianId, assignedTe
               <div style={{ color: C.muted }}>{fmtDate(dayRD(v.check_in_at))} · {fmtTime(v.check_in_at)} → {v.check_out_at ? fmtTime(v.check_out_at) : <span style={{ color: C.green }}>en sitio</span>}</div>
               <div className="font-mono" style={{ color: C.text }}>{fmtDuration(visitMs(v, now))}</div>
               {v.manual_out && <span style={{ color: C.orange }}>salida puesta a mano</span>}
+              {v.pending ? <span style={{ color: C.orange }}>por enviar</span>
+                : (v.check_in_offline || v.check_out_offline) && <span style={{ color: C.orange }} title="Se marcó sin señal: la hora es la del teléfono del técnico">marcada sin señal</span>}
               <div className="flex items-center gap-2 ml-auto">
                 <Where lat={v.check_in_lat} lng={v.check_in_lng} accuracy={v.check_in_accuracy} label="llegada" />
                 {v.check_out_at && !v.manual_out && <Where lat={v.check_out_lat} lng={v.check_out_lng} accuracy={v.check_out_accuracy} label="salida" />}
@@ -180,10 +208,11 @@ export function VisitsReportModal({ technicians, orders, companyName, onClose })
   const byTech = useMemo(() => {
     const m = new Map();
     (rows || []).forEach((v) => {
-      const cur = m.get(v.technician_id) || { techId: v.technician_id, ms: 0, visits: 0, open: 0, noGps: 0, days: new Set() };
+      const cur = m.get(v.technician_id) || { techId: v.technician_id, ms: 0, visits: 0, open: 0, noGps: 0, offline: 0, days: new Set() };
       if (v.check_out_at) cur.ms += visitMs(v); else cur.open++;
       cur.visits++; cur.days.add(dayRD(v.check_in_at));
       if (v.check_in_lat == null) cur.noGps++;
+      if (v.check_in_offline || v.check_out_offline) cur.offline++;
       m.set(v.technician_id, cur);
     });
     return [...m.values()].sort((a, b) => techName(a.techId).localeCompare(techName(b.techId), "es"));
@@ -198,13 +227,14 @@ export function VisitsReportModal({ technicians, orders, companyName, onClose })
       "Horas": v.check_out_at ? Math.round(msToHours(visitMs(v)) * 100) / 100 : "",
       "Ubicación llegada": v.check_in_lat != null ? mapUrl(v.check_in_lat, v.check_in_lng) : "sin ubicación",
       "Salida a mano": v.manual_out ? "Sí" : "",
+      "Marcada sin señal": v.check_in_offline || v.check_out_offline ? "Sí (hora del teléfono)" : "",
     };
   });
 
   const exportExcel = async () => {
     const XLSX = await loadXlsx();
     const wb = XLSX.utils.book_new();
-    const resumen = byTech.map((t) => ({ "Técnico": techName(t.techId), "Días con visitas": t.days.size, "Visitas": t.visits, "Horas en sitio": Math.round(msToHours(t.ms) * 100) / 100, "Visitas sin cerrar": t.open, "Sin ubicación": t.noGps }));
+    const resumen = byTech.map((t) => ({ "Técnico": techName(t.techId), "Días con visitas": t.days.size, "Visitas": t.visits, "Horas en sitio": Math.round(msToHours(t.ms) * 100) / 100, "Visitas sin cerrar": t.open, "Sin ubicación": t.noGps, "Marcadas sin señal": t.offline }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), "Resumen");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detail), "Detalle");
     XLSX.writeFile(wb, `horas-en-sitio-${from}-a-${to}.xlsx`);
@@ -212,11 +242,11 @@ export function VisitsReportModal({ technicians, orders, companyName, onClose })
   const print = () => {
     const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const resumen = byTech.map((t) => `<tr><td>${esc(techName(t.techId))}</td><td style="text-align:right">${t.days.size}</td><td style="text-align:right">${t.visits}</td><td style="text-align:right"><b>${(Math.round(msToHours(t.ms) * 100) / 100).toFixed(2)}</b></td><td style="text-align:right">${t.open || ""}</td></tr>`).join("");
-    const det = detail.map((d) => `<tr><td>${esc(d["Técnico"])}</td><td>${fmtDate(d["Fecha"])}</td><td>${esc(d["Orden"])}</td><td>${esc(d["Llegada"])}</td><td>${esc(d["Salida"])}</td><td style="text-align:right">${d["Horas"] === "" ? "" : Number(d["Horas"]).toFixed(2)}</td></tr>`).join("");
+    const det = detail.map((d) => `<tr><td>${esc(d["Técnico"])}</td><td>${fmtDate(d["Fecha"])}</td><td>${esc(d["Orden"])}</td><td>${esc(d["Llegada"])}</td><td>${esc(d["Salida"])}${d["Marcada sin señal"] ? " *" : ""}</td><td style="text-align:right">${d["Horas"] === "" ? "" : Number(d["Horas"]).toFixed(2)}</td></tr>`).join("");
     printDocument("Horas en sitio", `<h1>${esc(companyName)}</h1><div class="muted">Horas en sitio por técnico · ${fmtDate(from)} al ${fmtDate(to)}</div>
       <table><thead><tr><th>Técnico</th><th>Días</th><th>Visitas</th><th>Horas</th><th>Sin cerrar</th></tr></thead><tbody>${resumen}</tbody></table>
       <div style="margin-top:16px;font-weight:bold">Detalle</div>
-      <table><thead><tr><th>Técnico</th><th>Fecha</th><th>Orden</th><th>Llegada</th><th>Salida</th><th>Horas</th></tr></thead><tbody>${det}</tbody></table>`);
+      <table><thead><tr><th>Técnico</th><th>Fecha</th><th>Orden</th><th>Llegada</th><th>Salida</th><th>Horas</th></tr></thead><tbody>${det}</tbody></table>${detail.some((d) => d["Marcada sin señal"]) ? `<div class="muted" style="margin-top:6px">* Marcada sin señal: la hora es la del teléfono del técnico.</div>` : ""}`);
   };
 
   return (
@@ -235,7 +265,7 @@ export function VisitsReportModal({ technicians, orders, companyName, onClose })
             </div>
             {byTech.map((t) => (
               <div key={t.techId} className="grid grid-cols-12 gap-2 min-w-[520px] px-3 py-2 text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                <div className="col-span-4 truncate">{techName(t.techId)}{t.noGps > 0 && <span className="text-[11px] ml-1" style={{ color: C.orange }}>({t.noGps} sin ubicación)</span>}</div>
+                <div className="col-span-4 truncate">{techName(t.techId)}{t.noGps > 0 && <span className="text-[11px] ml-1" style={{ color: C.orange }}>({t.noGps} sin ubicación)</span>}{t.offline > 0 && <span className="text-[11px] ml-1" style={{ color: C.orange }} title="La hora la puso el teléfono del técnico">({t.offline} sin señal)</span>}</div>
                 <div className="col-span-2 text-right font-mono">{t.days.size}</div>
                 <div className="col-span-2 text-right font-mono">{t.visits}</div>
                 <div className="col-span-2 text-right font-mono font-semibold">{(Math.round(msToHours(t.ms) * 100) / 100).toFixed(2)}</div>

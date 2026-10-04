@@ -6,6 +6,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { ImageIcon, FileText, X, Plus, Pencil, Trash2, CheckCircle2, Unlink, Link2, Upload, Layers, AlertTriangle } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { OrderVisitsSection } from "./visitas.jsx";
+import { getOrderDetails, hasPendingFor, isNetworkError, isOnline, newId, patchOrderDetails, perform, useOfflineState } from "./offline.jsx";
 import { ActivityHistorySection, C, Field, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 
 export function UsageQuickUpdate({ item, onUpdate }) {
@@ -2069,16 +2070,29 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
   const [materialErr, setMaterialErr] = useState("");
   const [savingMaterial, setSavingMaterial] = useState(false);
 
+  const offlineState = useOfflineState();
   useEffect(() => {
     let active = true;
     setLoadingMaterials(true);
-    supabase.from("work_order_materials").select("*").eq("work_order_id", order.id).order("created_at")
-      .then(({ data, error }) => {
-        if (!active) return;
-        if (!error) setUsedMaterials(data || []);
-        setLoadingMaterials(false);
-      });
+    // Sin señal (o con cambios de esta orden en la cola): lo guardado en el teléfono
+    const fromCopy = () => getOrderDetails(order.id).then((d) => {
+      if (!active) return;
+      setUsedMaterials(d?.materials || []);
+      setLoadingMaterials(false);
+    });
+    (async () => {
+      if (!isOnline() || (await hasPendingFor(order.id))) { fromCopy(); return; }
+      const { data, error } = await supabase.from("work_order_materials").select("*").eq("work_order_id", order.id).order("created_at");
+      if (!active) return;
+      if (error && isNetworkError(error)) { fromCopy(); return; }
+      if (!error) {
+        setUsedMaterials(data || []);
+        if (isTecnico) patchOrderDetails(order.id, (d) => ({ ...d, materials: data || [] }));
+      }
+      setLoadingMaterials(false);
+    })();
     return () => { active = false; };
+    // eslint-disable-next-line
   }, [order.id]);
 
   const materialOptions = techMaterialOptions({ techUsesProducts, products, productStock, materials, branchId: order.branch_id || defaultBranchId });
@@ -2093,20 +2107,24 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
     if (qty > opt.available) { setMaterialErr(`No hay suficiente: disponible ${fmtQty(opt.available)} ${opt.unit || ""}.`); return; }
     setSavingMaterial(true);
     // La base de datos completa nombre, unidad, costo y empresa, y descuenta la existencia.
-    const { data, error } = await supabase.from("work_order_materials")
-      .insert({ work_order_id: order.id, company_id: order.company_id, name: opt.name, quantity: qty, ...techPickToColumns(opt.id) })
-      .select().single();
+    // Sin señal queda en la cola; si al enviarlo ya no hay existencia, aparece en "Cambios hechos sin señal".
+    const row = { id: newId(), work_order_id: order.id, company_id: order.company_id, name: opt.name, quantity: qty, ...techPickToColumns(opt.id) };
+    const res = await perform("material_add", order.id, { row }, `${order.code} · ${fmtQty(qty)} ${opt.unit || ""} ${opt.name}`);
     setSavingMaterial(false);
-    if (error) { setMaterialErr(error.message); return; }
-    setUsedMaterials((prev) => [...prev, data]);
-    onInventoryChanged && onInventoryChanged();
+    if (res.error) { setMaterialErr(res.error.message); return; }
+    const saved = res.data || { ...row, unit: opt.unit || null, pending: true, created_at: new Date().toISOString() };
+    setUsedMaterials((prev) => [...prev, saved]);
+    if (isTecnico) patchOrderDetails(order.id, (d) => ({ ...d, materials: [...(d.materials || []), saved] }));
+    if (res.data) onInventoryChanged && onInventoryChanged();
     setPickMaterialId(""); setPickMaterialQty("");
   };
   const removeUsedMaterial = async (m) => {
+    if (m.pending || !isOnline()) { setMaterialErr("Para devolver material necesitas conexión (y que lo anotado sin señal ya se haya enviado)."); return; }
     const res = await returnMaterialLine("work_order_materials", m);
     if (!res) return;
-    if (res.removed) setUsedMaterials((prev) => prev.filter((x) => x.id !== m.id));
-    else setUsedMaterials((prev) => prev.map((x) => (x.id === m.id ? res.updated : x)));
+    const next = res.removed ? usedMaterials.filter((x) => x.id !== m.id) : usedMaterials.map((x) => (x.id === m.id ? res.updated : x));
+    setUsedMaterials(next);
+    if (isTecnico) patchOrderDetails(order.id, (d) => ({ ...d, materials: next }));
     onInventoryChanged && onInventoryChanged();
   };
   const saveLeftover = (line) => (payload) => onRegisterLeftover({
@@ -2230,6 +2248,11 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
         <Pill label={p.label} color={p.color} />
         <Pill label={s.label} color={s.color} />
       </div>
+      {!offlineState.online && (
+        <div className="text-xs mb-3 px-3 py-2" style={{ background: C.orange + "22", color: C.orange }}>
+          Sin señal: lo que hagas en esta orden se guarda en el teléfono y se envía solo cuando vuelva la conexión. Las fotos que ya estaban enviadas se ven cuando haya señal.
+        </div>
+      )}
       <div className="text-sm font-semibold mb-1" style={{ color: C.text }}>{order.title}</div>
       <div className="grid grid-cols-3 gap-3 text-xs mb-4" style={{ color: C.muted }}>
         <div>Sucursal<br /><span style={{ color: C.text }}>{branchName(order.branch_id)}</span></div>
@@ -2467,6 +2490,9 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
                             </div>
                           )}
                         </a>
+                        {a.pending && (
+                          <span className="absolute bottom-1 left-1 px-1 text-[10px] font-semibold" style={{ background: C.orange, color: "#1A1500" }}>Por enviar</span>
+                        )}
                         {!readOnly && (
                           <button onClick={() => onDeletePhoto(a)} className="absolute top-1 right-1 p-0.5" style={{ background: "#000000a0", color: "#fff" }}>
                             <X size={12} />
@@ -2498,6 +2524,7 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
                   <span className="min-w-0">
                     {m.name} — {fmtQty(m.quantity)} {m.unit || ""}
                     <span className="text-[10px] uppercase tracking-wide ml-2" style={{ color: m.product_id ? C.blue : C.muted }}>{materialLineSource(m, materials)}</span>
+                    {m.pending && <span className="text-[10px] font-semibold ml-2" style={{ color: C.orange }}>por enviar</span>}
                   </span>
                   {!readOnly && canManageWarehouse && (
                     <span className="flex items-center gap-2 flex-shrink-0">
@@ -2589,6 +2616,9 @@ export function OrderDetailModal({ order, attachments, checklistItems, checklist
         {order.client_signature_url && !resigning ? (
           <div>
             <img src={order.client_signature_url} alt="Firma del cliente" className="mb-2" style={{ background: "#fff", maxWidth: 300, border: `1px solid ${C.border}` }} />
+            {String(order.client_signature_url).startsWith("data:") && (
+              <div className="text-[11px] mb-1" style={{ color: C.orange }}>Guardada sin señal · se envía sola cuando vuelva la conexión</div>
+            )}
             <div className="text-xs" style={{ color: C.muted }}>
               Firmado por <span style={{ color: C.text }}>{order.client_signature_name}</span> — {fmtDate(order.client_signature_at?.slice(0, 10))} {order.client_signature_at ? new Date(order.client_signature_at).toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" }) : ""}
             </div>

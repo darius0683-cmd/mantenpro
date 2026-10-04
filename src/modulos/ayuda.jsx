@@ -70,7 +70,7 @@ export const HELP_TOPICS = [
     summary: "El técnico marca \"Llegué\" y \"Terminé\" desde el celular; queda la hora y la ubicación, y las horas reales pasan a la mano de obra y a la nómina.",
     keywords: "llegada salida llegue termine check in check out gps ubicacion hora horas reales en sitio visita nomina mano de obra",
     steps: [
-      { text: "El técnico abre su orden en el celular y toca **Llegué** (1). La app toma la hora (la del sistema, no la del teléfono) y la ubicación del celular. Si la orden estaba **Pendiente**, pasa sola a **En progreso**.", img: "vis-1" },
+      { text: "El técnico abre su orden en el celular y toca **Llegué** (1). La app toma la hora (la del sistema, no la del teléfono) y la ubicación del celular. Si la orden estaba **Pendiente**, pasa sola a **En progreso**. Sin señal también se puede marcar: ver **Trabajar sin señal**.", img: "vis-1" },
       { text: "Mientras trabaja ve el tiempo **en sitio** (1). Al terminar toca **Terminé** (2). Cada visita queda con su enlace al mapa (3) para comprobar dónde estaba.", img: "vis-2" },
       { text: "El supervisor ve en **Técnicos** quién está en sitio y en qué orden (1). Con **Horas en sitio** (2) abre el reporte.", img: "vis-3" },
       { text: "En el reporte eliges las fechas (1) y ves las horas de cada técnico (2), listas para la **nómina**. Se puede imprimir o bajar en **Excel** (3) con el detalle de cada visita.", img: "vis-4" },
@@ -82,6 +82,28 @@ export const HELP_TOPICS = [
       "Una orden puede tener varias visitas (varios días o varios técnicos); las horas se suman por técnico.",
       "El técnico ve sus horas, pero **no ve la tarifa ni el costo** de la mano de obra; eso solo lo ven administradores y supervisores.",
       "Solo el técnico asignado marca su llegada, y su usuario tiene que estar **vinculado a su ficha de técnico** (Administración → Usuarios). Corregir o borrar visitas lo hacen supervisores y administradores.",
+    ],
+  },
+  {
+    id: "sin-conexion",
+    module: "tecnico",
+    group: "Órdenes de trabajo",
+    title: "Trabajar sin señal (modo sin conexión del técnico)",
+    summary: "El técnico sigue trabajando en sus órdenes aunque no tenga internet; todo se envía solo cuando vuelve la señal.",
+    keywords: "sin señal sin internet sin conexion offline datos fuera de linea sotano cola pendiente enviar sincronizar",
+    steps: [
+      { text: "Si el técnico abre la app sin señal, arriba sale **Sin conexión** con la fecha de los datos guardados (1). Ve sus órdenes igual (2) y puede abrirlas. Para que esto funcione tiene que haber entrado **una vez con señal** en ese teléfono.", img: "off-1" },
+      { text: "Dentro de la orden sale el aviso (1). Puede marcar **Llegué** y **Terminé**: se guarda la hora en que toca el botón (2) y la visita queda **por enviar** (3).", img: "off-2" },
+      { text: "También puede llenar el checklist, escribir la nota, tomar fotos (1) y recoger la firma del cliente (2), y **cerrar la orden**. Lo que todavía no se ha enviado sale marcado.", img: "off-3" },
+      { text: "Arriba se ve cuántos cambios faltan por enviar (1). Tocando ahí sale la lista, en el orden en que se hicieron (2). Cuando vuelve la señal se envían **solos**; no hay que hacer nada.", img: "off-4" },
+      { text: "Si el sistema no acepta un cambio (por ejemplo, la orden ya la había cerrado el supervisor), sale en rojo con el motivo (1). Se puede **Reintentar** o **Descartar** (2). Los demás cambios se envían igual.", img: "off-5" },
+    ],
+    tips: [
+      "Las visitas marcadas sin señal llevan la hora del **teléfono** y salen como **marcada sin señal** en la orden y en el reporte de Horas en sitio, para que el supervisor lo sepa.",
+      "La app no deja enviar una marca con la hora del teléfono adelantada ni con más de 10 días de atraso.",
+      "No cierres sesión ni borres los datos del navegador mientras haya cambios por enviar. Si cierras sesión, la app te avisa; lo pendiente se queda en el teléfono y se envía cuando vuelvas a entrar con tu usuario.",
+      "Sin señal no se puede: devolver material, quitar el checklist, borrar fotos ya enviadas, enviar el informe por correo ni reportar incidencias. Las fotos que ya estaban enviadas se ven cuando vuelve la señal.",
+      "Si la señal es muy mala (el teléfono dice que tiene internet pero no carga), la app lo detecta, guarda el cambio y lo reintenta cada 30 segundos.",
     ],
   },
   {

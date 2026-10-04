@@ -4,6 +4,7 @@ import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList,
 import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
 import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
+import { NoCopyScreen, OfflineBar, checkSession, clearStoredAuth, clearUserCopy, discardOp, findStoredAuthUser, getOrderDetails, hasPendingFor, isNetworkError, isOnline, listPendingOps, loadDataSnapshot, loadProfileCache, localBlobUrl, newId, onSynced, patchOrderDetails, perform, prefetchOrderDetails, saveDataSnapshot, saveProfileCache, setOfflineUser, startOfflineSync, useOfflineState } from "./modulos/offline.jsx";
 
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const companyName = company?.name || "Tu empresa";
@@ -386,8 +387,42 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [techReportTechFilter, setTechReportTechFilter] = useState("all");
   const [techReportDateTo, setTechReportDateTo] = useState("");
 
+  // ---- Modo sin conexión del técnico ----
+  // dataReadyRef: ya hay datos de verdad en pantalla (del servidor o de la copia); antes de eso
+  // no se guarda la copia, para no pisarla con listas vacías.
+  const dataReadyRef = useRef(false);
+  const [snapshotAt, setSnapshotAt] = useState(null);
+  const restoreSnapshot = async () => {
+    const snap = await loadDataSnapshot(session.user.id);
+    const d = snap?.data;
+    if (d) {
+      setBranches(d.branches || []);
+      setTechnicians(d.technicians || []);
+      setEquipment(d.equipment || []);
+      setLocations(d.locations || []);
+      setOrders(d.orders || []);
+      setOrderTechnicians(d.orderTechnicians || []);
+      setChecklistTemplates(d.checklistTemplates || []);
+      setClients(d.clients || []);
+      setMaterials(d.materials || []);
+      setProducts(d.products || []);
+      setProductStock(d.productStock || []);
+      setIncidents(d.incidents || []);
+      setTools(d.tools || []);
+      setProfiles(d.profiles || []);
+      setOrderAttachmentIds(new Set(d.attachmentOrderIds || []));
+      setOrderChecklistSummary(new Map(d.checklistSummary || []));
+      setSnapshotAt(snap.savedAt);
+      dataReadyRef.current = true;
+    } else {
+      setErrorMsg("Sin conexión y sin datos guardados en este teléfono. Conéctate para cargar tus órdenes.");
+    }
+    setLoadingScope(false);
+  };
+
   const loadAll = async () => {
     setLoadingScope(true);
+    if (isTecnico && !isOnline()) { await restoreSnapshot(); return; }
     const [br, tech, eq, loc, ord, woa, wocki, cktpl, ckitems, profs, inv, cli, prod, pcomp, ast, sup, purch, ncf, invc, cnotes, qts, sord, inc, oexp, coa, txr, csess, tls, tlists, tloans, mats, wot, rcon, banktx, cba, projs, projmats, pords, pordit, grcpts, grcptit] = await Promise.all([
       fetchAllRows(() => supabase.from("branches").select("*").eq("company_id", companyId).order("name")),
       fetchAllRows(() => supabase.from("technicians").select("*").eq("company_id", companyId).order("name")),
@@ -431,6 +466,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       fetchAllRows(() => supabase.from("goods_receipts").select("*").eq("company_id", companyId).order("receipt_date", { ascending: false })),
       fetchAllRows(() => supabase.from("goods_receipt_items").select("*")),
     ]);
+    if (br.error && isNetworkError(br.error)) {
+      // Se cayó la señal: el técnico sigue con la copia; los demás conservan lo que ya veían
+      if (isTecnico) { await restoreSnapshot(); return; }
+      setErrorMsg("Sin conexión. Lo que ves puede no estar al día.");
+      setLoadingScope(false);
+      return;
+    }
     if (br.error) setErrorMsg(br.error.message);
     setBranches(br.data || []);
     setTechnicians(tech.data || []);
@@ -488,6 +530,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const ps = await fetchAllRows(() => supabase.from("product_stock").select("product_id, branch_id, quantity").eq("company_id", companyId));
     setProductStock(ps.error ? [] : (ps.data || []));
     setLoadingScope(false);
+    if (isTecnico) {
+      dataReadyRef.current = true;
+      setSnapshotAt(null);
+      // Detalle de las órdenes abiertas del técnico, para poder abrirlas sin señal
+      const myTech = profile.technician_id;
+      const secondary = new Set((wot.data || []).filter((wt) => wt.technician_id === myTech).map((wt) => wt.work_order_id));
+      const openIds = (ord.data || []).filter((o) => o.status !== "completada" && (o.technician_id === myTech || secondary.has(o.id))).map((o) => o.id);
+      prefetchOrderDetails(openIds);
+    }
   };
   const transferStock = async (fromId, toId, items, notes, date) => {
     setSaving(true);
@@ -515,6 +566,47 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
   useEffect(() => { reloadOpenVisits(); /* eslint-disable-next-line */ }, [companyId]);
   const onSiteOrderIds = useMemo(() => new Set(openVisits.map((v) => v.work_order_id)), [openVisits]);
+
+  // Copia en el teléfono de lo que el técnico necesita sin señal (se actualiza sola con cada cambio)
+  useEffect(() => {
+    if (!isTecnico || !dataReadyRef.current) return undefined;
+    const t = setTimeout(() => {
+      const myTech = profile.technician_id;
+      const secondary = new Set(orderTechnicians.filter((wt) => wt.technician_id === myTech).map((wt) => wt.work_order_id));
+      const monthAgo = addDaysToDateStr(todayStrRD(), -30);
+      const myOrders = orders.filter((o) => (o.technician_id === myTech || secondary.has(o.id))
+        && (o.status !== "completada" || (o.completed_at || o.scheduled || "").slice(0, 10) >= monthAgo));
+      const myOrderIds = new Set(myOrders.map((o) => o.id));
+      saveDataSnapshot(session.user.id, {
+        branches, equipment, locations, clients, checklistTemplates, materials, products, productStock, tools,
+        technicians: technicians.map(({ hourly_rate: _rate, ...t }) => t), // la tarifa no se guarda en el teléfono
+        profiles: profiles.filter((p) => p.id === session.user.id),
+        orders: myOrders,
+        orderTechnicians: orderTechnicians.filter((wt) => myOrderIds.has(wt.work_order_id)),
+        incidents: incidents.filter((i) => i.technician_id === myTech),
+        attachmentOrderIds: [...orderAttachmentIds].filter((id) => myOrderIds.has(id)),
+        checklistSummary: [...orderChecklistSummary.entries()].filter(([id]) => myOrderIds.has(id)),
+      });
+    }, 1000);
+    return () => clearTimeout(t);
+    /* eslint-disable-next-line */
+  }, [isTecnico, orders, equipment, branches, locations, technicians, clients, checklistTemplates, orderTechnicians, materials, products, productStock, incidents, tools, orderAttachmentIds, orderChecklistSummary]);
+
+  // Volvió la señal después de trabajar con la copia: se traen los datos del servidor
+  // (órdenes nuevas, cambios del supervisor). Si había cambios en la cola, eso lo hace onSynced.
+  const offline = useOfflineState();
+  const snapshotAtRef = useRef(null);
+  useEffect(() => { snapshotAtRef.current = snapshotAt; }, [snapshotAt]);
+  useEffect(() => {
+    if (!offline.online || offline.pending > 0 || !snapshotAtRef.current) return undefined;
+    const t = setTimeout(() => { if (snapshotAtRef.current) loadAllRef.current(); }, 1500);
+    return () => clearTimeout(t);
+  }, [offline.online, offline.pending]);
+
+  // Cuando la cola termina de enviar lo hecho sin señal, se recargan los datos del servidor
+  const loadAllRef = useRef(loadAll);
+  useEffect(() => { loadAllRef.current = loadAll; });
+  useEffect(() => onSynced(() => { loadAllRef.current(); reloadOpenVisits(); }), []); // eslint-disable-line
 
   // Adquirentes de tarjeta (Azul, CardNET, VisaNet...) con su % de comisión y retención —
   // se cargan aparte de loadAll para no tocar ese Promise.all.
@@ -551,7 +643,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => { /* silencioso: la app funciona igual sin esto */ });
+      navigator.serviceWorker.register("/sw.js")
+        // Que guarde en el teléfono todos los archivos de esta versión (modo sin conexión)
+        .then(() => navigator.serviceWorker.ready)
+        .then((reg) => { if (navigator.onLine) reg.active?.postMessage({ type: "precache" }); })
+        .catch(() => { /* silencioso: la app funciona igual sin esto */ });
     }
   }, []);
 
@@ -1508,8 +1604,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const setOrderStatus = async (order, nextStatus) => {
     if (order.status === nextStatus || order.status === "completada") return;
     setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, status: nextStatus } : o)));
-    const { error } = await supabase.from("work_orders").update({ status: nextStatus }).eq("id", order.id);
-    if (error) setErrorMsg(error.message);
+    // Sin señal queda en la cola y se envía después (modo sin conexión)
+    const res = await perform("order_update", order.id, { fields: { status: nextStatus } }, `${order.code} · ${nextStatus === "en_progreso" ? "en progreso" : nextStatus}`);
+    if (res.error) setErrorMsg(res.error.message);
   };
 
   const deleteOrder = async (orderId) => {
@@ -1532,9 +1629,20 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return rows.map((r) => (r[pathField] && urlByPath[r[pathField]] ? { ...r, [urlField]: urlByPath[r[pathField]] } : r));
   };
 
+  // Sin señal (o con cambios de esta orden todavía en la cola): se abre con la copia del teléfono.
+  const openOrderDetailFromCopy = async (order) => {
+    const d = (await getOrderDetails(order.id)) || { attachments: [], checklist: [] };
+    const atts = await Promise.all((d.attachments || []).map(async (a) => (a.blobKey ? { ...a, file_url: (await localBlobUrl(a.blobKey)) || "" } : a)));
+    setDetailOrderAttachments(atts);
+    setDetailOrderChecklist(d.checklist || []);
+    setDetailOrder(order);
+  };
   const openOrderDetail = async (order) => {
-    const { data: attachments } = await supabase.from("work_order_attachments").select("*").eq("work_order_id", order.id).order("uploaded_at");
+    if (isTecnico && (!isOnline() || (await hasPendingFor(order.id)))) { await openOrderDetailFromCopy(order); return; }
+    const { data: attachments, error: attErr } = await supabase.from("work_order_attachments").select("*").eq("work_order_id", order.id).order("uploaded_at");
+    if (attErr && isTecnico && isNetworkError(attErr)) { await openOrderDetailFromCopy(order); return; }
     const { data: checklist } = await supabase.from("work_order_checklist_items").select("*").eq("work_order_id", order.id).order("position");
+    if (isTecnico && attachments && checklist) patchOrderDetails(order.id, (d) => ({ ...d, attachments, checklist }));
     const refreshedAttachments = await refreshSignedUrls(attachments || [], "file_path", "file_url");
     const [refreshedOrder] = await refreshSignedUrls([order], "photo_path", "photo_url").then((rows) => refreshSignedUrls(rows, "client_signature_path", "client_signature_url"));
     setDetailOrderAttachments(refreshedAttachments);
@@ -1548,18 +1656,31 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const upFile = await compressImage(file);
     const ext = upFile.name.split(".").pop();
     const path = `evidence-multi/${companyId}/${order.id}-${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
-    const { error: upError } = await supabase.storage.from("evidence").upload(path, upFile);
-    if (upError) { setErrorMsg(`No se pudo subir la foto: ${upError.message}`); return; }
-    const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
-    if (signError) { setErrorMsg(`Se subió la foto pero no se pudo generar el enlace: ${signError.message}`); return; }
-    // La función de la base de datos pone la empresa y revisa que el técnico esté asignado (horas-y-fotos.sql)
-    const { data: attRow, error: attError } = await supabase.rpc("add_order_attachment", { p_order: order.id, p_file_url: signed.signedUrl, p_file_path: path, p_file_name: upFile.name, p_stage: stage });
-    if (attError) { setErrorMsg(`Se subió la foto pero no se pudo vincular a la orden: ${attError.message}`); return; }
-    setDetailOrderAttachments((prev) => [...prev, attRow]);
+    // Sube, firma el enlace y la vincula con add_order_attachment (horas-y-fotos.sql), que pone la
+    // empresa y revisa que el técnico esté asignado. Sin señal, la foto queda en el teléfono y se
+    // envía sola después (offline.jsx).
+    const res = await perform("photo", order.id, { blob: upFile, path, name: upFile.name, stage }, `${order.code} · foto ${stage === "antes" ? "antes" : "después"}`);
+    if (res.error) { setErrorMsg(`No se pudo guardar la foto: ${res.error.message}`); return; }
+    const row = res.data || {
+      id: `local-${res.op.seq}`, work_order_id: order.id, stage, file_name: upFile.name, file_path: path,
+      blobKey: res.op.payload.blobKey, pending: true, uploaded_at: new Date().toISOString(),
+    };
+    setDetailOrderAttachments((prev) => [...prev, res.data ? row : { ...row, file_url: URL.createObjectURL(upFile) }]);
+    if (isTecnico) patchOrderDetails(order.id, (d) => ({ ...d, attachments: [...(d.attachments || []), row] }));
     setOrderAttachmentIds((prev) => new Set(prev).add(order.id));
   };
 
   const deleteDetailAttachment = async (attachment) => {
+    if (attachment.pending) {
+      // Foto tomada sin señal que todavía no se envió: se quita de la cola
+      if (!window.confirm("¿Quitar esta foto? Todavía no se ha enviado.")) return;
+      const seq = Number(String(attachment.id).replace("local-", ""));
+      if (seq) await discardOp(seq);
+      setDetailOrderAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
+      patchOrderDetails(attachment.work_order_id, (d) => ({ ...d, attachments: (d.attachments || []).filter((a) => a.id !== attachment.id) }));
+      return;
+    }
+    if (!isOnline()) { setErrorMsg("Para quitar una foto que ya se envió necesitas conexión."); return; }
     if (!window.confirm("¿Quitar esta foto de la orden?")) return;
     const { data, error } = await supabase.from("work_order_attachments").delete().eq("id", attachment.id).select();
     if (error) { setErrorMsg(error.message); return; }
@@ -1568,20 +1689,27 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       return;
     }
     setDetailOrderAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
+    patchOrderDetails(attachment.work_order_id, (d) => ({ ...d, attachments: (d.attachments || []).filter((a) => a.id !== attachment.id) }));
   };
 
+  // Checklist: cada punto lleva su identificación desde el teléfono, así se puede cargar y llenar
+  // sin señal y enviar después en orden.
+  const patchChecklistCopy = (orderId, fn) => { if (isTecnico) patchOrderDetails(orderId, (d) => ({ ...d, checklist: fn(d.checklist || []) })); };
   const loadChecklistFromTemplate = async (order, template) => {
     const sortedItems = (template.items || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
-    const rows = sortedItems.map((it, i) => ({ work_order_id: order.id, text: it.text, section: it.section || null, checked: false, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
-    const { data, error } = await supabase.from("work_order_checklist_items").insert(rows).select();
-    if (error) { setErrorMsg(error.message); return; }
-    setDetailOrderChecklist(data || []);
+    const rows = sortedItems.map((it, i) => ({ id: newId(), work_order_id: order.id, text: it.text, section: it.section || null, checked: false, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
+    const res = await perform("checklist_load", order.id, { rows }, `${order.code} · ${template.name || "checklist"}`);
+    if (res.error) { setErrorMsg(res.error.message); return; }
+    const list = (res.data && res.data.length ? res.data : rows).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+    setDetailOrderChecklist(list);
+    patchChecklistCopy(order.id, () => list);
   };
 
   const toggleChecklistItem = async (item, checked) => {
     setDetailOrderChecklist((prev) => prev.map((it) => (it.id === item.id ? { ...it, checked } : it)));
-    const { error } = await supabase.from("work_order_checklist_items").update({ checked }).eq("id", item.id);
-    if (error) setErrorMsg(error.message);
+    patchChecklistCopy(item.work_order_id, (list) => list.map((it) => (it.id === item.id ? { ...it, checked } : it)));
+    const res = await perform("checklist_update", item.work_order_id, { itemId: item.id, fields: { checked } }, `${detailOrder?.code || ""} · ${String(item.text || "").slice(0, 40)}`);
+    if (res.error) setErrorMsg(res.error.message);
   };
 
   const editChecklistItemField = (item, field, value) => {
@@ -1589,12 +1717,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   const saveChecklistItemField = async (item, field, value) => {
-    const { error } = await supabase.from("work_order_checklist_items").update({ [field]: value }).eq("id", item.id);
-    if (error) setErrorMsg(error.message);
+    patchChecklistCopy(item.work_order_id, (list) => list.map((it) => (it.id === item.id ? { ...it, [field]: value } : it)));
+    const res = await perform("checklist_update", item.work_order_id, { itemId: item.id, fields: { [field]: value } }, `${detailOrder?.code || ""} · ${String(item.text || "").slice(0, 40)}`);
+    if (res.error) setErrorMsg(res.error.message);
   };
 
   const clearOrderChecklist = async (order) => {
     if (order.status === "completada") return;
+    if (!isOnline() || (await hasPendingFor(order.id))) { setErrorMsg("Para quitar el checklist necesitas conexión y que lo hecho sin señal ya se haya enviado."); return; }
     if (!window.confirm("¿Quitar el checklist de esta orden? Se perderán los cotejos, respuestas y observaciones ya registradas, y podrás cargar otro checklist.")) return;
     const { data, error } = await supabase.from("work_order_checklist_items").delete().eq("work_order_id", order.id).select();
     if (error) { setErrorMsg(error.message); return; }
@@ -1603,6 +1733,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       return;
     }
     setDetailOrderChecklist([]);
+    patchChecklistCopy(order.id, () => []);
   };
 
   const saveOrderDetail = async (order, notes, photoFile, newStatus, laborHours, laborRate) => {
@@ -1620,7 +1751,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       photo_url = signed.signedUrl;
       photo_path = path;
     }
-    const payload = { resolution_notes: notes, photo_url, photo_path };
+    // Solo lo que cambió: así lo hecho sin señal no pisa lo que otro cambió mientras tanto
+    const payload = {};
+    if ((notes || "") !== (order.resolution_notes || "")) payload.resolution_notes = notes;
+    if (photoFile) { payload.photo_url = photo_url; payload.photo_path = photo_path; }
     if (newStatus) {
       payload.status = newStatus;
       // completed_at alimenta el indicador de "tiempo promedio de reparación" en Informes.
@@ -1635,9 +1769,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }
     if (laborHours !== undefined) payload.labor_hours = laborHours === "" ? null : Number(laborHours);
     if (laborRate !== undefined) payload.labor_rate_used = laborRate === "" ? null : Number(laborRate);
-    const { data, error } = await supabase.from("work_orders").update(payload).eq("id", order.id).select().single();
+    if (Object.keys(payload).length === 0) { setSaving(false); setDetailOrder(null); return; }
+    // Sin señal (nota, cerrar o reabrir) queda en la cola y se envía después
+    const res = await perform("order_update", order.id, { fields: payload }, `${order.code} · ${newStatus === "completada" ? "cerrar orden" : newStatus ? "cambio de estado" : "nota"}`);
     setSaving(false);
-    if (error) { setErrorMsg(error.message); return; }
+    if (res.error) { setErrorMsg(res.error.message); return; }
+    const data = res.data || { ...order, ...payload };
     setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
     setDetailOrder(null);
   };
@@ -1645,17 +1782,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const saveClientSignature = async (order, dataUrl, signerName) => {
     const blob = await (await fetch(dataUrl)).blob();
     const path = `signatures/${companyId}/${order.id}-${Date.now()}.png`;
-    const { error: upError } = await supabase.storage.from("evidence").upload(path, blob, { contentType: "image/png", upsert: true });
-    if (upError) { setErrorMsg(upError.message); return; }
-    const { data: signed, error: signError } = await supabase.storage.from("evidence").createSignedUrl(path, 604800);
-    if (signError) { setErrorMsg(signError.message); return; }
-    const { data, error } = await supabase.from("work_orders").update({
-      client_signature_url: signed.signedUrl,
-      client_signature_path: path,
-      client_signature_name: signerName,
-      client_signature_at: new Date().toISOString(),
-    }).eq("id", order.id).select().single();
-    if (error) { setErrorMsg(error.message); return; }
+    const at = new Date().toISOString();
+    // Sin señal la firma queda en el teléfono (se ve igual en la orden) y se sube después
+    const res = await perform("signature", order.id, { blob, path, name: signerName, at }, `${order.code} · firma de ${signerName}`);
+    if (res.error) { setErrorMsg(res.error.message); return; }
+    const data = res.data || { ...order, client_signature_url: dataUrl, client_signature_path: path, client_signature_name: signerName, client_signature_at: at };
     setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
     setDetailOrder((prev) => (prev ? data : prev));
   };
@@ -4145,6 +4276,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       )}
 
       <div className="flex-1 flex flex-col min-w-0">
+        <OfflineBar snapshotAt={snapshotAt} />
         {errorMsg && (
           <div className="px-4 py-2 text-xs flex items-center justify-between" style={{ background: C.redBg, color: C.red }}>
             <span>Error: {errorMsg}</span>
@@ -4563,6 +4695,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           myTechnicianId={profile.technician_id}
           canManageVisits={canManage}
           onVisitsChanged={async () => {
+            if (!isOnline()) return; // sin señal: la visita quedó en la cola
             reloadOpenVisits();
             // Las horas trabajadas las recalcula la base de datos al cerrar/corregir una visita
             const id = detailOrder.id;
@@ -5059,17 +5192,39 @@ export default function MantenProApp() {
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
 
+  // Sin señal: se usa el perfil y la empresa guardados en el teléfono la última vez.
+  // Devuelve true si había copia.
+  const applyCachedProfile = async (userId) => {
+    const cached = await loadProfileCache(userId);
+    if (!cached?.profile) return false;
+    setOfflineUser(userId);
+    setProfile(cached.profile);
+    setCompany(cached.company || null);
+    return true;
+  };
+
   const loadProfile = async (userId) => {
     const { data, error } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
-    if (error) { console.error(error); setProfile(null); return; }
+    if (error) {
+      console.error(error);
+      if (isNetworkError(error)) {
+        if (!(await applyCachedProfile(userId))) { loadedUserIdRef.current = null; setNoCopy(true); setProfile(undefined); }
+        return;
+      }
+      setProfile(null); return;
+    }
     setProfile(data || null);
+    let comp = null;
     if (data?.company_id) {
-      const { data: comp } = await supabase.from("companies").select("*").eq("id", data.company_id).single();
+      ({ data: comp } = await supabase.from("companies").select("*").eq("id", data.company_id).single());
       // Logos viejos guardados como enlace "público" del almacenamiento privado no abren:
       // se ignoran (no sale una imagen rota) hasta que se vuelva a subir el logo.
       if (comp?.logo_url && comp.logo_url.includes("/storage/v1/object/public/evidence/")) comp.logo_url = null;
       setCompany(comp || null);
     }
+    setOfflineUser(userId);
+    // Copia para abrir la app sin señal (solo el técnico trabaja sin conexión)
+    if (data?.role === "tecnico") saveProfileCache(userId, { profile: data, company: comp || null });
   };
 
   const checkPlatformAdmin = async (userId) => {
@@ -5099,22 +5254,92 @@ export default function MantenProApp() {
   // se cerraban los formularios abiertos y se perdía lo que se estaba escribiendo. Ahora solo
   // se recarga el perfil si de verdad entró OTRO usuario (o si se cerró la sesión).
   const loadedUserIdRef = useRef(null);
+  // true mientras la app está abierta sin señal con la sesión guardada en el teléfono
+  // (el permiso de Supabase vence cada hora y sin internet no se puede renovar).
+  const offlineAuthRef = useRef(false);
+  const [noCopy, setNoCopy] = useState(false);
+  const noCopyRef = useRef(false);
+  useEffect(() => { noCopyRef.current = noCopy; }, [noCopy]);
+
+  // Abre con la sesión y la copia guardadas en el teléfono. "ok" | "nocopy" | "none"
+  const startOffline = async () => {
+    const stored = findStoredAuthUser();
+    if (!stored) return "none";
+    if (!(await applyCachedProfile(stored.id))) return "nocopy";
+    offlineAuthRef.current = true;
+    loadedUserIdRef.current = stored.id;
+    setSession({ user: { id: stored.id, email: stored.email }, offline: true });
+    setInviteInfo((v) => (v === undefined ? null : v));
+    setNoCopy(false);
+    setAuthLoading(false);
+    return "ok";
+  };
+
+  const startSession = async () => {
+    // Sin señal se abre directo con la copia (sin esperar a que Supabase intente renovar el permiso)
+    if (!navigator.onLine) {
+      const r = await startOffline();
+      if (r === "ok") return;
+      if (r === "nocopy") { setNoCopy(true); setAuthLoading(false); return; }
+    }
+    let session = null, sessionErr = null;
+    try {
+      const r = await Promise.race([
+        supabase.auth.getSession(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("sin respuesta de la red")), 12000)),
+      ]);
+      session = r.data?.session || null; sessionErr = r.error;
+    } catch (e) { sessionErr = e; }
+    if (!session && (!isOnline() || (sessionErr && isNetworkError(sessionErr)))) {
+      const r = await startOffline();
+      if (r === "ok") return;
+      if (r === "nocopy") { setNoCopy(true); setAuthLoading(false); return; }
+    }
+    setNoCopy(false);
+    setSession(session);
+    if (session && loadedUserIdRef.current !== session.user.id) {
+      loadedUserIdRef.current = session.user.id;
+      await loadProfile(session.user.id);
+      await checkPlatformAdmin(session.user.id);
+    }
+    setAuthLoading(false);
+  };
+
   useEffect(() => {
+    startOfflineSync();
     loadInvite();
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      if (session && loadedUserIdRef.current !== session.user.id) {
-        loadedUserIdRef.current = session.user.id;
-        await loadProfile(session.user.id);
-        await checkPlatformAdmin(session.user.id);
-      }
-      setAuthLoading(false);
-    });
+    startSession();
+    // Volvió la señal con la sesión guardada: se renueva el permiso de Supabase.
+    // Si la red todavía no responde de verdad (señal mala), se sigue con la copia y se reintenta.
+    let recovering = false;
+    const onOnline = async () => {
+      if (!offlineAuthRef.current) { if (noCopyRef.current) startSession(); return; }
+      if (recovering || !navigator.onLine) return;
+      recovering = true;
+      try {
+        const r = await checkSession();
+        if (r.netErr) return;
+        if (r.userId) {
+          const { data } = await supabase.auth.getSession();
+          if (data?.session) { offlineAuthRef.current = false; setSession(data.session); }
+          return;
+        }
+        // Con señal y la sesión ya no sirve: hay que volver a entrar (lo pendiente se queda guardado)
+        offlineAuthRef.current = false; loadedUserIdRef.current = null;
+        setOfflineUser(null);
+        setSession(null); setProfile(undefined); setCompany(null);
+      } finally { recovering = false; }
+    };
+    window.addEventListener("online", onOnline);
+    const recoverTimer = setInterval(() => { if (offlineAuthRef.current) onOnline(); }, 30000);
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (_event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+      if (!session && offlineAuthRef.current && _event !== "SIGNED_OUT") return; // sin señal: se sigue con la copia
+      if (session) offlineAuthRef.current = false;
       setSession(session);
       if (!session) {
         loadedUserIdRef.current = null;
+        setOfflineUser(null);
         setProfile(undefined);
         setCompany(null);
         setIsPlatformAdmin(false);
@@ -5131,13 +5356,26 @@ export default function MantenProApp() {
         setAuthLoading(false);
       }, 0);
     });
-    return () => listener.subscription.unsubscribe();
+    return () => { listener.subscription.unsubscribe(); window.removeEventListener("online", onOnline); clearInterval(recoverTimer); };
     // eslint-disable-next-line
   }, []);
 
-  const signOut = () => supabase.auth.signOut();
+  const signOut = async () => {
+    const userId = session?.user?.id;
+    const pending = (await listPendingOps()).length;
+    if (pending > 0 && !window.confirm(`Tienes ${pending} cambio${pending !== 1 ? "s" : ""} hecho${pending !== 1 ? "s" : ""} sin señal que todavía no se ha${pending !== 1 ? "n" : ""} enviado. Se quedan guardados en este teléfono y se envían cuando vuelvas a entrar con tu usuario. ¿Cerrar sesión?`)) return;
+    await clearUserCopy(userId);
+    setOfflineUser(null);
+    offlineAuthRef.current = false;
+    await Promise.race([supabase.auth.signOut().catch(() => {}), new Promise((r) => setTimeout(r, 5000))]);
+    // Sin señal, Supabase no borra la sesión guardada: se borra a mano para que al volver la
+    // señal no entre solo el usuario anterior (teléfono compartido)
+    clearStoredAuth();
+    loadedUserIdRef.current = null; setSession(null); setProfile(undefined); setCompany(null); setIsPlatformAdmin(false);
+  };
 
   if (portalToken) return <ClientPortal token={portalToken} />;
+  if (noCopy) return <NoCopyScreen onRetry={() => { setAuthLoading(true); startSession(); }} />;
   if (authLoading || inviteInfo === undefined) return <FullScreenLoader label="Cargando..." />;
   if (!session) return <AuthScreen inviteInfo={inviteInfo} />;
 

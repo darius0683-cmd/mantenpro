@@ -40,7 +40,8 @@ function loadForRender(file) {
         alreadyReloaded = sessionStorage.getItem(RELOAD_KEY) === "1";
         sessionStorage.setItem(RELOAD_KEY, "1");
       } catch { alreadyReloaded = true; }
-      if (!alreadyReloaded) window.location.reload();
+      // Sin señal no se recarga (se perdería lo que estás haciendo); se muestra el aviso
+      if (!alreadyReloaded && navigator.onLine) window.location.reload();
       throw err;
     });
 }
