@@ -199,7 +199,7 @@ export const techWorksAtBranch = (t, branchId) => t.branch_id === branchId || (t
 
 export const ROLE_DEFAULT_PERMISSIONS = {
   supervisor: {
-    ...Object.fromEntries(["dashboard", "agenda", "orders", "projects", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "serviceContracts", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),
+    ...Object.fromEntries(["dashboard", "agenda", "orders", "projects", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "serviceContracts", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "debitNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),
     activityLog: "view",
   },
   vendedor: { dashboard: "edit", agenda: "edit", orders: "edit", quotes: "edit", invoices: "edit", caja: "edit" },
@@ -242,7 +242,6 @@ export const PERMISSION_CATALOG = [
     { key: "quotes", label: "Cotizaciones" },
     { key: "salesOrders", label: "Órdenes de Venta" },
     { key: "invoices", label: "Facturación" },
-    { key: "creditNotes", label: "Notas de Crédito" },
     { key: "recurringContracts", label: "Contratos recurrentes" },
     { key: "caja", label: "Caja" },
   ] },
@@ -259,6 +258,8 @@ export const PERMISSION_CATALOG = [
     { key: "branches", label: "Sucursales" },
     { key: "chartOfAccounts", label: "Catálogo de cuentas" },
     { key: "receivables", label: "Cuentas por Cobrar" },
+    { key: "creditNotes", label: "Notas de Crédito" },
+    { key: "debitNotes", label: "Notas de Débito" },
     { key: "payables", label: "Cuentas por Pagar" },
     { key: "taxRates", label: "Tasas impositivas" },
     { key: "ncf", label: "Secuencia NCF" },
@@ -540,6 +541,8 @@ export function ChangePasswordModal({ onClose, onDone, title }) {
   );
 }
 
+// Lo que todavía debe una factura: total + notas de débito − cobrado − notas de crédito / saldo a favor
+export const invoiceBalance = (inv) => Number(inv?.total || 0) + Number(inv?.debit_applied || 0) - Number(inv?.amount_paid || 0) - Number(inv?.credit_applied || 0);
 export const fmtMoney = (n) => `RD$ ${Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 // Clave pública VAPID del servidor de notificaciones push — es la misma para toda la

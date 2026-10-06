@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine, ScrollText } from "lucide-react";
-import { ACTIVITY_TABLE_LABELS, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, FullScreenLoader, NCFSequenceFormModal, PRIORITY_CFG, Pill, PushSetupInline, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, TOOL_STATUS_CFG, TYPE_CFG, ThemeToggleButton, addDaysToDateStr, addMonths, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, iconBtnStyle, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, returnMaterialLine, todayStrRD } from "./modulos/base.jsx";
-import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, VistaServiceContracts, ServiceContractFormModal, ServiceContractDetailModal, prefetchForViews } from "./modulos/lazy.jsx";
+import { ACTIVITY_TABLE_LABELS, addDaysToDateStr, addMonths, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, FullScreenLoader, iconBtnStyle, invoiceBalance, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, NCFSequenceFormModal, Pill, printDocument, PRIORITY_CFG, PushSetupInline, returnMaterialLine, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, ThemeToggleButton, todayStrRD, TOOL_STATUS_CFG, TYPE_CFG } from "./modulos/base.jsx";
+import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, VistaServiceContracts, ServiceContractFormModal, ServiceContractDetailModal, VistaDebitNotes, DebitNoteFormModal, DebitNoteDetailModal, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
+import { CajaPinPrompt, cashReportHtml, isCajaPinError, notesInSession } from "./modulos/caja.jsx";
 import { NoCopyScreen, OfflineBar, checkSession, clearStoredAuth, clearUserCopy, discardOp, findStoredAuthUser, getOrderDetails, hasPendingFor, isNetworkError, isOnline, listPendingOps, loadDataSnapshot, loadProfileCache, localBlobUrl, newId, onSynced, patchOrderDetails, perform, prefetchOrderDetails, saveDataSnapshot, saveProfileCache, setOfflineUser, startOfflineSync, useOfflineState } from "./modulos/offline.jsx";
 
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
@@ -35,7 +36,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     reports: "tecnico", serviceContracts: "tecnico",
     suppliers: "comercial", purchaseOrders: "comercial", deliveryNotes: "comercial", purchases: "comercial",
     supplierReceipts: "comercial", otherExpenses: "comercial", purchaseLedger: "comercial", quotes: "comercial",
-    salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
+    salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", debitNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
     salesReports: "comercial",
     chartOfAccounts: "contable", receivables: "contable", payables: "contable", taxRates: "contable",
     bankReconciliation: "contable", ncf: "contable", financialReports: "contable", fiscalReports: "contable",
@@ -103,6 +104,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const [ncfSequences, setNcfSequences] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [creditNotes, setCreditNotes] = useState([]);
+  const [debitNotes, setDebitNotes] = useState([]); // notas de débito (B03), ver caja-notas.sql
+  const [showAddDebitNote, setShowAddDebitNote] = useState(false);
+  const [debitNoteDetail, setDebitNoteDetail] = useState(null);
+  const [clientCredits, setClientCredits] = useState([]); // movimientos de saldo a favor de clientes
   const [recurringContracts, setRecurringContracts] = useState([]);
   const [bankTransactions, setBankTransactions] = useState([]);
   const [companyBankAccounts, setCompanyBankAccounts] = useState([]);
@@ -543,6 +548,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     ]);
     setServiceContracts(scs.error ? [] : (scs.data || []));
     setServiceContractEquipment(sce.error ? [] : (sce.data || []));
+    // Notas de débito y saldo a favor de clientes (caja-notas.sql); si no existen todavía, vacíos
+    if (!isTecnico) {
+      const [dns, ccs] = await Promise.all([
+        fetchAllRows(() => supabase.from("debit_notes").select("*").eq("company_id", companyId).order("note_date", { ascending: false })),
+        fetchAllRows(() => supabase.from("client_credits").select("*").eq("company_id", companyId)),
+      ]);
+      setDebitNotes(dns.error ? [] : (dns.data || []));
+      setClientCredits(ccs.error ? [] : (ccs.data || []));
+    }
     setLoadingScope(false);
     if (isTecnico) {
       dataReadyRef.current = true;
@@ -868,7 +882,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     const inRange = (dateStr) => dateStr && dateStr >= financialDateFrom && dateStr <= financialDateTo;
     const revenue = invoices.filter((i) => i.status !== "anulada" && inRange(i.invoice_date)).reduce((sum, i) => sum + Number(i.subtotal || 0), 0);
     const creditNotesTotal = creditNotes.filter((n) => inRange(n.note_date)).reduce((sum, n) => sum + Number(n.subtotal || 0), 0);
-    const netRevenue = revenue - creditNotesTotal;
+    const debitNotesTotal = debitNotes.filter((n) => n.status !== "anulada" && inRange(n.note_date)).reduce((sum, n) => sum + Number(n.subtotal || 0), 0);
+    const netRevenue = revenue - creditNotesTotal + debitNotesTotal;
     // Costo de la compra = monto antes de impuestos (service_value). Antes se usaba total - ITBIS,
     // que en compras con retención 254-06 quedaba corto (el total ya viene neto de retenciones).
     const purchasesCost = purchases.filter((p) => inRange(p.purchase_date)).reduce((sum, p) => sum + Number(p.service_value ?? (Number(p.total || 0) - Number(p.itbis_amount || 0)) + Number(p.itbis_retained || 0) + Number(p.isr_retained || 0)), 0);
@@ -887,8 +902,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     // Nómina cerrada del período (por fecha de pago): salarios brutos + aportes patronales.
     const payrollCost = financialPayrollCost.gross + financialPayrollCost.employer;
     const netIncome = netRevenue - costOfSales - expensePurchases - otherExpensesCost - cardCommissions - payrollCost + fxDifference;
-    return { revenue, creditNotesTotal, netRevenue, purchasesCost, costOfSales, linesWithoutCost, inventoryPurchases, expensePurchases, otherExpensesCost, cardCommissions, payrollCost, fxDifference, netIncome };
-  }, [invoices, creditNotes, purchases, otherExpenses, products, invoicePaymentsAll, financialCardCommissions, financialPayrollCost, financialInvoiceItems, financialPurchaseItems, financialDateFrom, financialDateTo]);
+    return { revenue, creditNotesTotal, debitNotesTotal, netRevenue, purchasesCost, costOfSales, linesWithoutCost, inventoryPurchases, expensePurchases, otherExpensesCost, cardCommissions, payrollCost, fxDifference, netIncome };
+  }, [invoices, creditNotes, debitNotes, purchases, otherExpenses, products, invoicePaymentsAll, financialCardCommissions, financialPayrollCost, financialInvoiceItems, financialPurchaseItems, financialDateFrom, financialDateTo]);
 
   const financialCashFlow = useMemo(() => {
     const cashIn = invoicePaymentsAll.filter((p) => !isRetentionMethod(p.method)).reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.fx_difference || 0), 0);
@@ -899,13 +914,23 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return { cashIn, cashOutSuppliers, cashOutExpenses, cashOut, net: cashIn - cashOut };
   }, [invoicePaymentsAll, purchasePaymentsAll, otherExpenses, financialDateFrom, financialDateTo]);
 
+  // Cobros del rango del reporte de ventas (para "cobros por cajero")
+  const [salesPayments, setSalesPayments] = useState([]);
+  useEffect(() => {
+    if (view !== "salesReports") return;
+    let active = true;
+    fetchAllRows(() => supabase.from("invoice_payments").select("*").gte("payment_date", salesReportDateFrom).lte("payment_date", salesReportDateTo))
+      .then(({ data, error }) => { if (active) setSalesPayments(error ? [] : (data || [])); });
+    return () => { active = false; };
+  }, [view, salesReportDateFrom, salesReportDateTo]);
+
   const salesReportData = useMemo(() => {
     const inRange = (d) => d && d >= salesReportDateFrom && d <= salesReportDateTo;
     const invoicesInRange = invoices.filter((i) => i.status !== "anulada" && inRange(i.invoice_date));
     const quotesInRange = quotes.filter((q) => inRange(q.quote_date));
     const totalInvoiced = invoicesInRange.reduce((sum, i) => sum + Number(i.total || 0), 0);
     const totalCollected = invoicesInRange.reduce((sum, i) => sum + Number(i.amount_paid || 0) + Number(i.credit_applied || 0), 0);
-    const totalPending = totalInvoiced - totalCollected;
+    const totalPending = invoicesInRange.reduce((sum, i) => sum + Math.max(invoiceBalance(i), 0), 0);
     const totalQuoted = quotesInRange.reduce((sum, q) => sum + Number(q.total || 0), 0);
     const quotesDecided = quotesInRange.filter((q) => q.status !== "pendiente");
     const quotesWon = quotesInRange.filter((q) => ["aprobada", "en_orden", "parcial", "convertida"].includes(q.status));
@@ -929,8 +954,37 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }
     const maxMonthTotal = Math.max(1, ...months.map((m) => m.total));
 
-    return { totalInvoiced, totalCollected, totalPending, totalQuoted, conversionRate, quotesCount: quotesInRange.length, invoicesCount: invoicesInRange.length, quoteStatusCounts, topClients, months, maxMonthTotal };
-  }, [invoices, quotes, clients, salesReportDateFrom, salesReportDateTo]);
+    // Totales del período y por usuario
+    const subtotal = invoicesInRange.reduce((sum, i) => sum + Number(i.subtotal || 0), 0);
+    const itbis = invoicesInRange.reduce((sum, i) => sum + Number(i.itbis || 0), 0);
+    const notesIn = (list) => (list || []).filter((n) => n.status !== "anulada" && inRange(n.note_date || (n.created_at || "").slice(0, 10)));
+    const creditInRange = notesIn(creditNotes);
+    const debitInRange = notesIn(debitNotes);
+    const creditTotal = creditInRange.reduce((sum, n) => sum + Number(n.total || 0), 0);
+    const debitTotal = debitInRange.reduce((sum, n) => sum + Number(n.total || 0), 0);
+    const userLabel = (id) => { if (!id) return "Sin dato (anteriores)"; const p = profiles.find((x) => x.id === id); return p ? (p.full_name || p.email || "Usuario") : "Usuario eliminado"; };
+    const group = (list, amountOf) => {
+      const m = {};
+      list.forEach((x) => { const k = x.created_by || ""; m[k] = m[k] || { userId: k, name: userLabel(k), count: 0, total: 0 }; m[k].count++; m[k].total += amountOf(x); });
+      return Object.values(m).sort((a, b) => b.total - a.total);
+    };
+    const bySeller = group(invoicesInRange, (i) => Number(i.total || 0));
+    // Las retenciones del cliente no son dinero cobrado: no cuentan para el cajero
+    const paymentsInRange = salesPayments.filter((p) => inRange(p.payment_date) && !isRetentionMethod(p.method));
+    const byCashier = group(paymentsInRange, (p) => Number(p.amount || 0) + Number(p.fx_difference || 0));
+    const byCashierMethod = {};
+    paymentsInRange.forEach((p) => {
+      const k = p.created_by || "";
+      byCashierMethod[k] = byCashierMethod[k] || {};
+      const m = p.method || "Otro";
+      byCashierMethod[k][m] = (byCashierMethod[k][m] || 0) + Number(p.amount || 0) + Number(p.fx_difference || 0);
+    });
+    const collectedInRange = paymentsInRange.reduce((sum, p) => sum + Number(p.amount || 0) + Number(p.fx_difference || 0), 0);
+
+    return { totalInvoiced, totalCollected, totalPending, totalQuoted, conversionRate, quotesCount: quotesInRange.length, invoicesCount: invoicesInRange.length, quoteStatusCounts, topClients, months, maxMonthTotal,
+      subtotal, itbis, creditTotal, creditCount: creditInRange.length, debitTotal, debitCount: debitInRange.length, netSales: totalInvoiced - creditTotal + debitTotal,
+      bySeller, byCashier, byCashierMethod, collectedInRange, paymentsCount: paymentsInRange.length };
+  }, [invoices, quotes, clients, salesReportDateFrom, salesReportDateTo, creditNotes, debitNotes, profiles, salesPayments]);
 
   const visibleQuotes = useMemo(() => (vendorBranchIds ? quotes.filter((q) => vendorBranchIds.includes(q.branch_id)) : quotes), [quotes, vendorBranchIds]);
   const visibleInvoices = useMemo(() => (vendorBranchIds ? invoices.filter((inv) => vendorBranchIds.includes(inv.branch_id)) : invoices), [invoices, vendorBranchIds]);
@@ -946,8 +1000,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   );
 
   const overdueReceivables = useMemo(() => {
-    const pending = visibleInvoices.filter((inv) => inv.status !== "anulada" && (Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0)) > 0.009)
-      .map((inv) => ({ ...inv, balance: Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0), days: Math.max(0, Math.floor((Date.now() - new Date(inv.invoice_date).getTime()) / 86400000)) }));
+    const pending = visibleInvoices.filter((inv) => inv.status !== "anulada" && (invoiceBalance(inv)) > 0.009)
+      .map((inv) => ({ ...inv, balance: invoiceBalance(inv), days: Math.max(0, Math.floor((Date.now() - new Date(inv.invoice_date).getTime()) / 86400000)) }));
     const overdue = pending.filter((inv) => inv.days > 30);
     return { count: overdue.length, total: overdue.reduce((s, inv) => s + inv.balance, 0) };
   }, [visibleInvoices]);
@@ -1805,6 +1859,14 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setOrders((prev) => prev.map((o) => (o.id === data.id ? data : o)));
     setDetailOrder((prev) => (prev ? data : prev));
   };
+
+  // Saldo a favor de cada cliente (suma de sus movimientos: + nota de crédito, − usado al cobrar)
+  const clientCreditMap = useMemo(() => {
+    const m = new Map();
+    clientCredits.forEach((r) => m.set(r.client_id, (m.get(r.client_id) || 0) + Number(r.amount || 0)));
+    return m;
+  }, [clientCredits]);
+  const clientCreditOf = (clientId) => Math.max(0, Math.round((clientCreditMap.get(clientId) || 0) * 100) / 100);
 
   // ---- Contratos de servicio con SLA ----
   const contractById = useMemo(() => new Map(serviceContracts.map((c) => [c.id, c])), [serviceContracts]);
@@ -2701,7 +2763,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const deletePurchasePayment = async (payment, purchase) => {
     if (!window.confirm("¿Eliminar este pago registrado?")) return;
     const { data: updated, error: delError } = await supabase.rpc("delete_purchase_payment", { p_payment_id: payment.id });
-    if (delError) { setErrorMsg(delError.message); return; }
+    if (delError) { if (askCajaPin(delError, () => deletePayment(payment, invoice, true))) return; setErrorMsg(delError.message); return; }
     const { data: allPayments } = await supabase.from("purchase_payments").select("*").eq("purchase_id", purchase.id).order("payment_date");
     if (updated) setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
     setPurchaseDetail((prev) => (prev ? { ...prev, purchase: updated || prev.purchase, payments: allPayments || [] } : prev));
@@ -3361,7 +3423,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     // — antes esto se calculaba en el cliente sin ningún límite.
     const targetInvoice = invoices.find((i) => i.id === payload.invoice_id);
     if (targetInvoice) {
-      const { data: updatedInvoice, error: creditError } = await supabase.rpc("apply_credit_to_invoice", { p_invoice_id: targetInvoice.id, p_amount: payload.total });
+      // Con la nota identificada, si supera lo que debe la factura el resto queda como saldo a favor
+      let { data: updatedInvoice, error: creditError } = await supabase.rpc("apply_credit_to_invoice", { p_invoice_id: targetInvoice.id, p_amount: payload.total, p_credit_note_id: note.id });
+      if (creditError && (creditError.code === "PGRST202" || /p_credit_note_id/.test(creditError.message || ""))) {
+        // Todavía no se corrió caja-notas.sql: forma anterior
+        ({ data: updatedInvoice, error: creditError } = await supabase.rpc("apply_credit_to_invoice", { p_invoice_id: targetInvoice.id, p_amount: payload.total }));
+      }
       if (creditError) {
         setSaving(false);
         setErrorMsg(`La nota de crédito ${ncf} se creó, pero no se pudo aplicar a la factura: ${creditError.message}. Revísalo manualmente.`);
@@ -3375,9 +3442,54 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     loadAll();
   };
 
+  // Usar el saldo a favor del cliente (de notas de crédito) para pagar una factura
+  const applyClientCredit = async (invoice, amount) => {
+    setSaving(true);
+    const { data, error } = await supabase.rpc("use_client_credit", { p_invoice_id: invoice.id, p_amount: amount });
+    setSaving(false);
+    if (error) { setErrorMsg(error.message); return; }
+    const updated = Array.isArray(data) ? data[0] : data;
+    if (updated) {
+      setInvoices((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+      setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated } : prev));
+    }
+    const { data: ccs } = await fetchAllRows(() => supabase.from("client_credits").select("*").eq("company_id", companyId));
+    if (ccs) setClientCredits(ccs);
+  };
+
+  // Nota de débito (B03): cargo extra sobre una factura. La base de datos asigna el NCF, guarda la
+  // nota y sube lo que debe la factura en un solo paso (issue_debit_note, caja-notas.sql).
+  const createDebitNote = async (payload, items) => {
+    setSaving(true);
+    const { data, error } = await supabase.rpc("issue_debit_note", {
+      p_invoice_id: payload.invoice_id, p_sequence_id: payload.ncf_sequence_id, p_reason: payload.reason || null,
+      p_note_date: payload.note_date || null,
+      p_items: items.map((it) => ({ description: it.description, quantity: Number(it.quantity), unit_price: Number(it.unit_price), is_taxable: !!it.is_taxable })),
+    });
+    setSaving(false);
+    if (error) { setErrorMsg(/issue_debit_note/.test(error.message) ? "Falta correr caja-notas.sql en Supabase." : error.message); return; }
+    setShowAddDebitNote(false);
+    const note = Array.isArray(data) ? data[0] : data;
+    await loadAll();
+    if (note?.id) openDebitNoteDetail(note);
+  };
+  const openDebitNoteDetail = async (note) => {
+    const { data: items } = await supabase.from("debit_note_items").select("*").eq("debit_note_id", note.id).order("position");
+    setDebitNoteDetail({ note, items: items || [] });
+  };
+
   const openCreditNoteDetail = async (note) => {
     const { data: items } = await supabase.from("credit_note_items").select("*").eq("credit_note_id", note.id);
     setCreditNoteDetail({ note, items: items || [] });
+  };
+
+  // El servidor rechaza cobros, apertura y cierre de caja si el usuario no desbloqueó la caja con su
+  // PIN: se pide el PIN aquí mismo y, al desbloquear, se repite la operación.
+  const [cajaPinRetry, setCajaPinRetry] = useState(null);
+  const askCajaPin = (err, retry) => {
+    if (!isCajaPinError(err)) return false;
+    setCajaPinRetry({ retry });
+    return true;
   };
 
   const registerPayment = async (invoice, payload, files) => {
@@ -3399,7 +3511,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       p_bank_account_id: payload.bank_account_id || null,
     });
     const resultRow = Array.isArray(result) ? result[0] : result;
-    if (payError || !resultRow) { setSaving(false); setErrorMsg(payError?.message || "No se pudo registrar el pago."); return; }
+    if (payError || !resultRow) { setSaving(false); if (askCajaPin(payError, () => registerPayment(invoice, payload, files))) return; setErrorMsg(payError?.message || "No se pudo registrar el pago."); return; }
 
     if (payload.card) {
       const { error: cardError } = await supabase.from("invoice_payment_card_details").insert({ ...payload.card, payment_id: resultRow.payment_id, company_id: companyId });
@@ -3429,8 +3541,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setInvoiceDetail((prev) => (prev ? { ...prev, invoice: updated || prev.invoice, payments: paymentsWithAttachments } : prev));
   };
 
-  const deletePayment = async (payment, invoice) => {
-    if (!window.confirm("¿Eliminar este pago registrado? También se quitarán sus comprobantes.")) return;
+  const deletePayment = async (payment, invoice, confirmed = false) => {
+    if (!confirmed && !window.confirm("¿Eliminar este pago registrado? También se quitarán sus comprobantes.")) return;
     // Mismo respaldo del lado del servidor que register_invoice_payment — verifica permiso
     // "invoices" y recalcula el saldo de la factura de forma atómica.
     const { data: updated, error: delError } = await supabase.rpc("delete_invoice_payment", { p_payment_id: payment.id });
@@ -3467,7 +3579,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     // deshabilitado (disabled={!canEdit("caja")}) de la interfaz.
     const { data, error } = await supabase.rpc("open_cash_session", { p_branch_id: branchId, p_opening_amount: openingAmount, p_opening_amount_usd: openingUsd });
     setSaving(false);
-    if (error) { setErrorMsg(error.message); return; }
+    if (error) { if (askCajaPin(error, () => openCashSession(branchId, openingAmount, openingUsd))) return; setErrorMsg(error.message); return; }
     setCashSessions((prev) => [data, ...prev]);
     setShowOpenCaja(false);
   };
@@ -3485,9 +3597,23 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       p_declared_cash_usd: declared.cashUsd || 0,
     });
     setSaving(false);
-    if (error) { setErrorMsg(error.message); return; }
+    if (error) { if (askCajaPin(error, () => closeCashSession(session, declared))) return; setErrorMsg(error.message); return; }
     setCashSessions((prev) => prev.map((s) => (s.id === data.id ? data : s)));
     setShowCloseCaja(false);
+  };
+
+  // Reporte del turno de caja (abierta o cerrada) para imprimir o guardar en PDF
+  const printCashReport = async (session, branchName, expected) => {
+    const win = window.open("", "_blank", "width=800,height=900"); // se abre antes de esperar (Safari bloquea si no)
+    const { data: payments, error } = await fetchAllRows(() => supabase.from("invoice_payments").select("*").eq("cash_session_id", session.id));
+    if (error) { if (win) win.close(); setErrorMsg(error.message); return; }
+    const html = cashReportHtml({
+      companyName, branchName, session, expected, payments: payments || [],
+      creditNotes: notesInSession(creditNotes, session, invoices),
+      debitNotes: notesInSession(debitNotes, session, invoices),
+      invoices, clients, profiles,
+    });
+    printDocument(`Reporte de caja ${branchName}`, html, win);
   };
 
   useEffect(() => {
@@ -4018,9 +4144,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
   const INVENTORY_CHILD_KEYS = ["tools", "materials"];
   const CATALOG_CHILD_KEYS = ["clients", "products", "services", "warranty"];
-  const SALES_CHILD_KEYS = ["quotes", "salesOrders", "invoices", "creditNotes", "recurringContracts", "caja"];
+  const SALES_CHILD_KEYS = ["quotes", "salesOrders", "invoices", "recurringContracts", "caja"];
   const COMPRAS_CHILD_KEYS = ["suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger"];
-  const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "payables", "chartOfAccounts", "taxRates", "bankReconciliation", "dgiiCatalog"];
+  const CONTABLE_CHILD_KEYS = ["ncf", "receivables", "creditNotes", "debitNotes", "payables", "chartOfAccounts", "taxRates", "bankReconciliation", "dgiiCatalog"];
   const _urlView = new URLSearchParams(window.location.search).get("view") || "dashboard";
   const [openSubmenus, setOpenSubmenus] = useState(() => ({
     inventoryMenu: INVENTORY_CHILD_KEYS.includes(_urlView),
@@ -4081,7 +4207,6 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         { key: "quotes", label: "Cotizaciones", Icon: ClipboardCheck },
         { key: "salesOrders", label: "Órdenes de Venta", Icon: Layers },
         { key: "invoices", label: "Facturación", Icon: Receipt },
-        { key: "creditNotes", label: "Notas de Crédito", Icon: RotateCcw },
         { key: "recurringContracts", label: "Contratos recurrentes", Icon: CalendarDays },
         { key: "caja", label: "Caja", Icon: Wallet },
       ],
@@ -4095,6 +4220,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       children: [
         { key: "chartOfAccounts", label: "Catálogo de cuentas", Icon: Boxes },
         { key: "receivables", label: "Cuentas por Cobrar", Icon: Receipt },
+        { key: "creditNotes", label: "Notas de Crédito", Icon: RotateCcw },
+        { key: "debitNotes", label: "Notas de Débito", Icon: Receipt },
         { key: "payables", label: "Cuentas por Pagar", Icon: ShoppingCart },
         { key: "taxRates", label: "Tasas impositivas", Icon: Hash },
         { key: "bankReconciliation", label: "Conciliación bancaria", Icon: Wallet },
@@ -4564,7 +4691,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("clients") && view === "clients" && (
-            <VistaClients openClientPortal={setPortalClient} canDelete={canDelete} canEdit={canEdit} clientSearch={clientSearch} clients={clients} companyName={companyName} deleteClient={deleteClient} filteredClients={filteredClients} selectedClients={selectedClients} setClientSearch={setClientSearch} setEditingClient={setEditingClient} setSelectedClients={setSelectedClients} setShowAddClient={setShowAddClient} />
+            <VistaClients clientCreditOf={clientCreditOf} openClientPortal={setPortalClient} canDelete={canDelete} canEdit={canEdit} clientSearch={clientSearch} clients={clients} companyName={companyName} deleteClient={deleteClient} filteredClients={filteredClients} selectedClients={selectedClients} setClientSearch={setClientSearch} setEditingClient={setEditingClient} setSelectedClients={setSelectedClients} setShowAddClient={setShowAddClient} />
           )}
 
           {!loadingScope && (hasPerm("products") || hasPerm("services")) && (view === "products" || view === "services") && (
@@ -4600,11 +4727,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("fiscalReports") && view === "fiscalReports" && (
-            <VistaFiscalReports clients={clients} company={company} creditNotes={creditNotes} invoices={invoices} otherExpenses={otherExpenses} products={products} purchases={purchases} setErrorMsg={setErrorMsg} setTaxReportPeriod={setTaxReportPeriod} suppliers={suppliers} taxReportPeriod={taxReportPeriod} />
+            <VistaFiscalReports debitNotes={debitNotes} clients={clients} company={company} creditNotes={creditNotes} invoices={invoices} otherExpenses={otherExpenses} products={products} purchases={purchases} setErrorMsg={setErrorMsg} setTaxReportPeriod={setTaxReportPeriod} suppliers={suppliers} taxReportPeriod={taxReportPeriod} />
           )}
 
           {!loadingScope && hasPerm("salesReports") && view === "salesReports" && (
-            <VistaSalesReports salesReportData={salesReportData} salesReportDateFrom={salesReportDateFrom} salesReportDateTo={salesReportDateTo} setSalesReportDateFrom={setSalesReportDateFrom} setSalesReportDateTo={setSalesReportDateTo} />
+            <VistaSalesReports companyName={companyName} salesReportData={salesReportData} salesReportDateFrom={salesReportDateFrom} salesReportDateTo={salesReportDateTo} setSalesReportDateFrom={setSalesReportDateFrom} setSalesReportDateTo={setSalesReportDateTo} />
           )}
 
           {!loadingScope && hasPerm("financialReports") && view === "financialReports" && (
@@ -4659,7 +4786,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("caja") && view === "caja" && (
-            <VistaCaja branches={branches} cajaBranch={cajaBranch} canEdit={canEdit} cardAcquirers={cardAcquirers} cashSessions={cashSessions} closeCashSession={closeCashSession} company={company} invoices={invoices} isAdmin={isAdmin} isVendedor={isVendedor} openCashSession={openCashSession} profile={profile} saveCardAcquirer={saveCardAcquirer} saving={saving} sessionPayments={sessionPayments} setCajaBranch={setCajaBranch} setShowAcquirers={setShowAcquirers} setShowCloseCaja={setShowCloseCaja} setShowOpenCaja={setShowOpenCaja} showAcquirers={showAcquirers} showCloseCaja={showCloseCaja} showOpenCaja={showOpenCaja} />
+            <VistaCaja profiles={profiles} creditNotes={creditNotes} debitNotes={debitNotes} onPrintCashReport={printCashReport} branches={branches} cajaBranch={cajaBranch} canEdit={canEdit} cardAcquirers={cardAcquirers} cashSessions={cashSessions} closeCashSession={closeCashSession} company={company} invoices={invoices} isAdmin={isAdmin} isVendedor={isVendedor} openCashSession={openCashSession} profile={profile} saveCardAcquirer={saveCardAcquirer} saving={saving} sessionPayments={sessionPayments} setCajaBranch={setCajaBranch} setShowAcquirers={setShowAcquirers} setShowCloseCaja={setShowCloseCaja} setShowOpenCaja={setShowOpenCaja} showAcquirers={showAcquirers} showCloseCaja={showCloseCaja} showOpenCaja={showOpenCaja} />
+          )}
+
+          {!loadingScope && hasPerm("debitNotes") && view === "debitNotes" && (
+            <VistaDebitNotes canEdit={canEdit} clients={clients} debitNotes={debitNotes} invoices={invoices} openDebitNoteDetail={openDebitNoteDetail} setShowAddDebitNote={setShowAddDebitNote} />
           )}
 
           {!loadingScope && hasPerm("creditNotes") && view === "creditNotes" && (
@@ -5146,9 +5277,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onReopen={reopenIncident}
         />
       )}
-      {showStatement && <StatementModal clients={clients} invoices={invoices} companyName={companyName} onClose={() => setShowStatement(false)} />}
+      {showStatement && <StatementModal clients={clients} invoices={invoices} companyName={companyName} clientCreditOf={clientCreditOf} onClose={() => setShowStatement(false)} />}
       {invoiceDetail && (
         <InvoiceDetailModal
+          clientCredit={clientCreditOf(invoiceDetail.invoice.client_id)}
+          onUseClientCredit={applyClientCredit}
           invoice={invoiceDetail.invoice}
           items={invoiceDetail.items}
           payments={invoiceDetail.payments}
@@ -5212,12 +5345,34 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           saving={saving}
         />
       )}
+      {cajaPinRetry && (
+        <CajaPinPrompt
+          profileId={profile?.id}
+          onClose={() => { setCajaPinRetry(null); setErrorMsg("No se guardó: la caja está bloqueada. Desbloquéala con tu PIN y vuelve a intentarlo."); }}
+          onUnlocked={() => { const r = cajaPinRetry.retry; setCajaPinRetry(null); r(); }}
+        />
+      )}
       {exchangeRatePrompt && (
         <ExchangeRatePromptModal
           contracts={exchangeRatePrompt.contracts}
           onClose={() => setExchangeRatePrompt(null)}
           onConfirm={confirmExchangeRatePrompt}
           saving={saving}
+        />
+      )}
+      {showAddDebitNote && (
+        <DebitNoteFormModal invoices={invoices} clients={clients} ncfSequences={ncfSequences} onClose={() => setShowAddDebitNote(false)} onSave={createDebitNote} saving={saving} />
+      )}
+      {debitNoteDetail && (
+        <DebitNoteDetailModal
+          note={debitNoteDetail.note}
+          items={debitNoteDetail.items}
+          invoice={invoices.find((i) => i.id === debitNoteDetail.note.invoice_id) || null}
+          clientName={clients.find((c) => c.id === debitNoteDetail.note.client_id)?.name || "—"}
+          clientRnc={clients.find((c) => c.id === debitNoteDetail.note.client_id)?.rnc_cedula || ""}
+          companyName={companyName}
+          company={company}
+          onClose={() => setDebitNoteDetail(null)}
         />
       )}
       {creditNoteDetail && (

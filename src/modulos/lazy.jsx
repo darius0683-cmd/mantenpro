@@ -21,6 +21,7 @@ const IMPORTERS = {
   contratos: () => import("./contratos.jsx"),
   "equipos-qr": () => import("./equipos-qr.jsx"),
   nomina: () => import("./nomina.jsx"),
+  notas: () => import("./notas.jsx"),
   portal: () => import("./portal.jsx"),
   soporte: () => import("./soporte.jsx"),
   tecnico: () => import("./tecnico.jsx"),
@@ -111,6 +112,11 @@ export const PayrollSection = lazyComponent("nomina", "PayrollSection");
 export const VistaServiceContracts = lazyComponent("contratos", "VistaServiceContracts");
 export const ServiceContractFormModal = lazyComponent("contratos", "ServiceContractFormModal");
 export const ServiceContractDetailModal = lazyComponent("contratos", "ServiceContractDetailModal");
+
+// notas de débito
+export const VistaDebitNotes = lazyComponent("notas", "VistaDebitNotes");
+export const DebitNoteFormModal = lazyComponent("notas", "DebitNoteFormModal");
+export const DebitNoteDetailModal = lazyComponent("notas", "DebitNoteDetailModal");
 
 // visitas
 export const VisitsReportModal = lazyComponent("visitas", "VisitsReportModal");
@@ -237,6 +243,7 @@ const CHUNK_OF_VIEW = {
   salesOrders: "ventas",
   invoices: "ventas",
   creditNotes: "ventas",
+  debitNotes: "notas",
   recurringContracts: "ventas",
   caja: "ventas",
   receivables: "ventas",

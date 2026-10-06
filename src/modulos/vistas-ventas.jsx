@@ -4,12 +4,13 @@
 // Se carga solo cuando se abre la pantalla (ver lazy.jsx).
 import React from "react";
 import { supabase } from "../supabaseClient";
-import { C, PAYMENT_STATUS_CFG, Pill, QUOTE_STATUS_CFG, SALES_ORDER_STATUS_CFG, cardDetailLine, fmtDate, fmtMoney, iconBtnStyle, invoiceReminderText, listHtml, mailtoLink, printDocument, waLink } from "./base.jsx";
+import { C, cardDetailLine, fmtDate, fmtMoney, iconBtnStyle, invoiceBalance, invoiceReminderText, listHtml, mailtoLink, PAYMENT_STATUS_CFG, Pill, printDocument, QUOTE_STATUS_CFG, SALES_ORDER_STATUS_CFG, waLink } from "./base.jsx";
 import { CardAcquirersPanel, CashCloseModal, CashOpenModal } from "./lazy.jsx";
-import { FileText, Link2, Mail, MessageCircle, Pencil, Plus, Search, Trash2, Wallet } from "lucide-react";
+import { FileText, Link2, Mail, MessageCircle, Pencil, Plus, Printer, Search, Trash2, Wallet } from "lucide-react";
+import { CajaPinAdmin, CajaPinGate, notesInSession } from "./caja.jsx";
 
 // Pantalla: clients
-export function VistaClients({ openClientPortal, canDelete, canEdit, clientSearch, clients, companyName, deleteClient, filteredClients, selectedClients, setClientSearch, setEditingClient, setSelectedClients, setShowAddClient }) {
+export function VistaClients({ clientCreditOf, openClientPortal, canDelete, canEdit, clientSearch, clients, companyName, deleteClient, filteredClients, selectedClients, setClientSearch, setEditingClient, setSelectedClients, setShowAddClient }) {
   return (
           <div>
               <div className="flex justify-between items-center mb-3">
@@ -60,6 +61,7 @@ export function VistaClients({ openClientPortal, canDelete, canEdit, clientSearc
                       <div>Teléfono: <span style={{ color: C.text }}>{c.phone || "—"}</span></div>
                       <div>Correo: <span style={{ color: C.text }}>{c.email || "—"}</span></div>
                       <div>Dirección: <span style={{ color: C.text }}>{c.address || "—"}</span></div>
+                      {clientCreditOf && clientCreditOf(c.id) > 0 && <div>Saldo a favor: <span className="font-semibold" style={{ color: C.green }}>{fmtMoney(clientCreditOf(c.id))}</span></div>}
                     </div>
                   </div>
                 ))}
@@ -74,7 +76,48 @@ export function VistaClients({ openClientPortal, canDelete, canEdit, clientSearc
 }
 
 // Pantalla: salesReports
-export function VistaSalesReports({ salesReportData, salesReportDateFrom, salesReportDateTo, setSalesReportDateFrom, setSalesReportDateTo }) {
+export function VistaSalesReports({ companyName, salesReportData, salesReportDateFrom, salesReportDateTo, setSalesReportDateFrom, setSalesReportDateTo }) {
+  const d = salesReportData;
+  const printSales = () => {
+    const esc = (x) => String(x ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    const methods = ["Efectivo", "Tarjeta", "Transferencia", "Otro"];
+    printDocument("Reporte de ventas", `
+      <h1>${esc(companyName || "")}</h1><div class="muted">Reporte de ventas · ${fmtDate(salesReportDateFrom)} al ${fmtDate(salesReportDateTo)}</div>
+      <table><thead><tr><th>Totales del período</th><th style="text-align:right">Monto</th></tr></thead><tbody>
+        <tr><td>Facturas emitidas (${d.invoicesCount})</td><td style="text-align:right">${fmtMoney(d.totalInvoiced)}</td></tr>
+        <tr><td>&nbsp;&nbsp;Subtotal</td><td style="text-align:right">${fmtMoney(d.subtotal)}</td></tr>
+        <tr><td>&nbsp;&nbsp;ITBIS</td><td style="text-align:right">${fmtMoney(d.itbis)}</td></tr>
+        <tr><td>Notas de crédito (${d.creditCount})</td><td style="text-align:right">-${fmtMoney(d.creditTotal)}</td></tr>
+        <tr><td>Notas de débito (${d.debitCount})</td><td style="text-align:right">+${fmtMoney(d.debitTotal)}</td></tr>
+        <tr><td><b>Ventas netas</b></td><td style="text-align:right"><b>${fmtMoney(d.netSales)}</b></td></tr>
+        <tr><td>Cobrado en el período (${d.paymentsCount} cobros)</td><td style="text-align:right">${fmtMoney(d.collectedInRange)}</td></tr>
+      </tbody></table>
+      <div style="margin-top:16px;font-weight:bold">Ventas por vendedor (quien hizo la factura)</div>
+      <table><thead><tr><th>Vendedor</th><th>Facturas</th><th style="text-align:right">Total</th></tr></thead><tbody>
+        ${d.bySeller.map((u) => `<tr><td>${esc(u.name)}</td><td>${u.count}</td><td style="text-align:right">${fmtMoney(u.total)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Sin facturas.</td></tr>`}
+      </tbody></table>
+      <div style="margin-top:16px;font-weight:bold">Cobros por cajero (quien registró el pago)</div>
+      <table><thead><tr><th>Cajero</th><th>Cobros</th>${methods.map((m) => `<th style="text-align:right">${m}</th>`).join("")}<th style="text-align:right">Total</th></tr></thead><tbody>
+        ${d.byCashier.map((u) => `<tr><td>${esc(u.name)}</td><td>${u.count}</td>${methods.map((m) => { const bm = d.byCashierMethod[u.userId] || {}; const v = m === "Otro" ? Object.entries(bm).filter(([k]) => !["Efectivo", "Tarjeta", "Transferencia"].includes(k)).reduce((a, [, x]) => a + x, 0) : (bm[m] || 0); return `<td style="text-align:right">${fmtMoney(v)}</td>`; }).join("")}<td style="text-align:right">${fmtMoney(u.total)}</td></tr>`).join("") || `<tr><td colspan="7" class="muted">Sin cobros.</td></tr>`}
+      </tbody></table>`);
+  };
+  const userTable = (title, rows, countLabel, extra) => (
+    <div>
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>{title}</div>
+      <div style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+        {rows.length === 0 && <div className="text-sm text-center py-4" style={{ color: C.muted }}>Sin datos en este rango.</div>}
+        {rows.map((u, idx) => (
+          <div key={u.userId || idx} className="px-3 py-2 text-sm" style={{ borderBottom: idx < rows.length - 1 ? `1px solid ${C.border}` : "none" }}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate">{u.name} <span className="text-xs" style={{ color: C.muted }}>· {u.count} {countLabel}</span></span>
+              <span className="font-mono flex-shrink-0">{fmtMoney(u.total)}</span>
+            </div>
+            {extra && extra(u)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
   return (
           <div>
               <div className="flex flex-wrap items-end gap-3 mb-4">
@@ -86,6 +129,9 @@ export function VistaSalesReports({ salesReportData, salesReportDateFrom, salesR
                   <div className="text-xs mb-1" style={{ color: C.muted }}>Hasta</div>
                   <input type="date" value={salesReportDateTo} onChange={(e) => setSalesReportDateTo(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }} />
                 </div>
+                <button onClick={printSales} className="flex items-center gap-2 px-3 py-2 text-sm ml-auto" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                  <Printer size={14} /> Imprimir / PDF
+                </button>
               </div>
 
               <div className="flex flex-wrap gap-3 mb-6">
@@ -109,6 +155,33 @@ export function VistaSalesReports({ salesReportData, salesReportDateFrom, salesR
                   <div className="text-xl font-bold font-mono" style={{ color: C.blue }}>{salesReportData.conversionRate === null ? "—" : `${salesReportData.conversionRate.toFixed(0)}%`}</div>
                   <div className="text-xs mt-1" style={{ color: C.muted }}>De cotizaciones ya decididas</div>
                 </div>
+              </div>
+
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Totales del período</div>
+              <div className="mb-6 overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                {[
+                  ["Facturas emitidas", `${d.invoicesCount}`, fmtMoney(d.totalInvoiced), C.text],
+                  ["Subtotal (sin ITBIS)", "", fmtMoney(d.subtotal), C.muted],
+                  ["ITBIS facturado", "", fmtMoney(d.itbis), C.muted],
+                  ["Notas de crédito", `${d.creditCount}`, `-${fmtMoney(d.creditTotal)}`, C.red],
+                  ["Notas de débito", `${d.debitCount}`, `+${fmtMoney(d.debitTotal)}`, C.blue],
+                  ["Ventas netas", "", fmtMoney(d.netSales), C.green],
+                  ["Cobrado en el período", `${d.paymentsCount}`, fmtMoney(d.collectedInRange), C.text],
+                ].map(([label, n, amount, color], idx) => (
+                  <div key={label} className="flex items-center justify-between gap-2 px-4 py-2 text-sm min-w-[320px]" style={{ borderBottom: idx < 6 ? `1px solid ${C.border}` : "none", fontWeight: label === "Ventas netas" ? 700 : 400 }}>
+                    <span>{label} {n && <span className="text-xs" style={{ color: C.muted }}>({n})</span>}</span>
+                    <span className="font-mono" style={{ color }}>{amount}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {userTable("Ventas por vendedor (quien hizo la factura)", d.bySeller, "facturas")}
+                {userTable("Cobros por cajero (quien registró el pago)", d.byCashier, "cobros", (u) => (
+                  <div className="text-[11px] mt-0.5 flex flex-wrap gap-x-3" style={{ color: C.muted }}>
+                    {Object.entries(d.byCashierMethod[u.userId] || {}).map(([m, v]) => <span key={m}>{m}: {fmtMoney(v)}</span>)}
+                  </div>
+                ))}
               </div>
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Facturación mensual — últimos 6 meses</div>
@@ -162,8 +235,8 @@ export function VistaReceivables({ clients, companyName, openInvoiceDetail, visi
   return (
           <div>
               {(() => {
-                const pending = visibleInvoices.filter((inv) => inv.status !== "anulada" && (Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0)) > 0.009)
-                  .map((inv) => ({ ...inv, balance: Number(inv.total) - Number(inv.amount_paid || 0) - Number(inv.credit_applied || 0), days: Math.max(0, Math.floor((Date.now() - new Date(inv.invoice_date).getTime()) / 86400000)) }))
+                const pending = visibleInvoices.filter((inv) => inv.status !== "anulada" && (invoiceBalance(inv)) > 0.009)
+                  .map((inv) => ({ ...inv, balance: invoiceBalance(inv), days: Math.max(0, Math.floor((Date.now() - new Date(inv.invoice_date).getTime()) / 86400000)) }))
                   .sort((a, b) => b.days - a.days);
                 const totalPending = pending.reduce((s, inv) => s + inv.balance, 0);
                 const bucketOf = (days) => (days <= 30 ? "0-30" : days <= 60 ? "31-60" : days <= 90 ? "61-90" : "90+");
@@ -432,8 +505,9 @@ export function VistaInvoices({ canEdit, clients, filteredInvoices, invoicePayme
 }
 
 // Pantalla: caja
-export function VistaCaja({ branches, cajaBranch, canEdit, cardAcquirers, cashSessions, closeCashSession, company, invoices, isAdmin, isVendedor, openCashSession, profile, saveCardAcquirer, saving, sessionPayments, setCajaBranch, setShowAcquirers, setShowCloseCaja, setShowOpenCaja, showAcquirers, showCloseCaja, showOpenCaja }) {
+export function VistaCaja({ profiles = [], creditNotes = [], debitNotes = [], onPrintCashReport, branches, cajaBranch, canEdit, cardAcquirers, cashSessions, closeCashSession, company, invoices, isAdmin, isVendedor, openCashSession, profile, saveCardAcquirer, saving, sessionPayments, setCajaBranch, setShowAcquirers, setShowCloseCaja, setShowOpenCaja, showAcquirers, showCloseCaja, showOpenCaja }) {
   return (
+          <CajaPinGate profileId={profile.id}>
           <div>
               {(() => {
                 const activeBranchId = isVendedor ? profile.branch_id : (cajaBranch || branches[0]?.id || "");
@@ -484,9 +558,14 @@ export function VistaCaja({ branches, cajaBranch, canEdit, cardAcquirers, cashSe
                             <div className="text-sm font-semibold" style={{ color: C.text }}>Caja abierta — {activeBranchName}</div>
                             <div className="text-xs" style={{ color: C.muted }}>Desde {new Date(openSession.opened_at).toLocaleString("es-DO")} · Fondo inicial {fmtMoney(openSession.opening_amount)}{Number(openSession.opening_amount_usd || 0) > 0 ? ` + US$ ${Number(openSession.opening_amount_usd).toFixed(2)}` : ""}</div>
                           </div>
-                          <button onClick={() => setShowCloseCaja(true)} disabled={!canEdit("caja")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.red, color: "#fff" }}>
-                            <Wallet size={14} /> Cerrar caja
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => onPrintCashReport && onPrintCashReport(openSession, activeBranchName, expected)} className="flex items-center gap-2 px-3 py-2 text-sm" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                              <Printer size={14} /> Imprimir reporte
+                            </button>
+                            <button onClick={() => setShowCloseCaja(true)} disabled={!canEdit("caja")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.red, color: "#fff" }}>
+                              <Wallet size={14} /> Cerrar caja
+                            </button>
+                          </div>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
@@ -512,6 +591,18 @@ export function VistaCaja({ branches, cajaBranch, canEdit, cardAcquirers, cashSe
                         {sessionPayments.length > 0 && (
                           <div className="text-xs mt-3" style={{ color: C.muted }}>{sessionPayments.length} cobro{sessionPayments.length !== 1 ? "s" : ""} registrado{sessionPayments.length !== 1 ? "s" : ""} en esta caja.</div>
                         )}
+                        {(() => {
+                          const cn = notesInSession(creditNotes, openSession, invoices);
+                          const dn = notesInSession(debitNotes, openSession, invoices);
+                          if (cn.length === 0 && dn.length === 0) return null;
+                          const sum = (l) => l.reduce((a, n) => a + Number(n.total || 0), 0);
+                          return (
+                            <div className="text-xs mt-2 flex gap-4 flex-wrap" style={{ color: C.muted }}>
+                              {cn.length > 0 && <span>Notas de crédito en este turno: <b style={{ color: C.text }}>{cn.length}</b> · {fmtMoney(sum(cn))}</span>}
+                              {dn.length > 0 && <span>Notas de débito en este turno: <b style={{ color: C.text }}>{dn.length}</b> · {fmtMoney(sum(dn))}</span>}
+                            </div>
+                          );
+                        })()}
                         {(() => {
                           const cardPays = sessionPayments.filter((p) => p.method === "Tarjeta");
                           if (cardPays.length === 0) return null;
@@ -564,6 +655,7 @@ export function VistaCaja({ branches, cajaBranch, canEdit, cardAcquirers, cashSe
                         {showAcquirers ? "▾" : "▸"} Adquirentes de tarjeta ({cardAcquirers.filter((a) => a.active).length} activo{cardAcquirers.filter((a) => a.active).length !== 1 ? "s" : ""})
                       </button>
                       {showAcquirers && <CardAcquirersPanel acquirers={cardAcquirers} canManage={isAdmin} onSave={saveCardAcquirer} />}
+                      {(isAdmin || profile.role === "supervisor") && <CajaPinsToggle profiles={profiles} isAdmin={isAdmin} />}
                     </div>
 
                     <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Historial de cuadres — {activeBranchName}</div>
@@ -573,7 +665,7 @@ export function VistaCaja({ branches, cajaBranch, canEdit, cardAcquirers, cashSe
                         <div className="col-span-2 text-right">Efectivo</div>
                         <div className="col-span-2 text-right">Tarjeta</div>
                         <div className="col-span-2 text-right">Transf./Otro</div>
-                        <div className="col-span-3 text-right">Diferencia total</div>
+                        <div className="col-span-3 text-right">Diferencia total / reporte</div>
                       </div>
                       {closedSessions.map((s) => {
                         const diff = Number(s.declared_cash || 0) - Number(s.expected_cash || 0)
@@ -591,6 +683,7 @@ export function VistaCaja({ branches, cajaBranch, canEdit, cardAcquirers, cashSe
                                 const du = Number(s.declared_cash_usd || 0) - Number(s.expected_cash_usd || 0);
                                 return <div className="text-xs font-normal" style={{ color: Math.abs(du) > 0.01 ? (du > 0 ? C.blue : C.red) : C.muted }}>US$ {Number(s.declared_cash_usd || 0).toFixed(2)} ({du > 0 ? "+" : ""}{du.toFixed(2)})</div>;
                               })()}
+                              <button onClick={() => onPrintCashReport && onPrintCashReport(s, activeBranchName)} className="inline-flex items-center gap-1 text-xs font-normal mt-1" style={{ color: C.amber }}><Printer size={12} /> Imprimir</button>
                             </div>
                           </div>
                         );
@@ -608,6 +701,19 @@ export function VistaCaja({ branches, cajaBranch, canEdit, cardAcquirers, cashSe
                 );
               })()}
             </div>
+          </CajaPinGate>
+  );
+}
+
+function CajaPinsToggle({ profiles, isAdmin }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="mt-2">
+      <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-2 text-xs uppercase tracking-wide mb-2" style={{ color: C.amber }}>
+        {open ? "▾" : "▸"} PIN de los cajeros
+      </button>
+      {open && <CajaPinAdmin profiles={profiles} isAdmin={isAdmin} />}
+    </div>
   );
 }
 

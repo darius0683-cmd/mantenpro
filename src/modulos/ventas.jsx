@@ -5,7 +5,7 @@ import React from "react";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "../supabaseClient";
 import { X, Pencil, Plus, GripVertical, BadgeCheck, FileText, Trash2, ImageIcon, Ban, Layers, Copy, Receipt, ClipboardList } from "lucide-react";
-import { ActivityHistorySection, C, ClientSearchSelect, Field, MOTIVOS_ANULACION_608, Modal, PAYMENT_STATUS_CFG, Pill, ProductSearchSelect, QUOTE_STATUS_CFG, SALES_ORDER_STATUS_CFG, SearchSelect, cardDetailLine, fmtDate, fmtMoney, groupItemsByChapter, iconBtnStyle, inputClass, inputStyle, invoiceLikeHtml, isRetentionMethod, printDocument, todayStrRD } from "./base.jsx";
+import { ActivityHistorySection, C, cardDetailLine, ClientSearchSelect, Field, fmtDate, fmtMoney, groupItemsByChapter, iconBtnStyle, inputClass, inputStyle, invoiceBalance, invoiceLikeHtml, isRetentionMethod, Modal, MOTIVOS_ANULACION_608, PAYMENT_STATUS_CFG, Pill, printDocument, ProductSearchSelect, QUOTE_STATUS_CFG, SALES_ORDER_STATUS_CFG, SearchSelect, todayStrRD } from "./base.jsx";
 
 export function ClientFormModal({ initial, onClose, onSave, saving }) {
   const [name, setName] = useState(initial?.name || "");
@@ -206,26 +206,32 @@ export function receiptHtml({ company, companyName, clientName, clientRnc, invoi
   `;
 }
 
-export function statementHtml(companyName, clientName, invoicesList) {
+export function statementHtml(companyName, clientName, invoicesList, creditBalance = 0) {
+  // Notas: + débito (cargos) / − crédito (rebajas o saldo a favor usado)
+  const notesOf = (inv) => Number(inv.debit_applied || 0) - Number(inv.credit_applied || 0);
   const rows = invoicesList.map((inv) => {
-    const balance = Number(inv.total) - Number(inv.amount_paid || 0);
+    const balance = invoiceBalance(inv);
     const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
-    return `<tr><td>${inv.ncf}</td><td>${fmtDate(inv.invoice_date)}</td><td style="text-align:right">${fmtMoney(inv.total)}</td><td style="text-align:right">${fmtMoney(inv.amount_paid || 0)}</td><td style="text-align:right">${fmtMoney(balance)}</td><td>${payCfg.label}</td></tr>`;
+    const n = notesOf(inv);
+    return `<tr><td>${inv.ncf}</td><td>${fmtDate(inv.invoice_date)}</td><td style="text-align:right">${fmtMoney(inv.total)}</td><td style="text-align:right">${n ? (n > 0 ? "+" : "") + fmtMoney(n) : ""}</td><td style="text-align:right">${fmtMoney(inv.amount_paid || 0)}</td><td style="text-align:right">${fmtMoney(balance)}</td><td>${payCfg.label}</td></tr>`;
   }).join("");
   const totalFacturado = invoicesList.reduce((s, i) => s + Number(i.total), 0);
+  const totalNotas = invoicesList.reduce((s, i) => s + notesOf(i), 0);
   const totalCobrado = invoicesList.reduce((s, i) => s + Number(i.amount_paid || 0), 0);
-  const saldo = totalFacturado - totalCobrado;
+  const saldo = invoicesList.reduce((s, i) => s + invoiceBalance(i), 0);
   return `
     <div class="header-row">
       <div><h1>${companyName}</h1><div class="muted">Estado de cuenta</div></div>
       <div class="muted" style="text-align:right">Fecha: ${new Date().toLocaleDateString("es-DO")}</div>
     </div>
     <div class="muted">Cliente: <b style="color:#111">${clientName}</b></div>
-    <table><thead><tr><th>NCF</th><th>Fecha</th><th style="text-align:right">Total</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><thead><tr><th>NCF</th><th>Fecha</th><th style="text-align:right">Total</th><th style="text-align:right">Notas</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="totals">
       <div><span>Total facturado</span><span>${fmtMoney(totalFacturado)}</span></div>
+      ${totalNotas ? `<div><span>Notas de débito / crédito</span><span>${totalNotas > 0 ? "+" : ""}${fmtMoney(totalNotas)}</span></div>` : ""}
       <div><span>Total cobrado</span><span>${fmtMoney(totalCobrado)}</span></div>
       <div class="total"><span>Saldo pendiente</span><span>${fmtMoney(saldo)}</span></div>
+      ${creditBalance > 0.009 ? `<div><span>Saldo a favor del cliente</span><span>${fmtMoney(creditBalance)}</span></div>` : ""}
     </div>
   `;
 }
@@ -673,10 +679,10 @@ export function InvoiceFormModal({ clients, products, ncfSequences, branches, ba
 
 export const CARD_BRANDS = ["Visa", "Mastercard", "American Express", "Discover", "Diners Club", "Otra"];
 
-export function InvoiceDetailModal({ invoice, items, payments, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, cardAcquirers, canEdit, canDelete, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
+export function InvoiceDetailModal({ clientCredit = 0, onUseClientCredit, invoice, items, payments, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, cardAcquirers, canEdit, canDelete, isAdmin, onClose, onVoid, onRegisterPayment, onDeletePayment, onDeletePaymentAttachment }) {
   const statusColor = invoice.status === "anulada" ? C.red : C.green;
   const payCfg = PAYMENT_STATUS_CFG[invoice.payment_status] || PAYMENT_STATUS_CFG.pendiente;
-  const balance = Number(invoice.total) - Number(invoice.amount_paid || 0) - Number(invoice.credit_applied || 0);
+  const balance = invoiceBalance(invoice);
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
   const showChapters = chapterGroups.length > 1 || (chapterGroups[0] && chapterGroups[0].chapter !== "General");
   const isImage = (name) => /\.(png|jpe?g|gif|webp)$/i.test(name || "");
@@ -749,7 +755,7 @@ export function InvoiceDetailModal({ invoice, items, payments, clientName, clien
     const ordered = (payments || []).slice().sort((a, b) => (a.payment_date || "").localeCompare(b.payment_date || "") || (a.created_at || "").localeCompare(b.created_at || ""));
     let paidUpTo = 0;
     for (const pmt of ordered) { paidUpTo += Number(pmt.amount || 0); if (pmt.id === payment.id) break; }
-    const balanceAfter = Math.max(Number(invoice.total || 0) - paidUpTo - Number(invoice.credit_applied || 0), 0);
+    const balanceAfter = Math.max(Number(invoice.total || 0) + Number(invoice.debit_applied || 0) - paidUpTo - Number(invoice.credit_applied || 0), 0);
     printDocument(`Recibo ${payment.receipt_number || ""}`, receiptHtml({ company, companyName, clientName, clientRnc, invoice, payment, balanceAfter }));
   };
   const submitPayment = () => {
@@ -762,6 +768,14 @@ export function InvoiceDetailModal({ invoice, items, payments, clientName, clien
     }
     if (!amt || amt <= 0) return;
     if (amt > balance + 0.05) { setPayError(`El pago (${fmtMoney(amt)}) es mayor que el saldo pendiente (${fmtMoney(balance)}).`); return; }
+    if (payMethod === "Saldo a favor") {
+      // No es dinero que entra: se usa el saldo a favor del cliente (de una nota de crédito)
+      if (amt > clientCredit + 0.005) { setPayError(`El cliente solo tiene ${fmtMoney(clientCredit)} de saldo a favor.`); return; }
+      if (onUseClientCredit) onUseClientCredit(invoice, Math.round(Math.min(amt, balance) * 100) / 100);
+      setShowPaymentForm(false);
+      setPayNotes("");
+      return;
+    }
     if (needsBankAccount && !payBankAccountId) { setPayError("Elige la cuenta bancaria a la que llegó la transferencia."); return; }
     let card = null;
     if (isCardPayment) {
@@ -857,7 +871,8 @@ export function InvoiceDetailModal({ invoice, items, payments, clientName, clien
         {invoice.applies_norma_0205 && <div className="flex justify-between text-sm" style={{ color: C.red }}><span>Retención ITBIS 30% (Norma 02-05)</span><span className="font-mono">-{fmtMoney(invoice.itbis_retained || 0)}</span></div>}
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total</span><span className="font-mono">{fmtMoney(invoice.total)}</span></div>
         <div className="flex justify-between text-sm" style={{ color: C.green }}><span>Cobrado</span><span className="font-mono">{fmtMoney(invoice.amount_paid || 0)}</span></div>
-        {Number(invoice.credit_applied || 0) > 0 && <div className="flex justify-between text-sm" style={{ color: C.blue }}><span>Crédito aplicado</span><span className="font-mono">{fmtMoney(invoice.credit_applied)}</span></div>}
+        {Number(invoice.debit_applied || 0) > 0 && <div className="flex justify-between text-sm" style={{ color: C.orange }}><span>Notas de débito</span><span className="font-mono">+{fmtMoney(invoice.debit_applied)}</span></div>}
+        {Number(invoice.credit_applied || 0) > 0 && <div className="flex justify-between text-sm" style={{ color: C.blue }}><span>Notas de crédito / saldo a favor aplicado</span><span className="font-mono">-{fmtMoney(invoice.credit_applied)}</span></div>}
         <div className="flex justify-between text-sm font-semibold" style={{ color: balance > 0 ? C.red : C.muted }}><span>Saldo pendiente</span><span className="font-mono">{fmtMoney(balance)}</span></div>
       </div>
 
@@ -952,15 +967,19 @@ export function InvoiceDetailModal({ invoice, items, payments, clientName, clien
             </>
           )}
           <Field label="Método (opcional)">
-            <select className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => { setPayMethod(e.target.value); setCardError(""); if (isRetentionMethod(e.target.value)) setPayCurrency("DOP"); }}>
+            <select className={inputClass} style={inputStyle} value={payMethod} onChange={(e) => { setPayMethod(e.target.value); setCardError(""); if (isRetentionMethod(e.target.value) || e.target.value === "Saldo a favor") setPayCurrency("DOP"); }}>
               <option value="">Selecciona un método</option>
               <option value="Efectivo">Efectivo</option>
               <option value="Tarjeta">Tarjeta</option>
               <option value="Transferencia">Transferencia</option>
               <option value="Otro">Otro</option>
               <option value="Retención ISR (cliente)">Retención ISR hecha por el cliente</option>
+              {clientCredit > 0.009 && <option value="Saldo a favor">Saldo a favor del cliente ({fmtMoney(clientCredit)})</option>}
             </select>
           </Field>
+          {payMethod === "Saldo a favor" && (
+            <div className="text-xs" style={{ color: C.muted }}>Usa el saldo a favor que el cliente tiene por notas de crédito. No entra dinero a la caja. Puedes usar hasta {fmtMoney(Math.min(clientCredit, balance))}.</div>
+          )}
           {isRetentionMethod(payMethod) && (
             <div className="text-xs" style={{ color: C.muted }}>El cliente retuvo ISR y te pagó menos: esto rebaja el saldo de la factura, pero no es dinero en caja (no exige caja abierta ni lleva recibo). Va al 607 como "Retención Renta por Terceros". Adjunta abajo el certificado de retención cuando el cliente lo entregue.</div>
           )}
@@ -1059,7 +1078,7 @@ export function InvoiceDetailModal({ invoice, items, payments, clientName, clien
 export function VoidInvoiceModal({ invoice, onClose, onConfirm, saving }) {
   const [reasonCode, setReasonCode] = useState("04");
   const [reason, setReason] = useState("");
-  const hasMoney = Number(invoice.amount_paid || 0) > 0 || Number(invoice.credit_applied || 0) > 0;
+  const hasMoney = Number(invoice.amount_paid || 0) > 0 || Number(invoice.credit_applied || 0) > 0 || Number(invoice.debit_applied || 0) > 0;
   return (
     <Modal title={`Anular factura ${invoice.invoice_number || invoice.ncf}`} onClose={onClose}>
       <div className="text-sm mb-3" style={{ color: C.text }}>
@@ -1067,7 +1086,7 @@ export function VoidInvoiceModal({ invoice, onClose, onConfirm, saving }) {
       </div>
       {hasMoney && (
         <div className="text-xs mb-3 p-2" style={{ background: C.redBg, color: C.red }}>
-          Esta factura tiene cobros o notas de crédito aplicadas: el sistema no la dejará anular. Elimina los cobros primero, o emite una nota de crédito.
+          Esta factura tiene cobros o notas de crédito/débito aplicadas: el sistema no la dejará anular. Elimina los cobros primero, o emite una nota de crédito.
         </div>
       )}
       <Field label="Motivo de anulación (608)">
@@ -1097,7 +1116,7 @@ export function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, 
 
   const selectedInvoice = invoices.find((i) => i.id === invoiceId);
   const b04Sequences = ncfSequences.filter((s) => s.ncf_type === "B04" && s.active && s.next_number <= s.range_end);
-  const invoiceBalance = selectedInvoice ? Number(selectedInvoice.total) - Number(selectedInvoice.amount_paid || 0) - Number(selectedInvoice.credit_applied || 0) : 0;
+  const invBalance = selectedInvoice ? invoiceBalance(selectedInvoice) : 0;
 
   useEffect(() => {
     if (!invoiceId) { setItems([]); return; }
@@ -1151,7 +1170,7 @@ export function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, 
       </Field>
       {selectedInvoice && (
         <div className="text-xs mb-3" style={{ color: C.muted }}>
-          Total de la factura: <span style={{ color: C.text }}>{fmtMoney(selectedInvoice.total)}</span> · Saldo disponible para acreditar: <span style={{ color: C.text }}>{fmtMoney(invoiceBalance)}</span>
+          Total de la factura: <span style={{ color: C.text }}>{fmtMoney(selectedInvoice.total)}</span> · Saldo disponible para acreditar: <span style={{ color: C.text }}>{fmtMoney(invBalance)}</span>
         </div>
       )}
       <div className="grid grid-cols-2 gap-3">
@@ -1195,6 +1214,12 @@ export function CreditNoteFormModal({ invoices, clients, ncfSequences, onClose, 
         <div className="flex justify-between text-base font-bold" style={{ color: C.text }}><span>Total a acreditar</span><span className="font-mono">{fmtMoney(total)}</span></div>
         {Number(selectedInvoice?.discount_pct) > 0 && <div className="text-xs" style={{ color: C.muted }}>Incluye el descuento de {selectedInvoice.discount_pct}% de la factura.</div>}
         {isUsdNote && <div className="text-xs" style={{ color: C.blue }}>Factura en US$: montos en RD$ a la tasa de la factura (RD$ {noteRate}) · ≈ US$ {(total / noteRate).toFixed(2)}</div>}
+        {selectedInvoice && total > invBalance + 0.009 && (
+          <div className="text-xs pt-1" style={{ color: C.green }}>
+            {invBalance > 0.009 ? `${fmtMoney(invBalance)} rebaja lo que debe la factura y ` : "La factura ya está pagada: "}
+            {fmtMoney(total - Math.max(invBalance, 0))} queda como <b>saldo a favor del cliente</b> (lo usa al pagar otra factura).
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end gap-2 mt-4">
@@ -1840,7 +1865,7 @@ export function SalesOrderDetailModal({ order, items, clientName, clientRnc, com
   );
 }
 
-export function StatementModal({ clients, invoices, companyName, onClose }) {
+export function StatementModal({ clients, invoices, companyName, clientCreditOf, onClose }) {
   const [clientId, setClientId] = useState("");
   const [paymentFilters, setPaymentFilters] = useState(new Set());
   const client = clients.find((c) => c.id === clientId);
@@ -1848,13 +1873,14 @@ export function StatementModal({ clients, invoices, companyName, onClose }) {
   const clientInvoices = paymentFilters.size === 0 ? clientInvoicesAll : clientInvoicesAll.filter((inv) => paymentFilters.has(inv.payment_status || "pendiente"));
   const totalFacturado = clientInvoices.reduce((s, i) => s + Number(i.total), 0);
   const totalCobrado = clientInvoices.reduce((s, i) => s + Number(i.amount_paid || 0), 0);
-  const saldo = totalFacturado - totalCobrado;
+  const saldo = clientInvoices.reduce((s, i) => s + invoiceBalance(i), 0);
+  const creditBalance = clientCreditOf ? clientCreditOf(clientId) : 0;
   const togglePaymentFilter = (key) => setPaymentFilters((prev) => { const next = new Set(prev); next.has(key) ? next.delete(key) : next.add(key); return next; });
   const filterLabel = paymentFilters.size === 0 || paymentFilters.size === 3 ? "" : ` — ${[...paymentFilters].map((k) => PAYMENT_STATUS_CFG[k]?.label).join(", ")}`;
 
   const doPrint = () => {
     if (!client) return;
-    printDocument(`Estado de cuenta - ${client.name}`, statementHtml(companyName, client.name + filterLabel, clientInvoices));
+    printDocument(`Estado de cuenta - ${client.name}`, statementHtml(companyName, client.name + filterLabel, clientInvoices, creditBalance));
   };
 
   return (
@@ -1885,7 +1911,7 @@ export function StatementModal({ clients, invoices, companyName, onClose }) {
               <div className="col-span-2 text-right">Estado</div>
             </div>
             {clientInvoices.map((inv) => {
-              const balance = Number(inv.total) - Number(inv.amount_paid || 0);
+              const balance = invoiceBalance(inv);
               const payCfg = PAYMENT_STATUS_CFG[inv.payment_status] || PAYMENT_STATUS_CFG.pendiente;
               return (
                 <div key={inv.id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center text-sm px-3 py-2" style={{ background: C.panelAlt }}>
@@ -1910,6 +1936,7 @@ export function StatementModal({ clients, invoices, companyName, onClose }) {
               <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Total facturado</span><span className="font-mono">{fmtMoney(totalFacturado)}</span></div>
               <div className="flex justify-between text-sm" style={{ color: C.green }}><span>Total cobrado</span><span className="font-mono">{fmtMoney(totalCobrado)}</span></div>
               <div className="flex justify-between text-base font-bold" style={{ color: saldo > 0 ? C.red : C.text }}><span>Saldo pendiente</span><span className="font-mono">{fmtMoney(saldo)}</span></div>
+              {creditBalance > 0.009 && <div className="flex justify-between text-sm" style={{ color: C.green }}><span>Saldo a favor del cliente</span><span className="font-mono">{fmtMoney(creditBalance)}</span></div>}
             </div>
           )}
         </>

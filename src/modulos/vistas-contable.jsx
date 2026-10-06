@@ -78,7 +78,7 @@ export function VistaTaxRates({ canDelete, canEdit, deleteTaxRate, setEditingTax
 }
 
 // Pantalla: fiscalReports
-export function VistaFiscalReports({ clients, company, creditNotes, invoices, otherExpenses, products, purchases, setErrorMsg, setTaxReportPeriod, suppliers, taxReportPeriod }) {
+export function VistaFiscalReports({ debitNotes = [], clients, company, creditNotes, invoices, otherExpenses, products, purchases, setErrorMsg, setTaxReportPeriod, suppliers, taxReportPeriod }) {
   return (
           <div>
               <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
@@ -111,6 +111,8 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                 const periodInvoices = invoices.filter((inv) => inv.status !== "anulada" && (inv.invoice_date || "").slice(0, 7) === taxReportPeriod);
                 // Notas de crédito (B04) del período: van al 607 con el NCF de la factura que modifican
                 const periodCreditNotes = creditNotes.filter((cn) => cn.status !== "anulada" && (cn.note_date || "").slice(0, 10).slice(0, 7) === taxReportPeriod);
+                // Notas de débito (B03) del período: también van al 607 con el NCF de la factura que modifican
+                const periodDebitNotes = (debitNotes || []).filter((dn) => dn.status !== "anulada" && (dn.note_date || "").slice(0, 7) === taxReportPeriod);
                 const issues607 = [];
                 periodInvoices.forEach((inv) => {
                   const cli = clients.find((c) => c.id === inv.client_id);
@@ -120,6 +122,9 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                 });
                 periodCreditNotes.forEach((cn) => {
                   if (!invoices.find((i) => i.id === cn.invoice_id)?.ncf) issues607.push(`Nota de crédito ${cn.ncf}: no se encontró el NCF de la factura que modifica`);
+                });
+                periodDebitNotes.forEach((dn) => {
+                  if (!invoices.find((i) => i.id === dn.invoice_id)?.ncf) issues607.push(`Nota de débito ${dn.ncf}: no se encontró el NCF de la factura que modifica`);
                 });
                 const purchTotals = periodPurchases.reduce((acc, pu) => {
                   acc.subtotal += Number(pu.service_value ?? pu.total ?? 0);
@@ -145,6 +150,11 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                   salesTotals.subtotal -= Number(cn.subtotal || 0);
                   salesTotals.itbis -= Number(cn.itbis || 0);
                   salesTotals.total -= Number(cn.total || 0);
+                });
+                periodDebitNotes.forEach((dn) => {
+                  salesTotals.subtotal += Number(dn.subtotal || 0);
+                  salesTotals.itbis += Number(dn.itbis || 0);
+                  salesTotals.total += Number(dn.total || 0);
                 });
 
                 const downloadCsv = (filename, header, rows) => {
@@ -256,7 +266,7 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                   ];
                   // Cobros de las facturas del período para repartir la forma de venta. Solo cuentan los
                   // cobros hechos hasta el cierre del mes; lo que falte por cobrar va a "Venta a Crédito".
-                  const ids = periodInvoices.map((inv) => inv.id);
+                  const ids = [...new Set([...periodInvoices.map((inv) => inv.id), ...periodDebitNotes.map((dn) => dn.invoice_id).filter(Boolean)])];
                   const paysByInvoice = new Map();
                   if (ids.length > 0) {
                     const { data: payRows, error: payErr } = await fetchByIdChunks(ids, (chunk) => supabase.from("invoice_payments").select("invoice_id, amount, method, payment_date").in("invoice_id", chunk));
@@ -268,6 +278,25 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                   const ymd = (d) => (d || "").slice(0, 10).replaceAll("-", "");
                   const pendingRetentions = [];
                   const rows = [];
+                  // Bolsa de cobros (hasta el cierre del mes) por factura, para repartirla entre la factura y sus notas de débito
+                  const pools = new Map();
+                  const poolOf = (invId, sumBy) => {
+                    if (!pools.has(invId)) pools.set(invId, {
+                      efectivo: sumBy((p) => p.method === "Efectivo"),
+                      banco: sumBy((p) => p.method !== "Efectivo" && p.method !== "Tarjeta" && !isRetentionMethod(p.method)),
+                      tarjeta: sumBy((p) => p.method === "Tarjeta"),
+                    });
+                    return pools.get(invId);
+                  };
+                  const takeFrom = (pool, amount) => {
+                    let left = Math.round(amount * 100) / 100; const got = { efectivo: 0, banco: 0, tarjeta: 0 };
+                    for (const k of ["efectivo", "banco", "tarjeta"]) { const t = Math.min(pool[k], left); got[k] = t; pool[k] -= t; left -= t; }
+                    return got;
+                  };
+                  const sumByFor = (invId) => {
+                    const paid = (paysByInvoice.get(invId) || []).filter((p) => (p.payment_date || "") <= periodEnd);
+                    return (fn) => paid.filter(fn).reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                  };
                   periodInvoices.forEach((inv) => {
                     const cli = clients.find((c) => c.id === inv.client_id);
                     const subtotal = Number(inv.subtotal || 0);
@@ -276,12 +305,12 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                     const pays = (paysByInvoice.get(inv.id) || []).slice().sort((a, b) => (a.payment_date || "").localeCompare(b.payment_date || ""));
                     const paidInPeriod = pays.filter((p) => (p.payment_date || "") <= periodEnd);
                     const sumBy = (fn) => paidInPeriod.filter(fn).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-                    const efectivo = sumBy((p) => p.method === "Efectivo");
-                    const tarjeta = sumBy((p) => p.method === "Tarjeta");
-                    const banco = sumBy((p) => p.method !== "Efectivo" && p.method !== "Tarjeta" && !isRetentionMethod(p.method));
                     // Retención de ISR hecha por el cliente (cualquier fecha): va a "Retención Renta por Terceros"
                     const isrRetPays = pays.filter((p) => p.method === "Retención ISR (cliente)");
                     const isrRetenido = isrRetPays.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                    // Lo cobrado se reparte primero a la factura; lo que sobre (cobro de notas de débito) queda para ellas
+                    const pool = poolOf(inv.id, sumBy);
+                    const { efectivo, banco, tarjeta } = takeFrom(pool, Math.max(Number(inv.total || 0) - isrRetenido, 0));
                     const credito = Math.max(Number(inv.total || 0) - efectivo - tarjeta - banco - isrRetenido, 0);
                     // La retención de la Norma 02-05 la hace el cliente al pagar: fecha = primer cobro.
                     let fechaRetencion = "";
@@ -307,6 +336,27 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                       inv?.income_type || "01", ymd(cn.note_date), "", Number(cn.subtotal || 0).toFixed(2), Number(cn.itbis || 0).toFixed(2), "0.00",
                       "", "", "", "", "",
                       "", "0.00", "0.00", "0.00", "0.00",
+                      "", "", "", "",
+                    ]);
+                  });
+                  // Notas de débito (B03): lo que se cobró de más sobre su factura se reparte aquí; el resto, a crédito
+                  periodDebitNotes.slice().sort((a, b) => (a.note_date || "").localeCompare(b.note_date || "")).forEach((dn) => {
+                    const cli = clients.find((c) => c.id === dn.client_id);
+                    const inv = invoices.find((i) => i.id === dn.invoice_id);
+                    let pool = pools.get(dn.invoice_id);
+                    if (!pool && inv) {
+                      // Factura de otro mes: primero se le descuenta su propio total
+                      pool = poolOf(inv.id, sumByFor(inv.id));
+                      const isr = (paysByInvoice.get(inv.id) || []).filter((p) => p.method === "Retención ISR (cliente)").reduce((sum, p) => sum + Number(p.amount || 0), 0);
+                      takeFrom(pool, Math.max(Number(inv.total || 0) - isr, 0));
+                    }
+                    const got = pool ? takeFrom(pool, Number(dn.total || 0)) : { efectivo: 0, banco: 0, tarjeta: 0 };
+                    const credito = Math.max(Number(dn.total || 0) - got.efectivo - got.banco - got.tarjeta, 0);
+                    rows.push([
+                      "", cli?.rnc_cedula || "", tipoId(cli?.rnc_cedula), dn.ncf || "", inv?.ncf || "",
+                      inv?.income_type || "01", ymd(dn.note_date), "", Number(dn.subtotal || 0).toFixed(2), Number(dn.itbis || 0).toFixed(2), "0.00",
+                      "", "", "", "", "",
+                      "", got.efectivo.toFixed(2), got.banco.toFixed(2), got.tarjeta.toFixed(2), credito.toFixed(2),
                       "", "", "", "",
                     ]);
                   });
@@ -341,7 +391,7 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                         </button>
                       </div>
                       <div className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
-                        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>607 · Ventas ({periodInvoices.length}) y notas de crédito ({periodCreditNotes.length})</div>
+                        <div className="text-xs uppercase tracking-wide mb-1" style={{ color: C.muted }}>607 · Ventas ({periodInvoices.length}), notas de crédito ({periodCreditNotes.length}) y de débito ({periodDebitNotes.length})</div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>Subtotal</span><span className="font-mono">{fmtMoney(salesTotals.subtotal)}</span></div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS facturado</span><span className="font-mono">{fmtMoney(salesTotals.itbis)}</span></div>
                         <div className="flex justify-between text-sm" style={{ color: C.muted }}><span>ITBIS retenido</span><span className="font-mono">{fmtMoney(salesTotals.itbisRet)}</span></div>
@@ -355,7 +405,7 @@ export function VistaFiscalReports({ clients, company, creditNotes, invoices, ot
                             </ul>
                           </details>
                         )}
-                        <button onClick={download607} disabled={periodInvoices.length === 0 && periodCreditNotes.length === 0} className="flex items-center gap-2 mt-3 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
+                        <button onClick={download607} disabled={periodInvoices.length === 0 && periodCreditNotes.length === 0 && periodDebitNotes.length === 0} className="flex items-center gap-2 mt-3 px-3 py-2 text-xs font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                           <FileText size={13} /> Descargar 607 (CSV)
                         </button>
                       </div>
@@ -486,6 +536,9 @@ export function VistaFinancialReports({ companyHasModule, financialCashFlow, fin
                     <div className="flex justify-between"><span style={{ color: C.muted }}>Ingresos por facturación</span><span className="font-mono">{fmtMoney(financialPnl.revenue)}</span></div>
                     {financialPnl.creditNotesTotal > 0 && (
                       <div className="flex justify-between"><span style={{ color: C.muted }}>Notas de crédito</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.creditNotesTotal)}</span></div>
+                    )}
+                    {financialPnl.debitNotesTotal > 0 && (
+                      <div className="flex justify-between"><span style={{ color: C.muted }}>Notas de débito</span><span className="font-mono" style={{ color: C.blue }}>+{fmtMoney(financialPnl.debitNotesTotal)}</span></div>
                     )}
                     <div className="flex justify-between font-semibold pt-1" style={{ borderTop: `1px solid ${C.border}` }}><span>Ingresos netos</span><span className="font-mono">{fmtMoney(financialPnl.netRevenue)}</span></div>
                     <div className="flex justify-between pt-2"><span style={{ color: C.muted }}>Costo de venta (productos vendidos)</span><span className="font-mono" style={{ color: C.red }}>-{fmtMoney(financialPnl.costOfSales)}</span></div>
