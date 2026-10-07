@@ -7,6 +7,22 @@ import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth
 import { CajaPinPrompt, cashReportHtml, isCajaPinError, notesInSession } from "./modulos/caja.jsx";
 import { NoCopyScreen, OfflineBar, checkSession, clearStoredAuth, clearUserCopy, discardOp, findStoredAuthUser, getOrderDetails, hasPendingFor, isNetworkError, isOnline, listPendingOps, loadDataSnapshot, loadProfileCache, localBlobUrl, newId, onSynced, patchOrderDetails, perform, prefetchOrderDetails, saveDataSnapshot, saveProfileCache, setOfflineUser, startOfflineSync, useOfflineState } from "./modulos/offline.jsx";
 
+// Ambiente de pruebas: si la app NO está conectada al Supabase de producción, se marca
+// en toda la pantalla (franja roja abajo y "[PRUEBAS]" en el título de la pestaña), para
+// que nunca se confunda con producción. No depende de ninguna configuración extra.
+const PROD_SUPABASE_REF = "tisehyjtpaclfxzusmmf";
+const IS_TEST_ENV = !String(import.meta.env.VITE_SUPABASE_URL || "").includes(PROD_SUPABASE_REF);
+if (IS_TEST_ENV && typeof document !== "undefined") {
+  try {
+    if (!document.title.startsWith("[PRUEBAS]")) document.title = `[PRUEBAS] ${document.title}`;
+    const bar = document.createElement("div");
+    bar.textContent = "AMBIENTE DE PRUEBAS — los datos de aquí no son reales";
+    bar.setAttribute("style", "position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:#C5412B;color:#fff;text-align:center;font:600 12px system-ui,sans-serif;padding:3px 8px;pointer-events:none;letter-spacing:.5px");
+    const add = () => document.body && !document.getElementById("mp-test-env-bar") && (bar.id = "mp-test-env-bar", document.body.appendChild(bar));
+    if (document.body) add(); else document.addEventListener("DOMContentLoaded", add);
+  } catch { /* sin DOM: no pasa nada */ }
+}
+
 function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const companyName = company?.name || "Tu empresa";
   const companyId = profile.company_id;
