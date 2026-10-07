@@ -16,6 +16,7 @@ const IMPORTERS = {
   "vistas-tecnico": () => import("./vistas-tecnico.jsx"),
   "vistas-ventas": () => import("./vistas-ventas.jsx"),
   admin: () => import("./admin.jsx"),
+  analisis: () => import("./analisis.jsx"),
   ayuda: () => import("./ayuda.jsx"),
   compras: () => import("./compras.jsx"),
   contratos: () => import("./contratos.jsx"),
@@ -86,6 +87,9 @@ export const ExportDataPanel = lazyComponent("admin", "ExportDataPanel");
 export const InviteFormModal = lazyComponent("admin", "InviteFormModal");
 export const TaxRateFormModal = lazyComponent("admin", "TaxRateFormModal");
 export const UserPermissionsModal = lazyComponent("admin", "UserPermissionsModal");
+
+// análisis de equipos
+export const VistaEquipmentAnalysis = lazyComponent("analisis", "VistaEquipmentAnalysis");
 
 // compras
 export const ExpenseFormModal = lazyComponent("compras", "ExpenseFormModal");
@@ -236,6 +240,7 @@ const CHUNK_OF_VIEW = {
   maintenanceSchedule: "tecnico",
   serviceContracts: "contratos",
   reports: "tecnico",
+  equipmentAnalysis: "analisis",
   warranty: "tecnico",
   branches: "tecnico",
   clients: "ventas",
