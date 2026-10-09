@@ -2089,7 +2089,145 @@ export function TechnicianHoursRow({ row, name, hourlyRate, readOnly, onSave, hi
   );
 }
 
-export function OrderDetailModal({ contractLabel, order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist, myTechnicianId, canManageVisits, onOrderStatusChange, onVisitsChanged }) {
+// ---- Materiales que anota el técnico (por aprobar) ----
+// El técnico anota lo que usó; no toca el inventario. Un administrador o supervisor lo aprueba
+// (puede corregir la cantidad; ahí se descuenta) o lo rechaza. Ver parte-c-materiales-tecnico.sql.
+const REQ_STATUS = { pendiente: ["Por aprobar", C.orange], aprobado: ["Aprobado", C.green], rechazado: ["Rechazado", C.red] };
+export function MaterialRequestsSection({ order, isTecnico, canManageWarehouse, readOnly, materialOptions, techName, onApproved, onRequested, onChanged }) {
+  const [requests, setRequests] = useState(null);
+  const [pick, setPick] = useState("");
+  const [qty, setQty] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [review, setReview] = useState({}); // id -> { qty, note }
+
+  const load = async () => {
+    const fromCopy = async () => { const d = await getOrderDetails(order.id); setRequests(d?.requests || []); };
+    if (!isOnline() || (await hasPendingFor(order.id))) { await fromCopy(); return; }
+    const { data, error } = await supabase.from("work_order_material_requests").select("*").eq("work_order_id", order.id).order("created_at");
+    if (error) {
+      if (isNetworkError(error)) { await fromCopy(); return; }
+      setRequests([]);
+      if (/work_order_material_requests/.test(error.message)) setErr("Falta correr parte-c-materiales-tecnico.sql en Supabase.");
+      return;
+    }
+    setRequests(data || []);
+    if (isTecnico) patchOrderDetails(order.id, (d) => ({ ...d, requests: data || [] }));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [order.id]);
+
+  const canRequest = isTecnico && !canManageWarehouse && !readOnly && order.status !== "completada";
+  const canReview = canManageWarehouse && !readOnly;
+
+  const submit = async () => {
+    setErr("");
+    const opt = materialOptions.find((o) => o.id === pick);
+    const q = Number(String(qty).replace(",", "."));
+    if (!opt || !(q > 0)) return;
+    setBusy(true);
+    const row = { id: newId(), work_order_id: order.id, name: opt.name, quantity: q, notes: note.trim() || null, ...techPickToColumns(opt.id) };
+    const res = await perform("material_request", order.id, { row }, `${order.code} · ${fmtQty(q)} ${opt.unit || ""} ${opt.name}`);
+    setBusy(false);
+    if (res.error) { setErr(res.error.message); return; }
+    const saved = res.data || { ...row, unit: opt.unit || null, status: "pendiente", pending: true, created_at: new Date().toISOString() };
+    const next = [...(requests || []), saved];
+    setRequests(next);
+    patchOrderDetails(order.id, (d) => ({ ...d, requests: next }));
+    if (res.data && onRequested) onRequested(order, saved);
+    setPick(""); setQty(""); setNote("");
+  };
+
+  const remove = async (r) => {
+    setErr("");
+    if (r.pending || !isOnline()) { setErr("Para borrar lo anotado necesitas conexión (y que ya se haya enviado)."); return; }
+    if (!window.confirm(`¿Borrar "${r.name}" de lo anotado?`)) return;
+    const { error } = await supabase.from("work_order_material_requests").delete().eq("id", r.id);
+    if (error) { setErr(error.message); return; }
+    await load();
+    onChanged && onChanged();
+  };
+
+  const doReview = async (r, approve) => {
+    setErr("");
+    const rv = review[r.id] || {};
+    const q = rv.qty === undefined || rv.qty === "" ? Number(r.quantity) : Number(String(rv.qty).replace(",", "."));
+    if (approve && !(q > 0)) { setErr("Escribe una cantidad mayor a cero."); return; }
+    if (!approve && !window.confirm(`¿Rechazar "${r.name}"? No se descuenta nada del inventario.`)) return;
+    setBusy(true);
+    const { data, error } = await supabase.rpc("mp_review_material_request", { p_id: r.id, p_approve: approve, p_quantity: approve ? q : null, p_note: (rv.note || "").trim() || null });
+    setBusy(false);
+    if (error) { setErr(error.message); return; }
+    setRequests((prev) => prev.map((x) => (x.id === r.id ? data : x)));
+    if (approve && onApproved) onApproved();
+    onChanged && onChanged();
+  };
+
+  if (requests === null) return null;
+  if (!canRequest && requests.length === 0 && !err) return null;
+  const pendingCount = requests.filter((r) => r.status === "pendiente").length;
+
+  return (
+    <div className="mt-2 mb-2 p-3" style={{ background: C.panel, border: `1px solid ${pendingCount && canReview ? C.orange : C.border}` }}>
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>
+        Materiales anotados por el técnico{pendingCount ? ` · ${pendingCount} por aprobar` : ""}
+      </div>
+      {requests.length > 0 && (
+        <div className="space-y-1 mb-2">
+          {requests.map((r) => {
+            const [label, color] = REQ_STATUS[r.status] || REQ_STATUS.pendiente;
+            const rv = review[r.id] || {};
+            return (
+              <div key={r.id} className="px-3 py-2 text-sm" style={{ background: C.panelAlt }}>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <span className="min-w-0">
+                    {r.name} — {fmtQty(r.status === "aprobado" && r.approved_quantity != null ? r.approved_quantity : r.quantity)} {r.unit || ""}
+                    {r.status === "aprobado" && r.approved_quantity != null && Number(r.approved_quantity) !== Number(r.quantity) && (
+                      <span className="text-xs ml-1" style={{ color: C.muted }}>(anotó {fmtQty(r.quantity)})</span>
+                    )}
+                    {r.technician_id && techName && <span className="text-xs ml-2" style={{ color: C.muted }}>{techName(r.technician_id)}</span>}
+                  </span>
+                  <span className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-[11px] font-semibold px-1.5 py-0.5" style={{ color, border: `1px solid ${color}60` }}>{r.pending ? "Por enviar" : label}</span>
+                    {r.status === "pendiente" && (canRequest || canReview) && (
+                      <button onClick={() => remove(r)} title="Borrar" style={{ color: C.muted }}><Trash2 size={13} /></button>
+                    )}
+                  </span>
+                </div>
+                {r.notes && <div className="text-xs mt-0.5" style={{ color: C.muted }}>{r.notes}</div>}
+                {r.review_note && <div className="text-xs mt-0.5" style={{ color: r.status === "rechazado" ? C.red : C.muted }}>Revisión: {r.review_note}</div>}
+                {r.status === "pendiente" && !r.pending && canReview && (
+                  <div className="grid grid-cols-12 gap-2 mt-2 items-center">
+                    <input type="text" inputMode="decimal" className={`${inputClass} col-span-3 text-xs`} style={inputStyle} value={rv.qty ?? String(r.quantity)} onChange={(e) => setReview((p) => ({ ...p, [r.id]: { ...rv, qty: e.target.value } }))} title="Cantidad que se aprueba" />
+                    <input className={`${inputClass} col-span-5 text-xs`} style={inputStyle} value={rv.note || ""} onChange={(e) => setReview((p) => ({ ...p, [r.id]: { ...rv, note: e.target.value } }))} placeholder="Nota (opcional)" maxLength={300} />
+                    <button onClick={() => doReview(r, true)} disabled={busy} className="col-span-2 px-2 py-2 text-xs font-semibold disabled:opacity-50" style={{ background: C.green, color: "#0B1F13" }}>Aprobar</button>
+                    <button onClick={() => doReview(r, false)} disabled={busy} className="col-span-2 px-2 py-2 text-xs disabled:opacity-50" style={{ color: C.red, border: `1px solid ${C.red}60` }}>Rechazar</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {canRequest && (
+        <div>
+          <div className="grid grid-cols-12 gap-2 min-w-[500px] items-end">
+            <div className="col-span-6"><SearchSelect items={materialOptions} value={pick} onChange={setPick} placeholder="Buscar el material que usaste..." getLabel={techOptionLabel} /></div>
+            <input type="text" inputMode="decimal" className={`${inputClass} col-span-2 text-xs`} style={inputStyle} value={qty} onChange={(e) => setQty(e.target.value)} placeholder="Cant." />
+            <button onClick={submit} disabled={busy || !pick || !qty} className="col-span-4 px-2 py-2 text-xs font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+              <Plus size={13} className="inline" /> Anotar
+            </button>
+          </div>
+          <input className={`${inputClass} mt-2 text-xs`} style={inputStyle} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Nota (opcional): para qué se usó" maxLength={300} />
+          <div className="text-xs mt-1" style={{ color: C.muted }}>Lo que anotes queda por aprobar: el supervisor lo revisa y ahí se descuenta del inventario.</div>
+        </div>
+      )}
+      {err && <div className="text-xs mt-1" style={{ color: C.red }}>{err}</div>}
+    </div>
+  );
+}
+
+export function OrderDetailModal({ contractLabel, order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onMaterialRequested, onMaterialRequestsChanged, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist, myTechnicianId, canManageVisits, onOrderStatusChange, onVisitsChanged }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [uploadingStage, setUploadingStage] = useState(null);
@@ -2145,6 +2283,12 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
   }, [order.id]);
 
   const materialOptions = techMaterialOptions({ techUsesProducts, products, productStock, materials, branchId: order.branch_id || defaultBranchId });
+  // Después de aprobar lo que anotó el técnico: el renglón nuevo y el inventario
+  const reloadUsedMaterials = async () => {
+    const { data, error } = await supabase.from("work_order_materials").select("*").eq("work_order_id", order.id).order("created_at");
+    if (!error) setUsedMaterials(data || []);
+    onInventoryChanged && onInventoryChanged();
+  };
   const [leftoverFor, setLeftoverFor] = useState(null); // renglón del que se registra un sobrante
   const leftoversFromOrder = (materials || []).filter((m) => m.kind === "sobrante" && m.source_work_order_id === order.id);
 
@@ -2640,7 +2784,12 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
             {materialErr && <div className="text-xs mt-1" style={{ color: "#E05252" }}>{materialErr}</div>}
           </div>
         )}
-        {!readOnly && !canManageWarehouse && (
+        <MaterialRequestsSection
+          order={order} isTecnico={isTecnico} canManageWarehouse={canManageWarehouse} readOnly={readOnly}
+          materialOptions={materialOptions} techName={techName}
+          onApproved={reloadUsedMaterials} onRequested={onMaterialRequested} onChanged={onMaterialRequestsChanged}
+        />
+        {!readOnly && !canManageWarehouse && !isTecnico && (
           <div className="text-xs" style={{ color: C.muted }}>Solo un supervisor o administrador puede retirar materiales del almacén.</div>
         )}
       </div>

@@ -159,20 +159,22 @@ export async function prefetchOrderDetails(orderIds) {
   const chunks = [];
   for (let i = 0; i < orderIds.length; i += 150) chunks.push(orderIds.slice(i, i + 150));
   const out = {};
-  orderIds.forEach((id) => { out[id] = { attachments: [], checklist: [], materials: [], visits: [] }; });
+  orderIds.forEach((id) => { out[id] = { attachments: [], checklist: [], materials: [], visits: [], requests: [] }; });
   try {
     for (const ids of chunks) {
-      const [att, ck, mat, vis] = await Promise.all([
+      const [att, ck, mat, vis, req] = await Promise.all([
         supabase.from("work_order_attachments").select("*").in("work_order_id", ids).order("uploaded_at"),
         supabase.from("work_order_checklist_items").select("*").in("work_order_id", ids).order("position"),
         supabase.from("work_order_materials").select("*").in("work_order_id", ids).order("created_at"),
         supabase.from("work_order_visits").select("*").in("work_order_id", ids).order("check_in_at"),
+        supabase.from("work_order_material_requests").select("*").in("work_order_id", ids).order("created_at"),
       ]);
       if (att.error || ck.error) return; // sin red o sin permiso: se queda la copia anterior
       (att.data || []).forEach((r) => out[r.work_order_id]?.attachments.push(r));
       (ck.data || []).forEach((r) => out[r.work_order_id]?.checklist.push(r));
       if (!mat.error) (mat.data || []).forEach((r) => out[r.work_order_id]?.materials.push(r));
       if (!vis.error) (vis.data || []).forEach((r) => out[r.work_order_id]?.visits.push(r));
+      if (!req.error) (req.data || []).forEach((r) => out[r.work_order_id]?.requests.push(r));
     }
   } catch { return; }
   const all = await ensureDetails();
@@ -330,6 +332,15 @@ const EXEC = {
     if (error) throw error;
     return data;
   },
+  // Material que anota el técnico (queda por aprobar; no toca el inventario)
+  async material_request(op) {
+    const { data, error } = await supabase.from("work_order_material_requests").insert(op.payload.row).select().single();
+    if (error) {
+      if (error.code === "23505") return { ...op.payload.row }; // ya se había guardado
+      throw error;
+    }
+    return data;
+  },
   async material_add(op) {
     const { data, error } = await supabase.from("work_order_materials").insert(op.payload.row).select().single();
     if (error) {
@@ -377,7 +388,7 @@ async function enqueue(op) {
 
 // Hace un cambio: si hay señal lo manda ya; si no (o si hay cambios anteriores esperando, para
 // respetar el orden), lo guarda en la cola.
-//   type: visit | checklist_load | checklist_update | order_update | signature | photo | material_add
+//   type: visit | checklist_load | checklist_update | order_update | signature | photo | material_add | material_request
 //   label: texto para la lista de pendientes ("Llegada · OT-0012")
 // Devuelve { data } si se guardó en el servidor, { queued: true, op } si quedó en la cola,
 // o { error } si el servidor lo rechazó.
@@ -517,7 +528,7 @@ export function startOfflineSync() {
 // ---------------------------------------------------------------------------------------------
 const OP_KIND = {
   visit: "Llegada / salida", checklist_load: "Checklist cargado", checklist_update: "Checklist",
-  order_update: "Orden", signature: "Firma del cliente", photo: "Foto", material_add: "Material usado",
+  order_update: "Orden", signature: "Firma del cliente", photo: "Foto", material_add: "Material usado", material_request: "Material anotado",
 };
 const fmtWhen = (iso) => (iso ? new Date(iso).toLocaleString("es-DO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 

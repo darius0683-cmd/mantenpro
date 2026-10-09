@@ -10,6 +10,40 @@ import { NoCopyScreen, OfflineBar, checkSession, clearStoredAuth, clearUserCopy,
 // Ambiente de pruebas: si la app NO está conectada al Supabase de producción, se marca
 // en toda la pantalla (franja roja abajo y "[PRUEBAS]" en el título de la pestaña), para
 // que nunca se confunda con producción. No depende de ninguna configuración extra.
+// ---- Aviso de versión nueva ----
+// Cada publicación (build) lleva un número de versión: va dentro del código (__APP_VERSION__) y en
+// /precache-manifest.json. Si la app lleva tiempo abierta y se publica otra versión, al volver a la
+// pestaña (o cada 5 minutos) se nota la diferencia y aparece una franja para actualizar. No se
+// recarga sola, para no cortar a nadie a mitad de un trabajo.
+const APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : null;
+function NewVersionBar() {
+  const [available, setAvailable] = useState(false);
+  useEffect(() => {
+    if (!APP_VERSION) return undefined;
+    let stopped = false;
+    const check = async () => {
+      if (stopped || !navigator.onLine || document.visibilityState === "hidden") return;
+      try {
+        const r = await fetch(`/precache-manifest.json?t=${Date.now()}`, { cache: "no-store" });
+        if (!r.ok) return;
+        const v = (await r.json())?.version;
+        if (v && v !== APP_VERSION) setAvailable(true);
+      } catch { /* sin señal: se revisa después */ }
+    };
+    check();
+    const timer = setInterval(check, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("online", check);
+    return () => { stopped = true; clearInterval(timer); document.removeEventListener("visibilitychange", check); window.removeEventListener("online", check); };
+  }, []);
+  if (!available) return null;
+  return (
+    <button onClick={() => window.location.reload()} className="w-full px-4 py-2 text-xs font-semibold text-left" style={{ background: C.blue, color: "#fff" }}>
+      Hay una versión nueva de MantenPro. Toca aquí para actualizar.
+    </button>
+  );
+}
+
 const PROD_SUPABASE_REF = "tisehyjtpaclfxzusmmf";
 const IS_TEST_ENV = !String(import.meta.env.VITE_SUPABASE_URL || "").includes(PROD_SUPABASE_REF);
 if (IS_TEST_ENV && typeof document !== "undefined") {
@@ -612,6 +646,22 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (!error) setOpenVisits(data || []);
   };
   useEffect(() => { reloadOpenVisits(); /* eslint-disable-next-line */ }, [companyId]);
+
+  // Materiales anotados por técnicos que esperan aprobación (parte-c-materiales-tecnico.sql)
+  const [pendingMaterialRequests, setPendingMaterialRequests] = useState([]);
+  const reloadPendingMaterialRequests = async () => {
+    if (!canManage || !companyId) return;
+    const { data, error } = await supabase.from("work_order_material_requests").select("*").eq("company_id", companyId).eq("status", "pendiente").order("created_at");
+    if (!error) setPendingMaterialRequests(data || []);
+  };
+  useEffect(() => { reloadPendingMaterialRequests(); /* eslint-disable-next-line */ }, [companyId]);
+  const reviewMaterialRequest = async (req, approve) => {
+    if (!approve && !window.confirm(`¿Rechazar "${req.name}"? No se descuenta nada del inventario.`)) return;
+    const { error } = await supabase.rpc("mp_review_material_request", { p_id: req.id, p_approve: approve, p_quantity: approve ? Number(req.quantity) : null, p_note: null });
+    if (error) { setErrorMsg(error.message); return; }
+    await reloadPendingMaterialRequests();
+    if (approve) reloadInventory();
+  };
   const onSiteOrderIds = useMemo(() => new Set(openVisits.map((v) => v.work_order_id)), [openVisits]);
 
   // Copia en el teléfono de lo que el técnico necesita sin señal (se actualiza sola con cada cambio)
@@ -4453,13 +4503,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
                       style={{ color: item.children.some((c) => c.key === view) ? C.text : C.muted, background: item.children.some((c) => c.key === view) ? C.panelAlt : "transparent", borderLeft: `2px solid ${item.children.some((c) => c.key === view) ? C.amber : "transparent"}` }}>
                       <item.Icon size={16} />
                       <span className="flex-1">{item.label}</span>
+                      {item.key === "inventoryMenu" && pendingMaterialRequests.length > 0 && !isSubOpen && <span className="text-[10px] font-bold px-1.5" style={{ background: C.orange, color: "#1A1500" }}>{pendingMaterialRequests.length}</span>}
                       {isSubOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </button>
                     {isSubOpen && item.children.map((child) => (
                       <button key={child.key} onClick={() => changeView(child.key)} className="w-full flex items-center gap-3 pl-9 pr-5 py-2 text-sm text-left"
                         style={{ color: view === child.key ? C.text : C.muted, background: view === child.key ? C.panelAlt : "transparent", borderLeft: `2px solid ${view === child.key ? C.amber : "transparent"}` }}>
                         <child.Icon size={14} />
-                        {child.label}
+                        <span className="flex-1">{child.label}</span>
+                        {child.key === "materials" && pendingMaterialRequests.length > 0 && <span className="text-[10px] font-bold px-1.5" title="Materiales por aprobar" style={{ background: C.orange, color: "#1A1500" }}>{pendingMaterialRequests.length}</span>}
                       </button>
                     ))}
                   </div>
@@ -4502,6 +4554,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
       <div className="flex-1 flex flex-col min-w-0">
         <OfflineBar snapshotAt={snapshotAt} />
+        <NewVersionBar />
         {errorMsg && (
           <div className="px-4 py-2 text-xs flex items-center justify-between" style={{ background: C.redBg, color: C.red }}>
             <span>Error: {errorMsg}</span>
@@ -4704,7 +4757,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("materials") && view === "materials" && (
-            <VistaMaterials branchName={branchName} canDelete={canDelete} canEdit={canEdit} deleteMaterial={deleteMaterial} lowStockMaterials={lowStockMaterials} materials={materials} materialsLowStockOnly={materialsLowStockOnly} setEditingMaterial={setEditingMaterial} setMaterialsLowStockOnly={setMaterialsLowStockOnly} setShowAddMaterial={setShowAddMaterial} techUsesProducts={techUsesProducts} products={products} productStock={productStock} branches={branches} orders={orders} projects={projects} />
+            <VistaMaterials branchName={branchName} canDelete={canDelete} canEdit={canEdit} deleteMaterial={deleteMaterial} lowStockMaterials={lowStockMaterials} materials={materials} materialsLowStockOnly={materialsLowStockOnly} setEditingMaterial={setEditingMaterial} setMaterialsLowStockOnly={setMaterialsLowStockOnly} setShowAddMaterial={setShowAddMaterial} techUsesProducts={techUsesProducts} products={products} productStock={productStock} branches={branches} orders={orders} projects={projects} pendingRequests={canManage ? pendingMaterialRequests : []} onReviewRequest={reviewMaterialRequest} techName={techName} openOrderDetail={openOrderDetail} />
           )}
 
           {!loadingScope && hasPerm("maintenanceSchedule") && view === "maintenanceSchedule" && (
@@ -4916,6 +4969,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           productStock={productStock}
           defaultBranchId={defaultBranchId}
           canManageWarehouse={canManage}
+          onMaterialRequestsChanged={reloadPendingMaterialRequests}
           onAddPhoto={addOrderPhoto}
           onDeletePhoto={deleteDetailAttachment}
           clients={clients}

@@ -910,7 +910,7 @@ export function VistaTools({ assignToolsByQuantity, bulkDeleteTools, bulkRetireT
 }
 
 // Pantalla: materials
-export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial, lowStockMaterials, materials, materialsLowStockOnly, setEditingMaterial, setMaterialsLowStockOnly, setShowAddMaterial, techUsesProducts, products, productStock, branches, orders, projects }) {
+export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial, lowStockMaterials, materials, materialsLowStockOnly, setEditingMaterial, setMaterialsLowStockOnly, setShowAddMaterial, techUsesProducts, products, productStock, branches, orders, projects, pendingRequests = [], onReviewRequest, techName, openOrderDetail }) {
   // Empresa con técnico + comercial: aquí quedan los sobrantes (y los materiales que ya existían);
   // el inventario nuevo vive en Productos y se muestra abajo solo para consulta.
   const techProducts = techUsesProducts ? (products || []).filter((p) => p.tech_available && (p.item_type || "producto") !== "servicio" && !p.is_composite) : [];
@@ -943,6 +943,34 @@ export function VistaMaterials({ branchName, canDelete, canEdit, deleteMaterial,
                   )}
                 </div>
               </div>
+              {pendingRequests.length > 0 && (
+                <div className="mb-4 p-3" style={{ background: C.panel, border: `1px solid ${C.orange}` }}>
+                  <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.orange }}>Materiales anotados por técnicos — por aprobar ({pendingRequests.length})</div>
+                  <div className="text-xs mb-2" style={{ color: C.muted }}>Al aprobar se descuenta del inventario. Para aprobar otra cantidad, abre la orden.</div>
+                  <div className="space-y-1">
+                    {pendingRequests.map((r) => {
+                      const o = (orders || []).find((x) => x.id === r.work_order_id);
+                      return (
+                        <div key={r.id} className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 text-sm" style={{ background: C.panelAlt }}>
+                          <div className="min-w-0">
+                            <button onClick={() => o && openOrderDetail && openOrderDetail(o)} className="font-mono text-xs mr-2 underline" style={{ color: C.amber }}>{o?.code || "OT"}</button>
+                            {r.name} — <span className="font-mono">{Number(r.quantity).toLocaleString("es-DO")} {r.unit || ""}</span>
+                            {r.technician_id && techName && <span className="text-xs ml-2" style={{ color: C.muted }}>{techName(r.technician_id)}</span>}
+                            <span className="text-xs ml-2" style={{ color: C.muted }}>{fmtDate(String(r.created_at || "").slice(0, 10))}</span>
+                            {r.notes && <div className="text-xs" style={{ color: C.muted }}>{r.notes}</div>}
+                          </div>
+                          {onReviewRequest && (
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <button onClick={() => onReviewRequest(r, true)} className="px-3 py-1.5 text-xs font-semibold" style={{ background: C.green, color: "#0B1F13" }}>Aprobar</button>
+                              <button onClick={() => onReviewRequest(r, false)} className="px-3 py-1.5 text-xs" style={{ color: C.red, border: `1px solid ${C.red}60` }}>Rechazar</button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {techUsesProducts && (
                 <div className="mb-4 p-3 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.muted }}>
                   Tu empresa lleva el inventario en <b style={{ color: C.text }}>Productos</b>. Aquí quedan los <b style={{ color: C.text }}>sobrantes</b> (material incompleto, usado o recuperado: sin costo y no se vende) y los materiales que ya estaban cargados antes.
