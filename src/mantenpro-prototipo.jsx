@@ -1550,7 +1550,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     return { error: { message: "No se pudo generar un código único para la orden. Intenta de nuevo." } };
   };
 
-  const createOrder = async (payload, files, extraTechIds, linkedIncidentId, linkedSalesOrderId) => {
+  // opts.checklistTemplateId: checklist elegido en el formulario; se carga en la orden recién creada.
+  const createOrder = async (payload, files, extraTechIds, linkedIncidentId, linkedSalesOrderId, opts = {}) => {
     setSaving(true);
     const { data, error } = await insertOrderWithCode({ ...payload, status: "pendiente" });
     if (error) { setSaving(false); setErrorMsg(error.message); return; }
@@ -1560,6 +1561,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setOrderFromSalesOrder(null);
     setOrderPrefill(null);
     if (extraTechIds && extraTechIds.length > 0) await syncOrderTechnicians(data.id, extraTechIds);
+    if (opts?.checklistTemplateId) {
+      const tpl = checklistTemplates.find((t) => t.id === opts.checklistTemplateId);
+      if (tpl) {
+        await loadChecklistFromTemplate(data, tpl);
+        setOrderChecklistSummary((prev) => new Map(prev).set(data.id, { total: (tpl.items || []).length, answered: 0 }));
+      }
+    }
     await notifyManyTechnicians([data.technician_id, ...(extraTechIds || [])], {
       title: `Nueva orden asignada: ${data.code}`,
       body: data.title,
@@ -4842,7 +4850,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         </div>
       </div>
 
-      {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} onClose={() => setShowOrderForm(false)} onSave={createOrder} saving={saving} />}
+      {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} onClose={() => setShowOrderForm(false)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
       {showBulkOrders && <BulkOrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowBulkOrders(false)} onSave={createBulkOrders} saving={saving} />}
       {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} initial={editingOrder} initialExtraTechIds={orderTechnicians.filter((wt) => wt.work_order_id === editingOrder.id).map((wt) => wt.technician_id)} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
       {orderFromIncident && (
@@ -4851,9 +4859,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           equipment={equipment}
           technicians={technicians}
           clients={clients}
+          checklistTemplates={checklistTemplates}
           initial={{ title: orderFromIncident.title, branch_id: orderFromIncident.branch_id, equipment_id: orderFromIncident.equipment_id, client_id: orderFromIncident.client_id }}
           onClose={() => setOrderFromIncident(null)}
-          onSave={(payload, files, extraTechIds) => createOrder(payload, files, extraTechIds, orderFromIncident.incidentId)}
+          onSave={(payload, files, extraTechIds, opts) => createOrder(payload, files, extraTechIds, orderFromIncident.incidentId, null, opts)}
           saving={saving}
         />
       )}
@@ -4863,9 +4872,10 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           equipment={equipment}
           technicians={technicians}
           clients={clients}
+          checklistTemplates={checklistTemplates}
           initial={{ title: orderFromSalesOrder.title, branch_id: orderFromSalesOrder.branch_id, equipment_id: orderFromSalesOrder.equipment_id, client_id: orderFromSalesOrder.client_id }}
           onClose={() => setOrderFromSalesOrder(null)}
-          onSave={(payload, files, extraTechIds) => createOrder(payload, files, extraTechIds, null, orderFromSalesOrder.salesOrderId)}
+          onSave={(payload, files, extraTechIds, opts) => createOrder(payload, files, extraTechIds, null, orderFromSalesOrder.salesOrderId, opts)}
           saving={saving}
         />
       )}
@@ -4975,7 +4985,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       )}
       {portalClient && <ClientPortalLinkModal client={portalClient} companyId={companyId} companyName={companyName} canManage={!isTecnico} onClose={() => setPortalClient(null)} />}
       {showQrScanner && <QrScannerModal onDetected={handleQrScan} onClose={() => setShowQrScanner(false)} />}
-      {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={createOrder} saving={saving} />}
+      {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
       {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
       {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}

@@ -22,6 +22,7 @@ const IMPORTERS = {
   contratos: () => import("./contratos.jsx"),
   "equipos-qr": () => import("./equipos-qr.jsx"),
   nomina: () => import("./nomina.jsx"),
+  "orden-form": () => import("./orden-form.jsx"),
   notas: () => import("./notas.jsx"),
   portal: () => import("./portal.jsx"),
   soporte: () => import("./soporte.jsx"),
@@ -145,7 +146,8 @@ export const IncidentFormModal = lazyComponent("tecnico", "IncidentFormModal");
 export const LocationFormModal = lazyComponent("tecnico", "LocationFormModal");
 export const MaterialFormModal = lazyComponent("tecnico", "MaterialFormModal");
 export const OrderDetailModal = lazyComponent("tecnico", "OrderDetailModal");
-export const OrderFormModal = lazyComponent("tecnico", "OrderFormModal");
+// Formulario de órdenes con selector de checklist al crear (orden-form.jsx)
+export const OrderFormModal = lazyComponent("orden-form", "OrderFormModal");
 export const ProjectDetailModal = lazyComponent("tecnico", "ProjectDetailModal");
 export const ProjectFormModal = lazyComponent("tecnico", "ProjectFormModal");
 export const TechFormModal = lazyComponent("tecnico", "TechFormModal");
@@ -319,5 +321,6 @@ const VIEW_CHUNK_OF_VIEW = {
 // Precarga silenciosa: si falla (sin internet), no recarga ni avisa; se reintenta al usar la sección.
 export function prefetchForViews(viewKeys) {
   const chunks = new Set((viewKeys || []).flatMap((k) => [CHUNK_OF_VIEW[k], VIEW_CHUNK_OF_VIEW[k]]).filter(Boolean));
+  if (chunks.has("tecnico")) chunks.add("orden-form");
   chunks.forEach((f) => { IMPORTERS[f]().catch(() => {}); });
 }
