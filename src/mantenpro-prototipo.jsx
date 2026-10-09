@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine, ScrollText } from "lucide-react";
-import { ACTIVITY_TABLE_LABELS, addDaysToDateStr, addMonths, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, FullScreenLoader, iconBtnStyle, invoiceBalance, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, NCFSequenceFormModal, Pill, printDocument, PRIORITY_CFG, PushSetupInline, returnMaterialLine, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, ThemeToggleButton, todayStrRD, TOOL_STATUS_CFG, TYPE_CFG } from "./modulos/base.jsx";
+import { ACTIVITY_TABLE_LABELS, addDaysToDateStr, defaultChecklistFor, addMonths, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, FullScreenLoader, iconBtnStyle, invoiceBalance, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, NCFSequenceFormModal, Pill, printDocument, PRIORITY_CFG, PushSetupInline, returnMaterialLine, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, ThemeToggleButton, todayStrRD, TOOL_STATUS_CFG, TYPE_CFG } from "./modulos/base.jsx";
 import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, VistaServiceContracts, ServiceContractFormModal, ServiceContractDetailModal, VistaDebitNotes, DebitNoteFormModal, DebitNoteDetailModal, VistaEquipmentAnalysis, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 import { CajaPinPrompt, cashReportHtml, isCajaPinError, notesInSession } from "./modulos/caja.jsx";
@@ -1564,8 +1564,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (opts?.checklistTemplateId) {
       const tpl = checklistTemplates.find((t) => t.id === opts.checklistTemplateId);
       if (tpl) {
-        await loadChecklistFromTemplate(data, tpl);
-        setOrderChecklistSummary((prev) => new Map(prev).set(data.id, { total: (tpl.items || []).length, answered: 0 }));
+        await loadChecklistFromTemplate(data, tpl, { background: true });
       }
     }
     await notifyManyTechnicians([data.technician_id, ...(extraTechIds || [])], {
@@ -1612,6 +1611,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       if (error) { setErrorMsg(`No se pudo crear la orden "${row.title}": ${error.message}`); continue; }
       nextAfter = n;
       inserted.push(data);
+      const tpl = row.checklist_template_id && checklistTemplates.find((t) => t.id === row.checklist_template_id);
+      if (tpl) await loadChecklistFromTemplate(data, tpl, { background: true });
     }
     setOrders((prev) => [...inserted, ...prev]);
     const byTechnician = {};
@@ -1790,12 +1791,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // Checklist: cada punto lleva su identificación desde el teléfono, así se puede cargar y llenar
   // sin señal y enviar después en orden.
   const patchChecklistCopy = (orderId, fn) => { if (isTecnico) patchOrderDetails(orderId, (d) => ({ ...d, checklist: fn(d.checklist || []) })); };
-  const loadChecklistFromTemplate = async (order, template) => {
+  // opts.background: la orden no está abierta en pantalla (se acaba de crear sola o en lote)
+  const loadChecklistFromTemplate = async (order, template, opts = {}) => {
     const sortedItems = (template.items || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
     const rows = sortedItems.map((it, i) => ({ id: newId(), work_order_id: order.id, text: it.text, section: it.section || null, checked: false, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
     const res = await perform("checklist_load", order.id, { rows }, `${order.code} · ${template.name || "checklist"}`);
     if (res.error) { setErrorMsg(res.error.message); return; }
     const list = (res.data && res.data.length ? res.data : rows).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
+    setOrderChecklistSummary((prev) => new Map(prev).set(order.id, { total: list.length, answered: 0 }));
+    if (opts.background) return;
     setDetailOrderChecklist(list);
     patchChecklistCopy(order.id, () => list);
   };
@@ -1831,7 +1835,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     patchChecklistCopy(order.id, () => []);
   };
 
-  const saveOrderDetail = async (order, notes, photoFile, newStatus, laborHours, laborRate) => {
+  // extra: otros campos de la orden (ej. signature_skip_reason al cerrar sin firma)
+  const saveOrderDetail = async (order, notes, photoFile, newStatus, laborHours, laborRate, extra) => {
     setSaving(true);
     let photo_url = order.photo_url || null;
     let photo_path = order.photo_path || null;
@@ -1864,6 +1869,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     }
     if (laborHours !== undefined) payload.labor_hours = laborHours === "" ? null : Number(laborHours);
     if (laborRate !== undefined) payload.labor_rate_used = laborRate === "" ? null : Number(laborRate);
+    if (extra) Object.assign(payload, extra);
     if (Object.keys(payload).length === 0) { setSaving(false); setDetailOrder(null); return; }
     // Sin señal (nota, cerrar o reabrir) queda en la cola y se envía después
     const res = await perform("order_update", order.id, { fields: payload }, `${order.code} · ${newStatus === "completada" ? "cerrar orden" : newStatus ? "cambio de estado" : "nota"}`);
@@ -2091,12 +2097,15 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       type: "preventivo",
       priority: "media",
       title: `Mantenimiento preventivo — ${source.name}`,
-      scheduled: todayStr,
+      // La fecha que tocaba (si ya pasó, la orden sale vencida); sin fecha (solo por uso), hoy
+      scheduled: source.next_maintenance_date || todayStr,
       status: "pendiente",
     };
     const { data, error, n } = await insertOrderWithCode(payload, startAfter);
     if (error) { setErrorMsg(error.message); return { ok: false }; }
     setOrders((prev) => [data, ...prev]);
+    const tpl = defaultChecklistFor(source, checklistTemplates);
+    if (tpl) await loadChecklistFromTemplate(data, tpl, { background: true });
     if (data.technician_id) {
       await notifyManyTechnicians([data.technician_id], {
         title: `Nueva orden asignada: ${data.code}`,
@@ -2108,7 +2117,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 
     const updatePayload = {};
     if (source.maintenance_frequency_days && source.next_maintenance_date) {
-      updatePayload.next_maintenance_date = addDaysToDateStr(todayStr, Number(source.maintenance_frequency_days));
+      // El próximo se cuenta desde la fecha que tocaba (el calendario no se corre). Si estaba
+      // atrasado varios periodos, se salta a la primera fecha que todavía no pasó.
+      const freq = Number(source.maintenance_frequency_days);
+      let next = addDaysToDateStr(source.next_maintenance_date, freq);
+      while (next <= todayStr) next = addDaysToDateStr(next, freq);
+      updatePayload.next_maintenance_date = next;
     }
     if (source.usage_unit && source.usage_interval && source.current_usage != null) {
       updatePayload.usage_last_maintenance = source.current_usage;
@@ -4851,7 +4865,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       </div>
 
       {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} onClose={() => setShowOrderForm(false)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
-      {showBulkOrders && <BulkOrderFormModal branches={branches} equipment={equipment} technicians={technicians} onClose={() => setShowBulkOrders(false)} onSave={createBulkOrders} saving={saving} />}
+      {showBulkOrders && <BulkOrderFormModal branches={branches} equipment={equipment} technicians={technicians} checklistTemplates={checklistTemplates} onClose={() => setShowBulkOrders(false)} onSave={createBulkOrders} saving={saving} />}
       {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} initial={editingOrder} initialExtraTechIds={orderTechnicians.filter((wt) => wt.work_order_id === editingOrder.id).map((wt) => wt.technician_id)} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
       {orderFromIncident && (
         <OrderFormModal
@@ -4956,11 +4970,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {showAddTech && <TechFormModal branches={branches} onClose={() => setShowAddTech(false)} onSave={saveTech} saving={saving} />}
       {editingTech && <TechFormModal branches={branches} initial={editingTech} onClose={() => setEditingTech(null)} onSave={saveTech} saving={saving} />}
       {showAddEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {editingEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
@@ -4988,8 +5002,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
       {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
-      {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
-      {editingAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} initial={editingAsset} onClose={() => setEditingAsset(null)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
+      {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} checklistTemplates={checklistTemplates} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
+      {editingAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} checklistTemplates={checklistTemplates} initial={editingAsset} onClose={() => setEditingAsset(null)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
       {showAddProduct && (
         <ProductFormModal
           existingProducts={products.filter((p) => (p.item_type || "producto") === (view === "services" ? "servicio" : "producto"))}

@@ -197,6 +197,30 @@ export const ROLE_CFG = {
 // comprobación para no repetirla en cada pantalla.
 export const techWorksAtBranch = (t, branchId) => t.branch_id === branchId || (t.extra_branch_ids || []).includes(branchId);
 
+// Checklist que se carga solo en las órdenes de un equipo (o activo de cliente): el que tiene
+// fijado; si no tiene, el único checklist de su mismo tipo. Si hay varios del mismo tipo y
+// ninguno fijado, no se elige ninguno (que lo elija el supervisor).
+export function defaultChecklistFor(source, templates) {
+  if (!source) return null;
+  const list = templates || [];
+  if (source.default_checklist_template_id) {
+    const t = list.find((x) => x.id === source.default_checklist_template_id);
+    if (t) return t;
+  }
+  const type = (source.type || "").trim().toLowerCase();
+  if (!type) return null;
+  const same = list.filter((t) => (t.equipment_type || "").trim().toLowerCase() === type);
+  return same.length === 1 ? same[0] : null;
+}
+
+// Motivos para cerrar una orden sin la firma del cliente
+export const SIGNATURE_SKIP_REASONS = [
+  "El cliente no estaba presente",
+  "Equipo propio de la empresa",
+  "El cliente no quiso firmar",
+  "Trabajo fuera de horario",
+];
+
 export const ROLE_DEFAULT_PERMISSIONS = {
   supervisor: {
     ...Object.fromEntries(["dashboard", "agenda", "orders", "projects", "incidents", "equipment", "reports", "checklists", "technicians", "tools", "materials", "maintenanceSchedule", "serviceContracts", "clients", "products", "services", "warranty", "suppliers", "purchaseOrders", "deliveryNotes", "purchases", "supplierReceipts", "otherExpenses", "purchaseLedger", "quotes", "salesOrders", "invoices", "creditNotes", "debitNotes", "recurringContracts", "caja", "branches", "salesReports"].map((k) => [k, "edit"])),

@@ -8,7 +8,7 @@ import { supabase } from "../supabaseClient";
 import { OrderVisitsSection } from "./visitas.jsx";
 import { SlaDetail } from "./sla.jsx";
 import { getOrderDetails, hasPendingFor, isNetworkError, isOnline, newId, patchOrderDetails, perform, useOfflineState } from "./offline.jsx";
-import { ActivityHistorySection, C, Field, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
+import { ActivityHistorySection, C, Field, SIGNATURE_SKIP_REASONS, defaultChecklistFor, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 
 export function UsageQuickUpdate({ item, onUpdate }) {
   const [value, setValue] = useState(item.current_usage ?? "");
@@ -228,7 +228,38 @@ export function TechFormModal({ branches, initial, onClose, onSave, saving }) {
   );
 }
 
-export function EquipmentFormModal({ branches, locations, technicians, clients, initial, onClose, onSave, saving, onRequestNewLocation }) {
+// Checklist fijo del equipo: es el que se carga solo en sus órdenes de mantenimiento
+// (programado, automático o "Crear varias órdenes"). Sin elegir, se usa el único de su mismo tipo.
+function ChecklistDefaultField({ templates, equipType, value, onChange }) {
+  const t = (equipType || "").trim().toLowerCase();
+  const same = t ? templates.filter((x) => (x.equipment_type || "").trim().toLowerCase() === t) : [];
+  const others = templates.filter((x) => !same.includes(x));
+  const auto = !value && same.length === 1 ? same[0] : null;
+  return (
+    <Field label="Checklist del mantenimiento (se carga solo en sus órdenes)">
+      {templates.length === 0 ? (
+        <div className="text-xs px-3 py-2" style={{ background: C.panelAlt, color: C.muted, border: `1px solid ${C.border}` }}>No hay checklists creados todavía (menú Checklists).</div>
+      ) : (
+        <>
+          <select className={inputClass} style={inputStyle} value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="">{auto ? `Automático: ${auto.name}` : "Ninguno fijo"}</option>
+            {same.length > 0 && (
+              <optgroup label={`Para equipos tipo "${equipType}"`}>
+                {same.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </optgroup>
+            )}
+            <optgroup label={same.length > 0 ? "Otros checklists" : "Checklists"}>
+              {others.map((x) => <option key={x.id} value={x.id}>{x.name} — {x.equipment_type}</option>)}
+            </optgroup>
+          </select>
+          {!value && same.length > 1 && <div className="text-xs mt-1" style={{ color: C.orange }}>Hay {same.length} checklists para este tipo: elige uno para que se cargue solo.</div>}
+        </>
+      )}
+    </Field>
+  );
+}
+
+export function EquipmentFormModal({ branches, locations, technicians, clients, checklistTemplates = [], initial, onClose, onSave, saving, onRequestNewLocation }) {
   const [clientId, setClientId] = useState(initial?.client_id || "");
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "");
@@ -245,6 +276,7 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
   const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
   const [operationalStatus, setOperationalStatus] = useState(initial?.operational_status || "operativo");
+  const [checklistId, setChecklistId] = useState(initial?.default_checklist_template_id || "");
 
   const branchLocations = locations.filter((l) => l.branch_id === branchId);
   const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === defaultTechId));
@@ -262,6 +294,7 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
       usage_interval: usageInterval === "" ? null : Number(usageInterval),
       usage_last_maintenance: initial?.usage_last_maintenance ?? null,
       operational_status: operationalStatus,
+      default_checklist_template_id: checklistId || null,
       ...(clients ? { client_id: clientId || null } : {}),
     });
   };
@@ -338,6 +371,7 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
           </select>
         </Field>
       </div>
+      <ChecklistDefaultField templates={checklistTemplates} equipType={type} value={checklistId} onChange={setChecklistId} />
       <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Si dejas la frecuencia en blanco, este equipo no aparecerá en "Mantenimiento programado".</div>
       <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Mantenimiento por uso (horómetro / kilometraje, opcional)</div>
       <div className="grid grid-cols-3 gap-3">
@@ -520,11 +554,16 @@ export function orderServiceReportHtml({ companyName, order, branchName, equipNa
         <img src="${order.client_signature_url}" style="max-width:260px;background:#fff;border:1px solid #ccc;" />
         <div class="muted" style="margin-top:2px;">Firmado por ${order.client_signature_name || ""}${order.client_signature_at ? " — " + fmtDate(order.client_signature_at.slice(0, 10)) : ""}</div>
       </div>
+    ` : order.signature_skip_reason ? `
+      <div style="margin-top:18px;padding-top:10px;border-top:1px solid #ddd;">
+        <div style="font-weight:bold;margin-bottom:4px;">Firma del cliente</div>
+        <div class="muted">Sin firma — ${order.signature_skip_reason}</div>
+      </div>
     ` : ""}
   `;
 }
 
-export function ClientAssetFormModal({ clients, branches, technicians, initial, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
+export function ClientAssetFormModal({ clients, branches, technicians, checklistTemplates = [], initial, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
   const [clientId, setClientId] = useState(initial?.client_id || clients[0]?.id || "");
   // Si desde este formulario se creó un cliente nuevo con el "+" (búsqueda en
   // catálogo DGII o manual), lo selecciona solo en cuanto se guarda — sin
@@ -550,6 +589,7 @@ export function ClientAssetFormModal({ clients, branches, technicians, initial, 
   const [usageUnit, setUsageUnit] = useState(initial?.usage_unit || "");
   const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
+  const [checklistId, setChecklistId] = useState(initial?.default_checklist_template_id || "");
 
   const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === defaultTechId));
 
@@ -566,6 +606,7 @@ export function ClientAssetFormModal({ clients, branches, technicians, initial, 
       current_usage: currentUsage === "" ? null : Number(currentUsage),
       usage_interval: usageInterval === "" ? null : Number(usageInterval),
       usage_last_maintenance: initial?.usage_last_maintenance ?? null,
+      default_checklist_template_id: checklistId || null,
     });
   };
 
@@ -631,6 +672,7 @@ export function ClientAssetFormModal({ clients, branches, technicians, initial, 
           <input type="date" className={inputClass} style={inputStyle} value={nextMaintenance} onChange={(e) => setNextMaintenance(e.target.value)} />
         </Field>
       </div>
+      <ChecklistDefaultField templates={checklistTemplates} equipType="" value={checklistId} onChange={setChecklistId} />
       <div className="text-xs uppercase tracking-wide mb-2 mt-2" style={{ color: C.muted }}>Mantenimiento por uso (horómetro / kilometraje, opcional)</div>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Unidad de uso">
@@ -1834,7 +1876,7 @@ export function ChecklistTemplateFormModal({ initial, onClose, onSave, saving })
   );
 }
 
-export function BulkOrderFormModal({ branches, equipment, technicians, onClose, onSave, saving }) {
+export function BulkOrderFormModal({ branches, equipment, technicians, checklistTemplates = [], onClose, onSave, saving }) {
   const [branchId, setBranchId] = useState(branches[0]?.id || "");
   const [weekAnchor, setWeekAnchor] = useState(() => {
     const d = new Date();
@@ -1865,7 +1907,7 @@ export function BulkOrderFormModal({ branches, equipment, technicians, onClose, 
     setPool((prev) => {
       const exists = prev.find((p) => p.equipment_id === eq.id);
       if (exists) return prev.filter((p) => p.equipment_id !== eq.id);
-      return [...prev, { equipment_id: eq.id, title: `Mantenimiento — ${eq.name}`, day: 0, technician_id: commonTechnicianId }];
+      return [...prev, { equipment_id: eq.id, title: `Mantenimiento — ${eq.name}`, day: 0, technician_id: commonTechnicianId, checklist_template_id: defaultChecklistFor(eq, checklistTemplates)?.id || "" }];
     });
   };
   const updatePoolRow = (equipmentId, patch) => setPool((prev) => prev.map((p) => (p.equipment_id === equipmentId ? { ...p, ...patch } : p)));
@@ -1880,6 +1922,7 @@ export function BulkOrderFormModal({ branches, equipment, technicians, onClose, 
       priority: commonPriority,
       technician_id: p.technician_id || null,
       scheduled: weekDates[p.day].toISOString().slice(0, 10),
+      checklist_template_id: p.checklist_template_id || null,
     }));
     onSave(rows);
   };
@@ -1928,17 +1971,21 @@ export function BulkOrderFormModal({ branches, equipment, technicians, onClose, 
 
       {pool.length > 0 && (
         <>
-          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Asigna día y técnico para cada orden ({pool.length})</div>
+          <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Asigna día, técnico y checklist para cada orden ({pool.length})</div>
           <div className="space-y-2 mb-3">
             {pool.map((p) => (
               <div key={p.equipment_id} className="grid grid-cols-12 gap-2 min-w-[860px] items-center">
-                <input className={`${inputClass} col-span-4`} style={inputStyle} value={p.title} onChange={(e) => updatePoolRow(p.equipment_id, { title: e.target.value })} />
-                <select className={`${inputClass} col-span-4`} style={inputStyle} value={p.day} onChange={(e) => updatePoolRow(p.equipment_id, { day: Number(e.target.value) })}>
+                <input className={`${inputClass} col-span-3`} style={inputStyle} value={p.title} onChange={(e) => updatePoolRow(p.equipment_id, { title: e.target.value })} />
+                <select className={`${inputClass} col-span-3`} style={inputStyle} value={p.day} onChange={(e) => updatePoolRow(p.equipment_id, { day: Number(e.target.value) })}>
                   {dayLabels.map((lbl, i) => <option key={i} value={i}>{lbl} · {fmtDate(weekDates[i].toISOString().slice(0, 10))}</option>)}
                 </select>
-                <select className={`${inputClass} col-span-4`} style={inputStyle} value={p.technician_id} onChange={(e) => updatePoolRow(p.equipment_id, { technician_id: e.target.value })}>
+                <select className={`${inputClass} col-span-3`} style={inputStyle} value={p.technician_id} onChange={(e) => updatePoolRow(p.equipment_id, { technician_id: e.target.value })}>
                   <option value="">Sin asignar</option>
                   {branchTechs.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                <select className={`${inputClass} col-span-3`} style={inputStyle} value={p.checklist_template_id || ""} onChange={(e) => updatePoolRow(p.equipment_id, { checklist_template_id: e.target.value })} title="Checklist que se carga en la orden">
+                  <option value="">Sin checklist</option>
+                  {checklistTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.equipment_type}</option>)}
                 </select>
               </div>
             ))}
@@ -2141,6 +2188,13 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
   const totalLaborCost = laborCost + extraTechnicianCost;
 
   const [signerName, setSignerName] = useState(order.client_signature_name || "");
+  // Cerrar sin firma: motivo elegido (o escrito en "Otro"). Se guarda con Guardar / Cerrar orden.
+  const savedSkip = order.signature_skip_reason || "";
+  const [skipOpen, setSkipOpen] = useState(false);
+  const [skipChoice, setSkipChoice] = useState(savedSkip ? (SIGNATURE_SKIP_REASONS.includes(savedSkip) ? savedSkip : "otro") : "");
+  const [skipOther, setSkipOther] = useState(savedSkip && !SIGNATURE_SKIP_REASONS.includes(savedSkip) ? savedSkip : "");
+  const skipReason = order.client_signature_url ? "" : (skipChoice === "otro" ? skipOther.trim() : skipChoice);
+  const skipFields = skipReason !== savedSkip ? { signature_skip_reason: skipReason || null } : undefined;
   const [resigning, setResigning] = useState(false);
   const [savingSignature, setSavingSignature] = useState(false);
   const handleSaveSignature = async (dataUrl) => {
@@ -2172,7 +2226,7 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
   const closeRequirements = [];
   if (uncheckedCount > 0) closeRequirements.push(`checklist (${uncheckedCount} punto${uncheckedCount !== 1 ? "s" : ""} sin marcar)`);
   if (!notes.trim()) closeRequirements.push("nota de cierre");
-  if (!order.client_signature_url) closeRequirements.push("firma del cliente");
+  if (!order.client_signature_url && !skipReason) closeRequirements.push("firma del cliente (o el motivo por el que no firmó)");
   const canCloseOrder = closeRequirements.length === 0;
 
   const doPrintChecklist = () => {
@@ -2200,6 +2254,25 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
     if (!reportEmail.trim()) return;
     setSendingReport(true);
     setReportSentMsg("");
+    // Las fotos y la firma del correo se ven por enlaces firmados. Los de la app duran 7 días
+    // (se renuevan al abrir la orden); para el correo se piden de 1 año, para que el cliente
+    // pueda abrir el informe más adelante sin que las imágenes salgan rotas.
+    const YEAR = 31536000;
+    const relink = async (rows, pathField, urlField) => {
+      const paths = rows.map((r) => r[pathField]).filter((x) => x && !String(x).startsWith("data:"));
+      if (paths.length === 0) return rows;
+      const { data: signedList } = await supabase.storage.from("evidence").createSignedUrls(paths, YEAR);
+      const byPath = Object.fromEntries((signedList || []).filter((x) => !x.error && x.signedUrl).map((x) => [x.path, x.signedUrl]));
+      return rows.map((r) => (byPath[r[pathField]] ? { ...r, [urlField]: byPath[r[pathField]] } : r));
+    };
+    let mailBefore = beforePhotos, mailAfter = afterPhotos, mailOrder = order;
+    try {
+      [mailBefore, mailAfter, [mailOrder]] = await Promise.all([
+        relink(beforePhotos, "file_path", "file_url"),
+        relink(afterPhotos, "file_path", "file_url"),
+        relink([order], "client_signature_path", "client_signature_url"),
+      ]);
+    } catch { /* si falla, se envían los enlaces de 7 días */ }
     const materialsText = usedMaterials.length > 0
       ? usedMaterials.map((m) => `- ${m.name}: ${m.quantity} ${m.unit || ""}`).join("\n")
       : "Ninguno";
@@ -2223,9 +2296,9 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
       materialsText,
     ].join("\n");
     const reportBodyHtml = orderServiceReportHtml({
-      companyName, order, branchName, equipName, techName,
+      companyName, order: mailOrder, branchName, equipName, techName,
       clientName: orderClient?.name || "",
-      checklistItems, usedMaterials, laborHours, beforePhotos, afterPhotos,
+      checklistItems, usedMaterials, laborHours, beforePhotos: mailBefore, afterPhotos: mailAfter,
     });
     const html = `<html><head><style>
       body { font-family: Arial, Helvetica, sans-serif; color: #111; }
@@ -2648,7 +2721,31 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
               <div className="text-xs" style={{ color: C.muted }}>Escribe el nombre de quien va a firmar para habilitar el cuadro de firma.</div>
             )}
             {resigning && <button onClick={() => setResigning(false)} className="mt-2 text-xs px-3 py-1.5" style={{ border: `1px solid ${C.border}`, color: C.muted }}>Cancelar</button>}
+            {!resigning && !order.client_signature_url && (
+              <div className="mt-3 pt-2" style={{ borderTop: `1px dashed ${C.border}` }}>
+                {!skipOpen && !skipReason ? (
+                  <button type="button" onClick={() => setSkipOpen(true)} className="text-xs underline" style={{ color: C.muted }}>El cliente no puede firmar</button>
+                ) : (
+                  <div>
+                    <Field label="Motivo por el que se cierra sin firma">
+                      <select className={inputClass} style={inputStyle} value={skipChoice} onChange={(e) => setSkipChoice(e.target.value)}>
+                        <option value="">Elige el motivo...</option>
+                        {SIGNATURE_SKIP_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                        <option value="otro">Otro (escribir)</option>
+                      </select>
+                    </Field>
+                    {skipChoice === "otro" && (
+                      <input className={inputClass} style={inputStyle} value={skipOther} onChange={(e) => setSkipOther(e.target.value)} placeholder="Escribe el motivo" maxLength={200} />
+                    )}
+                    <div className="text-xs mt-1" style={{ color: C.muted }}>Queda registrado en la orden y en el informe de servicio. Se guarda al tocar Guardar o Cerrar orden.</div>
+                    <button type="button" onClick={() => { setSkipOpen(false); setSkipChoice(""); setSkipOther(""); }} className="text-xs mt-1 underline" style={{ color: C.muted }}>Quitar motivo</button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+        ) : order.signature_skip_reason ? (
+          <div className="text-xs px-3 py-2" style={{ background: C.orange + "1A", color: C.orange }}>Cerrada sin firma — {order.signature_skip_reason}</div>
         ) : (
           <div className="text-xs" style={{ color: C.muted }}>Sin firma registrada.</div>
         )}
@@ -2698,7 +2795,7 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>{readOnly ? "Cerrar" : "Cancelar"}</button>
         {!readOnly && (
-          <button onClick={() => onSave(order, notes, null, undefined, laborForSave, rateForSave)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
+          <button onClick={() => onSave(order, notes, null, undefined, laborForSave, rateForSave, skipFields)} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
             {saving ? "Guardando..." : "Guardar"}
           </button>
         )}
@@ -2707,7 +2804,7 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
             onClick={() => {
               if (!canCloseOrder) return;
               if (!window.confirm("¿Cerrar esta orden de trabajo? Se guardará la nota y la foto, y quedará marcada como Completada.")) return;
-              onSave(order, notes, null, "completada", laborForSave, rateForSave);
+              onSave(order, notes, null, "completada", laborForSave, rateForSave, skipFields);
             }}
             disabled={saving || !canCloseOrder}
             title={canCloseOrder ? undefined : `Falta: ${closeRequirements.join(", ")}`}
@@ -2721,7 +2818,7 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
           <button
             onClick={() => {
               if (!window.confirm("¿Reabrir esta orden de trabajo? Volverá a estado \"En progreso\" y el checklist quedará editable.")) return;
-              onSave(order, notes, null, "en_progreso", laborForSave, rateForSave);
+              onSave(order, notes, null, "en_progreso", laborForSave, rateForSave, skipFields);
             }}
             disabled={saving}
             className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50"

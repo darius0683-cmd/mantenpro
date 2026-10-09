@@ -5,7 +5,7 @@
 // se propone solo.
 import React, { useState } from "react";
 import { ImageIcon, FileText, X } from "lucide-react";
-import { C, Field, Modal, PRIORITY_CFG, SearchSelect, TYPE_CFG, iconBtnStyle, inputClass, inputStyle, techWorksAtBranch } from "./base.jsx";
+import { C, Field, Modal, PRIORITY_CFG, SearchSelect, TYPE_CFG, defaultChecklistFor, iconBtnStyle, inputClass, inputStyle, techWorksAtBranch } from "./base.jsx";
 
 const sameType = (a, b) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 
@@ -26,10 +26,9 @@ export function OrderFormModal({ branches, equipment, technicians, clients, chec
   // Checklist (solo al crear). Se propone el del tipo del equipo hasta que el usuario elija uno a mano.
   const equipTypeOf = (id) => equipment.find((e) => e.id === id)?.type || "";
   const matchingFor = (id) => checklistTemplates.filter((t) => sameType(t.equipment_type, equipTypeOf(id)));
-  const [checklistId, setChecklistId] = useState(() => {
-    const m = matchingFor(initial?.equipment_id || "");
-    return isNew && m.length === 1 ? m[0].id : "";
-  });
+  // Propuesta: el checklist fijo del equipo; si no tiene, el único de su mismo tipo
+  const proposalFor = (id) => defaultChecklistFor(equipment.find((e) => e.id === id), checklistTemplates)?.id || "";
+  const [checklistId, setChecklistId] = useState(() => (isNew ? proposalFor(initial?.equipment_id || "") : ""));
   const [checklistTouched, setChecklistTouched] = useState(false);
   const selectedEquipType = equipTypeOf(equipmentId);
   const matching = matchingFor(equipmentId);
@@ -39,10 +38,7 @@ export function OrderFormModal({ branches, equipment, technicians, clients, chec
     setEquipmentId(id);
     const owner = equipment.find((x) => x.id === id)?.client_id;
     if (owner) setClientId(owner);
-    if (isNew && !checklistTouched) {
-      const m = matchingFor(id);
-      setChecklistId(m.length === 1 ? m[0].id : "");
-    }
+    if (isNew && !checklistTouched) setChecklistId(proposalFor(id));
   };
 
   const branchEquip = equipment.filter((e) => e.branch_id === branchId);
@@ -140,8 +136,8 @@ export function OrderFormModal({ branches, equipment, technicians, clients, chec
                   {others.map((t) => <option key={t.id} value={t.id}>{t.name} — {t.equipment_type}</option>)}
                 </optgroup>
               </select>
-              {checklistId && !checklistTouched && matching.some((t) => t.id === checklistId) && (
-                <div className="text-xs mt-1" style={{ color: C.muted }}>Propuesto por el tipo del equipo. Puedes cambiarlo o quitarlo.</div>
+              {checklistId && !checklistTouched && checklistId === proposalFor(equipmentId) && (
+                <div className="text-xs mt-1" style={{ color: C.muted }}>Propuesto por el equipo. Puedes cambiarlo o quitarlo.</div>
               )}
             </>
           ) : (
