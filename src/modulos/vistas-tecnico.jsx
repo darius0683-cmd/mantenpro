@@ -1315,8 +1315,23 @@ export function VistaChecklists({ canDelete, canEdit, checklistTemplates, delete
 }
 
 // Pantalla: reports
-export function VistaReports({ availabilityPeriod, technicians = [], companyName, equipName, techReportTechFilter = "all", setTechReportTechFilter, avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
+export function VistaReports({ locationName, availabilityPeriod, technicians = [], companyName, equipName, techReportTechFilter = "all", setTechReportTechFilter, avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
   const oneTech = techReportTechFilter !== "all" ? technicians.find((t) => t.id === techReportTechFilter) : null;
+  // Buscador de la tabla de técnicos
+  const [techQuery, setTechQuery] = React.useState("");
+  const techRowsShown = techQuery.trim()
+    ? techStats.filter((t) => [t.name, t.specialty].some((v) => String(v ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(techQuery.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""))))
+    : techStats;
+  // Buscador de la tabla "Historial por equipo" (la lista puede ser muy larga)
+  const [equipQuery, setEquipQuery] = React.useState("");
+  const normQ = (v) => String(v ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const equipRowsShown = equipQuery.trim()
+    ? equipStats.filter((eq) => {
+        const q = normQ(equipQuery.trim());
+        return [eq.name, eq.type, eq.brand, eq.model, eq.serial_number, fmtCapacity(eq), branchName(eq.branch_id), locationName ? locationName(eq.location_id) : ""]
+          .some((v) => normQ(v).includes(q));
+      })
+    : equipStats;
   // Informe imprimible (en la ventana de impresión se elige "Guardar como PDF")
   const printReport = () => {
     const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -1518,6 +1533,11 @@ export function VistaReports({ availabilityPeriod, technicians = [], companyName
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              <div className="flex items-center gap-2 px-3 py-2 mb-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <Search size={14} color={C.muted} />
+                <input value={techQuery} onChange={(e) => setTechQuery(e.target.value)} placeholder="Buscar técnico por nombre o especialidad..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                {techQuery && <button onClick={() => setTechQuery("")} style={iconBtnStyle}><X size={14} /></button>}
+              </div>
               <div className="mb-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-2">Técnico</div>
@@ -1530,7 +1550,7 @@ export function VistaReports({ availabilityPeriod, technicians = [], companyName
                   <div className="col-span-2 text-right">Costo M.O.</div>
                   <div className="col-span-1 text-right">Historial</div>
                 </div>
-                {techStats.map((t) => (
+                {techRowsShown.map((t) => (
                   <div key={t.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-2">
                       <div>{t.name}</div>
@@ -1554,9 +1574,12 @@ export function VistaReports({ availabilityPeriod, technicians = [], companyName
                   </div>
                 ))}
                 {techStats.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Todavía no hay técnicos registrados.</div>}
+                {techStats.length > 0 && techRowsShown.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Ningún técnico coincide con "{techQuery}".</div>}
               </div>
 
-              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Historial por equipo</div>
+              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Historial por equipo</div>
+              </div>
               <div className="p-4 mb-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="text-xs mb-2" style={{ color: C.muted }}>Equipos con más órdenes correctivas (posibles focos de problemas)</div>
                 <ResponsiveContainer width="100%" height={220}>
@@ -1585,6 +1608,11 @@ export function VistaReports({ availabilityPeriod, technicians = [], companyName
                   </ResponsiveContainer>
                 </div>
               )}
+              <div className="flex items-center gap-2 px-3 py-2 mb-2" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <Search size={14} color={C.muted} />
+                <input value={equipQuery} onChange={(e) => setEquipQuery(e.target.value)} placeholder="Buscar equipo por nombre, tipo, marca, modelo, serie, sucursal o ubicación..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                {equipQuery && <button onClick={() => setEquipQuery("")} style={iconBtnStyle}><X size={14} /></button>}
+              </div>
               <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                 <div className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
                   <div className="col-span-2">Equipo</div>
@@ -1598,7 +1626,7 @@ export function VistaReports({ availabilityPeriod, technicians = [], companyName
                   <div className="col-span-2 text-right" title="Tiempo que estuvo operativo en el periodo">Disponibilidad</div>
                   <div className="col-span-1 text-right">Historial</div>
                 </div>
-                {equipStats.map((eq) => (
+                {equipRowsShown.map((eq) => (
                   <div key={eq.id} className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
                     <div className="col-span-2">
                       <div>{eq.name}</div>
@@ -1623,6 +1651,7 @@ export function VistaReports({ availabilityPeriod, technicians = [], companyName
                   </div>
                 ))}
                 {equipStats.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Todavía no hay equipos registrados.</div>}
+                {equipStats.length > 0 && equipRowsShown.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Ningún equipo coincide con "{equipQuery}".</div>}
               </div>
             </div>
   );
