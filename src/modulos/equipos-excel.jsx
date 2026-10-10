@@ -20,6 +20,7 @@ const COLS = {
   brand: "Marca",
   model: "Modelo",
   capacity: "Capacidad",
+  capacityUnit: "Unidad de capacidad",
   serial: "Número de serie",
   installed: "Fecha de instalación",
   branch: "Sucursal *",
@@ -97,7 +98,8 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
     [COLS.status]: STATUS_LABEL[e.operational_status] || "Operativo",
     [COLS.brand]: e.brand || "",
     [COLS.model]: e.model || "",
-    [COLS.capacity]: e.capacity || "",
+    [COLS.capacity]: e.capacity ?? "",
+    [COLS.capacityUnit]: e.capacity_unit || "",
     [COLS.serial]: e.serial_number || "",
     [COLS.installed]: "",
     [COLS.branch]: branchName(e.branch_id),
@@ -123,8 +125,8 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
       else delete ws[ref];
     });
   }
-  ws["!cols"] = [38, 30, 16, 16, 14, 16, 16, 18, 14, 18, 18, 20, 26, 14, 14, 10, 10, 12].map((wch) => ({ wch }));
-  ws["!autofilter"] = { ref: `A1:R${Math.max(rows.length, 1) + 1}` };
+  ws["!cols"] = [38, 30, 16, 16, 14, 16, 12, 12, 18, 14, 18, 18, 20, 26, 14, 14, 10, 10, 12].map((wch) => ({ wch }));
+  ws["!autofilter"] = { ref: `A1:S${Math.max(rows.length, 1) + 1}` };
 
   const listas = [["Sucursales", "Ubicaciones (sucursal → ubicación)", "Técnicos activos", "Estado", "Unidad de uso", "Clientes"]];
   const locRows = locations.map((l) => `${branchName(l.branch_id)} → ${l.name}`).sort();
@@ -146,7 +148,7 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
     [""],
     ["Columnas obligatorias: Nombre y Sucursal. La sucursal debe escribirse igual que en la hoja \"Listas\"."],
     ["Estado: Operativo o Fuera de servicio (vacío = Operativo)."],
-    ["Capacidad: texto libre con su unidad, por ejemplo 24,000 BTU, 5 TR, 60 kVA. Escríbela igual que en otros equipos para poder filtrar y comparar."],
+    ["Capacidad: solo el número (24000, 5, 60). Unidad de capacidad: BTU, TR, kW, kVA, HP... Escribe la unidad igual que en otros equipos para poder comparar."],
     ["Ubicación: si no existe en esa sucursal, se crea al subir el archivo."],
     ["Técnico por defecto: debe existir, estar activo y trabajar en esa sucursal (hoja \"Listas\")."],
     ["Cliente (dueño): el cliente al que pertenece el equipo, escrito igual que en la hoja \"Listas\". Vacío = equipo propio. Con cliente, el equipo sale en el portal de ese cliente."],
@@ -252,6 +254,14 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
     const hasClientCol = Object.prototype.hasOwnProperty.call(raw, COLS.client) || Object.prototype.hasOwnProperty.call(raw, "Cliente");
     // Archivos bajados antes de que existiera la columna Capacidad: no la borran
     const hasCapacityCol = Object.prototype.hasOwnProperty.call(raw, COLS.capacity);
+    let capValue = null;
+    if (hasCapacityCol) {
+      const rawCap = String(get("capacity") ?? "").trim().replace(/,/g, "");
+      if (rawCap !== "") {
+        capValue = Number(rawCap);
+        if (!isFinite(capValue) || capValue < 0) errs.push(`la capacidad "${get("capacity")}" no es un número (la unidad va en "Unidad de capacidad")`);
+      }
+    }
     let clientId = null;
     if (hasClientCol) {
       const clientText = text(raw[COLS.client] ?? raw["Cliente"]);
@@ -318,10 +328,10 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
       default_technician_id: techId, maintenance_frequency_days: freq, next_maintenance_date: next,
       usage_unit: unit, current_usage: usage, usage_interval: interval,
       ...(hasClientCol ? { client_id: clientId } : {}),
-      ...(hasCapacityCol ? { capacity: text(get("capacity")) } : {}),
+      ...(hasCapacityCol ? { capacity: capValue, capacity_unit: capValue === null ? null : text(get("capacityUnit")) } : {}),
     };
     if (target) {
-      const changed = locationKey || [...FIELDS, ...(hasClientCol ? ["client_id"] : []), ...(hasCapacityCol ? ["capacity"] : [])].some((f) => !sameVal(payload[f], target[f]));
+      const changed = locationKey || [...FIELDS, ...(hasClientCol ? ["client_id"] : []), ...(hasCapacityCol ? ["capacity", "capacity_unit"] : [])].some((f) => !sameVal(payload[f], target[f]));
       if (!changed) { result.unchanged++; return; }
       result.updates.push({ row: rowNum, id: target.id, payload, locationKey, before: target });
     } else {

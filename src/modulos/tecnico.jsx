@@ -8,7 +8,7 @@ import { supabase } from "../supabaseClient";
 import { OrderVisitsSection } from "./visitas.jsx";
 import { SlaDetail } from "./sla.jsx";
 import { getOrderDetails, hasPendingFor, isNetworkError, isOnline, newId, patchOrderDetails, perform, useOfflineState } from "./offline.jsx";
-import { ActivityHistorySection, C, Field, SIGNATURE_SKIP_REASONS, defaultChecklistFor, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
+import { ActivityHistorySection, C, CAPACITY_UNITS, Field, SIGNATURE_SKIP_REASONS, fmtCapacity, defaultChecklistFor, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 
 export function UsageQuickUpdate({ item, onUpdate }) {
   const [value, setValue] = useState(item.current_usage ?? "");
@@ -287,7 +287,8 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
   const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
   const [operationalStatus, setOperationalStatus] = useState(initial?.operational_status || "operativo");
-  const [capacity, setCapacity] = useState(initial?.capacity || "");
+  const [capacity, setCapacity] = useState(initial?.capacity ?? "");
+  const [capacityUnit, setCapacityUnit] = useState(initial?.capacity_unit || "");
   const [checklistId, setChecklistId] = useState(initial?.default_checklist_template_id || "");
 
   const branchLocations = locations.filter((l) => l.branch_id === branchId);
@@ -297,8 +298,19 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
   // del mismo tipo; si no hay de ese tipo, de todos.
   const others = equipment.filter((e) => e.id !== initial?.id);
   const sameTypeFn = (e) => type.trim() && (e.type || "").trim().toLowerCase() === type.trim().toLowerCase();
-  const capSameType = usedValues(others, "capacity", sameTypeFn);
-  const capacityOptions = capSameType.length > 0 ? capSameType : usedValues(others, "capacity");
+  // Capacidades ya usadas (número + unidad), primero las del mismo tipo; al elegir una se
+  // llenan los dos campos. Las unidades: las ya usadas y las comunes.
+  const capList = (list) => {
+    const seen = new Map();
+    list.filter((e) => e.capacity !== null && e.capacity !== undefined && e.capacity !== "").forEach((e) => {
+      const label = fmtCapacity(e);
+      if (!seen.has(label.toLowerCase())) seen.set(label.toLowerCase(), { label, value: Number(e.capacity), unit: e.capacity_unit || "" });
+    });
+    return [...seen.values()].sort((a, b) => (a.unit || "").localeCompare(b.unit || "") || a.value - b.value);
+  };
+  const capSameType = capList(others.filter(sameTypeFn));
+  const capacityOptions = (capSameType.length > 0 ? capSameType : capList(others)).slice(0, 24);
+  const unitOptions = [...new Set([...usedValues(others, "capacity_unit"), ...CAPACITY_UNITS])];
   const typeOptions = usedValues(others, "type");
   const brandOptions = usedValues(others, "brand");
   const modelOptions = usedValues(others, "model", (e) => !brand.trim() || (e.brand || "").trim().toLowerCase() === brand.trim().toLowerCase());
@@ -316,7 +328,8 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
       usage_interval: usageInterval === "" ? null : Number(usageInterval),
       usage_last_maintenance: initial?.usage_last_maintenance ?? null,
       operational_status: operationalStatus,
-      capacity: capacity.trim() || null,
+      capacity: String(capacity).trim() === "" ? null : Number(String(capacity).replace(/,/g, "")),
+      capacity_unit: String(capacity).trim() === "" ? null : (capacityUnit.trim() || null),
       default_checklist_template_id: checklistId || null,
       ...(clients ? { client_id: clientId || null } : {}),
     });
@@ -334,11 +347,30 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Capacidad (con su unidad)">
-          <input list="mp-eq-capacities" className={inputClass} style={inputStyle} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Ej. 24,000 BTU · 5 TR · 60 kVA" maxLength={60} />
-          <datalist id="mp-eq-capacities">{capacityOptions.map((v) => <option key={v} value={v} />)}</datalist>
-          {capacityOptions.length > 0 && <div className="text-[11px] mt-1" style={{ color: C.muted }}>Escribe o elige una capacidad ya usada{type.trim() ? ` en equipos tipo "${type.trim()}"` : ""}.</div>}
-        </Field>
+        <div>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Capacidad">
+              <input type="text" inputMode="decimal" className={inputClass} style={inputStyle} value={capacity} onChange={(e) => setCapacity(e.target.value.replace(/[^0-9.,]/g, ""))} placeholder="Ej. 24000" />
+            </Field>
+            <Field label="Unidad">
+              <input list="mp-eq-cap-units" className={inputClass} style={inputStyle} value={capacityUnit} onChange={(e) => setCapacityUnit(e.target.value)} placeholder="Ej. BTU" maxLength={20} />
+              <datalist id="mp-eq-cap-units">{unitOptions.map((v) => <option key={v} value={v} />)}</datalist>
+            </Field>
+          </div>
+          {capacityOptions.length > 0 && (
+            <div className="-mt-2 mb-3">
+              <div className="text-[11px] mb-1" style={{ color: C.muted }}>Ya usadas{capSameType.length > 0 && type.trim() ? ` en equipos tipo "${type.trim()}"` : ""} (toca una para usarla):</div>
+              <div className="flex flex-wrap gap-1">
+                {capacityOptions.map((o) => (
+                  <button key={o.label} type="button" onClick={() => { setCapacity(String(o.value)); setCapacityUnit(o.unit); }} className="text-[11px] px-2 py-0.5"
+                    style={{ border: `1px solid ${C.border}`, color: Number(String(capacity).replace(/,/g, "")) === o.value && capacityUnit === o.unit ? C.amber : C.text }}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <Field label="Estado operativo">
           <select className={inputClass} style={inputStyle} value={operationalStatus} onChange={(e) => setOperationalStatus(e.target.value)}>
             <option value="operativo">Operativo</option>

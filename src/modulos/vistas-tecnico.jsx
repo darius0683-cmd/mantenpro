@@ -3,7 +3,7 @@
 // (estados, funciones y cálculos del Dashboard) le llega por props con el mismo nombre.
 // Se carga solo cuando se abre la pantalla (ver lazy.jsx).
 import React from "react";
-import { C, Dot, Field, INCIDENT_STATUS_CFG, KpiCard, LEFTOVER_CONDITIONS, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, TOOL_STATUS_CFG, TYPE_CFG, addDaysToDateStr, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, listHtml, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
+import { C, Dot, Field, fmtCapacity, INCIDENT_STATUS_CFG, KpiCard, LEFTOVER_CONDITIONS, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, TOOL_STATUS_CFG, TYPE_CFG, addDaysToDateStr, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, listHtml, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
 import { TechnicianToolRow, ToolListCard, UsageQuickUpdate } from "./lazy.jsx";
 import { EquipmentExcelButtons } from "./equipos-excel.jsx";
 import { printEquipmentQrLabels } from "./equipos-qr.jsx";
@@ -491,7 +491,7 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
   const table = (rows) => {
     if (rows.length === 0) return `<div class="muted" style="margin-top:8px">No hay equipos en esta lista.</div>`;
     const body = rows.slice().sort(byName).map((e, i) => [
-      i + 1, e.name, e.type, e.capacity, e.brand, e.model, e.serial_number, locationName(e.location_id), branchName(e.branch_id), techLabel(e.default_technician_id),
+      i + 1, e.name, e.type, fmtCapacity(e), e.brand, e.model, e.serial_number, locationName(e.location_id), branchName(e.branch_id), techLabel(e.default_technician_id),
       isOutOfService(e) ? "Fuera de servicio" : "Operativo",
     ].map((c) => `<td>${c === null || c === undefined || c === "" ? "—" : escHtml(c)}</td>`).join(""));
     return `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r}</tr>`).join("")}</tbody></table>`;
@@ -647,7 +647,7 @@ export function VistaEquipment({ clients = [], companyLogo, openEquipmentCard, b
                       <div className="text-xs mt-3 space-y-1" style={{ color: C.muted }}>
                         {eq.brand && <div>Marca: <span style={{ color: C.text }}>{eq.brand}</span></div>}
                         {eq.model && <div>Modelo: <span style={{ color: C.text }}>{eq.model}</span></div>}
-                        {eq.capacity && <div>Capacidad: <span style={{ color: C.text }}>{eq.capacity}</span></div>}
+                        {fmtCapacity(eq) && <div>Capacidad: <span style={{ color: C.text }}>{fmtCapacity(eq)}</span></div>}
                         {eq.serial_number && <div className="font-mono">S/N: <span style={{ color: C.text }}>{eq.serial_number}</span></div>}
                         {eq.installed_at && <div>Instalado: <span style={{ color: C.text }}>{fmtDate(eq.installed_at)}</span></div>}
                         {locationName(eq.location_id) && <div>Ubicación: <span style={{ color: C.text }}>{locationName(eq.location_id)}</span></div>}

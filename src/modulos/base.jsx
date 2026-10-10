@@ -213,6 +213,15 @@ export function defaultChecklistFor(source, templates) {
   return same.length === 1 ? same[0] : null;
 }
 
+// Capacidad del equipo: número y unidad por separado. Se muestra "24,000 BTU".
+export const CAPACITY_UNITS = ["BTU", "TR", "Ton", "kW", "kVA", "HP", "CFM", "GPM", "L", "gal", "kg", "PSI"];
+export function fmtCapacity(e) {
+  if (!e || e.capacity === null || e.capacity === undefined || e.capacity === "") return "";
+  const n = Number(e.capacity);
+  const num = isNaN(n) ? String(e.capacity) : n.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  return [num, e.capacity_unit].filter(Boolean).join(" ");
+}
+
 // Motivos para cerrar una orden sin la firma del cliente
 export const SIGNATURE_SKIP_REASONS = [
   "El cliente no estaba presente",

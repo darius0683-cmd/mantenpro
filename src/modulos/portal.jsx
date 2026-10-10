@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Ban, CheckCircle2, ClipboardList, Copy, ExternalLink, FileText, Link2, Mail, MessageCircle, Phone, Receipt, RefreshCw, Wrench } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { APP_URL, C, Field, INCIDENT_STATUS_CFG, Modal, PAYMENT_STATUS_CFG, Pill, STATUS_CFG, TYPE_CFG, fmtDate, fmtMoney, inputClass, inputStyle, invoiceLikeHtml, printDocument } from "./base.jsx";
+import { APP_URL, C, fmtCapacity, Field, INCIDENT_STATUS_CFG, Modal, PAYMENT_STATUS_CFG, Pill, STATUS_CFG, TYPE_CFG, fmtDate, fmtMoney, inputClass, inputStyle, invoiceLikeHtml, printDocument } from "./base.jsx";
 
 export const portalUrl = (token) => `${APP_URL}/?portal=${token}`;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -297,7 +297,7 @@ export function ClientPortal({ token }) {
                     <Pill label={out ? "Fuera de servicio" : "Operativo"} color={out ? C.red : C.green} />
                   </div>
                   <div className="text-xs mt-1 space-y-0.5" style={{ color: C.muted }}>
-                    {[e.type, e.capacity, e.brand, e.model].filter(Boolean).length > 0 && <div>{[e.type, e.capacity, e.brand, e.model].filter(Boolean).join(" · ")}</div>}
+                    {[e.type, fmtCapacity(e), e.brand, e.model].filter(Boolean).length > 0 && <div>{[e.type, fmtCapacity(e), e.brand, e.model].filter(Boolean).join(" · ")}</div>}
                     {e.serial_number && <div className="font-mono">S/N: {e.serial_number}</div>}
                     {e.location && <div>Ubicación: {e.location}</div>}
                     {e.next_maintenance_date && <div>Próximo mantenimiento: <span style={{ color: C.text }}>{fmtDate(e.next_maintenance_date)}</span></div>}

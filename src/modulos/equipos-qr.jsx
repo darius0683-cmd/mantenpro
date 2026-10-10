@@ -10,7 +10,7 @@
 // Nadie de otra empresa puede ver el equipo: los datos siguen protegidos por RLS.
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Camera, ClipboardList, History, MapPin, Printer, QrCode, User, X } from "lucide-react";
-import { APP_URL, C, INCIDENT_STATUS_CFG, Modal, Pill, STATUS_CFG, TYPE_CFG, fmtDate, todayStrRD } from "./base.jsx";
+import { APP_URL, C, fmtCapacity, INCIDENT_STATUS_CFG, Modal, Pill, STATUS_CFG, TYPE_CFG, fmtDate, todayStrRD } from "./base.jsx";
 
 export const equipmentQrUrl = (id) => `${APP_URL}/?eq=${id}`;
 
@@ -38,7 +38,7 @@ export async function printEquipmentQrLabels({ list, companyName, companyLogo, b
     const svgs = await Promise.all(list.map((eq) => QRCode.toString(equipmentQrUrl(eq.id), { type: "svg", errorCorrectionLevel: "M", margin: 0 })));
     const labels = list.map((eq, i) => {
       const where = [locationName?.(eq.location_id), branchName?.(eq.branch_id)].filter(Boolean).join(" · ");
-      const meta = [eq.brand, eq.model, eq.capacity].filter(Boolean).join(" · ");
+      const meta = [eq.brand, eq.model, fmtCapacity(eq)].filter(Boolean).join(" · ");
       return `<div class="label">
         <div class="qr">${svgs[i]}</div>
         <div class="txt">
@@ -116,7 +116,7 @@ export function EquipmentQrModal({ equipment, orders, incidents, branchName, loc
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs mb-4" style={{ color: C.muted }}>
-        <div>Marca / modelo<br /><span style={{ color: C.text }}>{[equipment.brand, equipment.model].filter(Boolean).join(" ") || "—"}</span>{equipment.capacity && <span style={{ color: C.text }}> · {equipment.capacity}</span>}</div>
+        <div>Marca / modelo<br /><span style={{ color: C.text }}>{[equipment.brand, equipment.model].filter(Boolean).join(" ") || "—"}</span>{fmtCapacity(equipment) && <span style={{ color: C.text }}> · {fmtCapacity(equipment)}</span>}</div>
         <div>No. de serie<br /><span className="font-mono" style={{ color: C.text }}>{equipment.serial_number || "—"}</span></div>
         <div>Próximo mantenimiento<br /><span style={{ color: overdue ? C.red : C.text }}>{next ? fmtDate(next) + (overdue ? " (vencido)" : "") : "—"}</span></div>
         <div>Último servicio<br /><span style={{ color: C.text }}>{lastDone ? fmtDate(lastDone.completed_at?.slice(0, 10) || lastDone.scheduled) : "—"}</span></div>
