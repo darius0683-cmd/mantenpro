@@ -1315,7 +1315,7 @@ export function VistaChecklists({ canDelete, canEdit, checklistTemplates, delete
 }
 
 // Pantalla: reports
-export function VistaReports({ locationName, availabilityPeriod, technicians = [], companyName, equipName, techReportTechFilter = "all", setTechReportTechFilter, avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
+export function VistaReports({ showEquipment = true, showChecklists = true, showPreventive = true, locationName, availabilityPeriod, technicians = [], companyName, equipName, techReportTechFilter = "all", setTechReportTechFilter, avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
   const oneTech = techReportTechFilter !== "all" ? technicians.find((t) => t.id === techReportTechFilter) : null;
   // Buscador de la tabla de técnicos
   const [techQuery, setTechQuery] = React.useState("");
@@ -1405,24 +1405,24 @@ export function VistaReports({ locationName, availabilityPeriod, technicians = [
 
               <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Indicadores clave</div>
               <div className="flex flex-wrap gap-3 mb-6">
-                <KpiCard
+                {showPreventive && <KpiCard
                   label="Cumplimiento del preventivo"
                   value={preventiveCompliance.pct === null ? "—" : `${preventiveCompliance.pct.toFixed(0)}%`}
                   accent={preventiveCompliance.pct === null ? C.muted : preventiveCompliance.pct >= 80 ? C.green : preventiveCompliance.pct >= 50 ? C.amber : C.red}
                   sub={`${preventiveCompliance.done} completadas de ${preventiveCompliance.total} programadas`}
-                />
+                />}
                 <KpiCard
                   label="MTTR (tiempo promedio de reparación)"
                   value={avgRepairTime.label}
                   accent={C.blue}
                   sub={`Órdenes correctivas cerradas (${avgRepairTime.n})`}
                 />
-                <KpiCard
+                {showEquipment && <KpiCard
                   label="MTBF (tiempo medio entre fallas)"
                   value={mtbf.label}
                   accent={C.blue}
                   sub={`Promedio entre correctivas de ${mtbf.nEquip} equipo${mtbf.nEquip !== 1 ? "s" : ""} con 2+ fallas`}
-                />
+                />}
                 <KpiCard
                   label="Cumplimiento de fecha límite"
                   value={deadlineCompliance.pct === null ? "—" : `${deadlineCompliance.pct.toFixed(0)}%`}
@@ -1441,19 +1441,19 @@ export function VistaReports({ locationName, availabilityPeriod, technicians = [
                   accent={reopenStats.pct === null ? C.muted : reopenStats.pct <= 5 ? C.green : reopenStats.pct <= 15 ? C.amber : C.red}
                   sub={`${reopenStats.reopened} reabiertas de ${reopenStats.everCompleted} completadas`}
                 />
-                <KpiCard
+                {showChecklists && <KpiCard
                   label="Uso de checklist al cierre"
                   value={checklistCompliance.usagePct === null ? "—" : `${checklistCompliance.usagePct.toFixed(0)}%`}
                   accent={checklistCompliance.usagePct === null ? C.muted : checklistCompliance.usagePct >= 80 ? C.green : checklistCompliance.usagePct >= 50 ? C.amber : C.red}
                   sub={`${checklistCompliance.withChecklist} con checklist de ${checklistCompliance.closedTotal} cerradas`}
-                />
-                <KpiCard
+                />}
+                {showChecklists && <KpiCard
                   label="Checklist completado al cierre"
                   value={checklistCompliance.completePct === null ? "—" : `${checklistCompliance.completePct.toFixed(0)}%`}
                   accent={checklistCompliance.completePct === null ? C.muted : checklistCompliance.completePct >= 95 ? C.green : checklistCompliance.completePct >= 80 ? C.amber : C.red}
                   sub={`${checklistCompliance.complete} de ${checklistCompliance.withChecklist} con checklist quedaron 100% respondidas`}
-                />
-                {equipStats.length > 0 && (() => {
+                />}
+                {showEquipment && equipStats.length > 0 && (() => {
                   const avg = equipStats.reduce((s2, e) => s2 + e.availabilityPct, 0) / equipStats.length;
                   const down = equipStats.filter((e) => e.downtimeHours > 0).length;
                   return (
@@ -1577,6 +1577,7 @@ export function VistaReports({ locationName, availabilityPeriod, technicians = [
                 {techStats.length > 0 && techRowsShown.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Ningún técnico coincide con "{techQuery}".</div>}
               </div>
 
+              {showEquipment && (<>
               <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
                 <div className="text-xs uppercase tracking-wide" style={{ color: C.muted }}>Historial por equipo</div>
               </div>
@@ -1653,6 +1654,7 @@ export function VistaReports({ locationName, availabilityPeriod, technicians = [
                 {equipStats.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Todavía no hay equipos registrados.</div>}
                 {equipStats.length > 0 && equipRowsShown.length === 0 && <div className="px-4 py-6 text-center text-sm" style={{ color: C.muted }}>Ningún equipo coincide con "{equipQuery}".</div>}
               </div>
+              </>)}
             </div>
   );
 }

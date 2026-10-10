@@ -1749,7 +1749,7 @@ export function ProjectDetailModal({
   );
 }
 
-export function IncidentFormModal({ branches, equipment, clients, technicians, initial, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
+export function IncidentFormModal({ branches, equipment, clients, technicians, showEquipment = true, initial, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
   const [photos, setPhotos] = useState([]);
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
@@ -1812,12 +1812,12 @@ export function IncidentFormModal({ branches, equipment, clients, technicians, i
             {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </Field>
-        <Field label="Equipo">
+        {showEquipment && <Field label="Equipo">
           <select className={inputClass} style={inputStyle} value={equipmentId} onChange={(e) => setEquipmentId(e.target.value)} disabled={!branchId}>
             <option value="">Sin especificar</option>
             {branchEquip.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
           </select>
-        </Field>
+        </Field>}
       </div>
       {!initial?.id && (
         <Field label="Fotos de la avería (opcional)">

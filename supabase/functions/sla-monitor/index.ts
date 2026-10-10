@@ -8,6 +8,9 @@
 // automatico.sql): crea las órdenes de mantenimiento vencidas y manda los avisos de órdenes nuevas,
 // atrasadas y el resumen del día. La base de datos lleva la cuenta de si ya corrió hoy.
 //
+// También avisa a los administradores de las pymes en prueba gratis cuando faltan 5 días y
+// cuando la prueba termina (mp_collect_trial_notices, pyme-edicion.sql).
+//
 // Secrets: SLA_CRON_SECRET (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY automáticos)
 // Publicar con:  supabase functions deploy sla-monitor --no-verify-jwt
 
@@ -39,6 +42,9 @@ Deno.serve(async (req) => {
     // Avisos de material anotado por técnicos (parte-c): ya están en la campanita, faltan push y correo
     const pend = await supabase.rpc("mp_collect_pending_push");
     if (!pend.error) rows.push(...((pend.data || []) as Row[]));
+    // Prueba gratis de la edición Pyme (pyme-edicion.sql): aviso a 5 días de vencer y al vencer
+    const trial = await supabase.rpc("mp_collect_trial_notices");
+    if (!trial.error) rows.push(...((trial.data || []) as Row[]));
     if (rows.length === 0) return json({ ok: true, alerts: 0, dailyError });
 
     const ids = [...new Set(rows.map((r) => r.profile_id))];

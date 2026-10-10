@@ -81,19 +81,27 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // el candado real y definitivo vive en RLS (ver venta-por-modulos.sql) — esto es solo para
   // no mostrar en el menú/UI algo que el backend igual va a rechazar.
   const MODULE_OF_KEY = {
-    orders: "tecnico", agenda: "tecnico", incidents: "tecnico", projects: "tecnico", equipment: "tecnico",
-    checklists: "tecnico", technicians: "tecnico", tools: "tecnico", materials: "tecnico", maintenanceSchedule: "tecnico",
-    reports: "tecnico", equipmentAnalysis: "tecnico", serviceContracts: "tecnico",
+    orders: "tecnico", agenda: "tecnico", incidents: "tecnico", projects: "tecnico", equipment: "equipos",
+    checklists: "checklists", technicians: "tecnico", tools: "inventario", materials: "tecnico", maintenanceSchedule: "preventivo",
+    reports: "tecnico", equipmentAnalysis: "analisis", serviceContracts: "tecnico",
     suppliers: "comercial", purchaseOrders: "comercial", deliveryNotes: "comercial", purchases: "comercial",
     supplierReceipts: "comercial", otherExpenses: "comercial", purchaseLedger: "comercial", quotes: "comercial",
     salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", debitNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
     salesReports: "comercial",
-    chartOfAccounts: "contable", receivables: "contable", payables: "contable", taxRates: "contable",
-    bankReconciliation: "contable", ncf: "contable", financialReports: "contable", fiscalReports: "contable",
+    chartOfAccounts: "contable", receivables: "contable", payables: "contable", taxRates: ["contable", "comercial"],
+    bankReconciliation: "contable", ncf: ["contable", "comercial"], financialReports: "contable", fiscalReports: "contable",
     activityLog: "administracion",
     payroll: "nomina",
   };
-  const companyHasModule = (mod) => !mod || (company?.enabled_modules || []).includes(mod);
+  // Un módulo puede ser una lista: basta con tener uno (NCF y Tasas: contable o comercial).
+  // Piezas del técnico que se venden aparte (edición Pyme): equipos, checklists, inventario,
+  // preventivo y analisis. Las empresas que ya tenían "tecnico" las recibieron todas (pyme-edicion.sql).
+  const companyHasModule = (mod) => !mod || (Array.isArray(mod) ? mod.some((m) => (company?.enabled_modules || []).includes(m)) : (company?.enabled_modules || []).includes(mod));
+  const hasEquipos = companyHasModule("equipos");
+  const hasChecklists = companyHasModule("checklists");
+  const hasPreventivo = companyHasModule("preventivo");
+  // Días que le quedan a la prueba gratis (null si la empresa no está en prueba).
+  const trialDaysLeft = company?.trial_ends_at ? Math.ceil((new Date(company.trial_ends_at).getTime() - Date.now()) / 86400000) : null;
   // Técnico + comercial: el técnico usa Productos como inventario y su almacén queda para sobrantes
   const techUsesProducts = companyHasModule("tecnico") && companyHasModule("comercial");
   // Secciones que usan el permiso de otra: "Análisis de equipos" lo ve quien ve los Reportes técnicos.
@@ -1526,23 +1534,25 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // Un equipo "fuera de servicio" no debe entrar al plan de mantenimiento preventivo — no tiene
   // sentido generarle una orden (ni despachar un técnico) a algo que ya se sabe que no funciona.
   const dueEquipment = useMemo(
-    () => equipment.filter((e) => e.operational_status !== "fuera_servicio" && (isDueByDate(e) || isDueByUsage(e)))
+    () => (hasPreventivo ? equipment : []).filter((e) => e.operational_status !== "fuera_servicio" && (isDueByDate(e) || isDueByUsage(e)))
       .sort((a, b) => (a.next_maintenance_date || "").localeCompare(b.next_maintenance_date || "")),
-    [equipment, todayStr]
+    [equipment, todayStr, hasPreventivo]
   );
   const dueClientAssets = useMemo(
-    () => clientAssets.filter((a) => isDueByDate(a) || isDueByUsage(a))
+    () => (hasPreventivo ? clientAssets : []).filter((a) => isDueByDate(a) || isDueByUsage(a))
       .sort((a, b) => (a.next_maintenance_date || "").localeCompare(b.next_maintenance_date || "")),
-    [clientAssets, todayStr]
+    [clientAssets, todayStr, hasPreventivo]
   );
   const upcomingEquipment = useMemo(() => {
     const in7Str = addDaysToDateStr(todayStr, 7);
+    if (!hasPreventivo) return [];
     return equipment.filter((e) => e.operational_status !== "fuera_servicio" && !isDueByDate(e) && !isDueByUsage(e) && e.maintenance_frequency_days && e.next_maintenance_date && e.next_maintenance_date > todayStr && e.next_maintenance_date <= in7Str);
-  }, [equipment, todayStr]);
+  }, [equipment, todayStr, hasPreventivo]);
   const upcomingClientAssets = useMemo(() => {
     const in7Str = addDaysToDateStr(todayStr, 7);
+    if (!hasPreventivo) return [];
     return clientAssets.filter((a) => !isDueByDate(a) && !isDueByUsage(a) && a.maintenance_frequency_days && a.next_maintenance_date && a.next_maintenance_date > todayStr && a.next_maintenance_date <= in7Str);
-  }, [clientAssets, todayStr]);
+  }, [clientAssets, todayStr, hasPreventivo]);
   const lowStockMaterials = useMemo(
     () => materials.filter((m) => m.min_quantity != null && Number(m.quantity || 0) <= Number(m.min_quantity)),
     [materials]
@@ -4657,6 +4667,12 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       <div className="flex-1 flex flex-col min-w-0">
         <OfflineBar snapshotAt={snapshotAt} />
         <NewVersionBar />
+        {trialDaysLeft !== null && trialDaysLeft <= 10 && (
+          <div className="px-4 py-2 text-sm flex items-center gap-2 flex-wrap" style={{ background: trialDaysLeft <= 3 ? C.red + "20" : C.amber + "20", color: trialDaysLeft <= 3 ? C.red : C.amber, borderBottom: `1px solid ${C.border}` }}>
+            <b>{trialDaysLeft <= 0 ? "Tu prueba gratis termina hoy." : `Te queda${trialDaysLeft !== 1 ? "n" : ""} ${trialDaysLeft} día${trialDaysLeft !== 1 ? "s" : ""} de prueba gratis.`}</b>
+            <span style={{ color: C.text }}>Al terminar se suspende el acceso; tus datos se conservan. Contáctanos para activar tu suscripción.</span>
+          </div>
+        )}
         {errorMsg && (
           <div className="px-4 py-2 text-xs flex items-center justify-between" style={{ background: C.redBg, color: C.red }}>
             <span>Error: {errorMsg}</span>
@@ -4684,7 +4700,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             </select>
           </div>
           <div className="flex gap-2 items-center">
-            {companyHasModule("tecnico") && (
+            {hasEquipos && (
               <button onClick={() => setShowQrScanner(true)} className="p-2" style={{ color: C.text }} title="Escanear el QR de un equipo">
                 <ScanLine size={20} />
               </button>
@@ -4737,9 +4753,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
             </div>
             {canManage && view === "orders" && (
               <>
-                <button onClick={() => setShowBulkOrders(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
+                {hasEquipos && <button onClick={() => setShowBulkOrders(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ border: `1px solid ${C.border}`, color: C.text }}>
                   <Layers size={16} /> Crear varias
-                </button>
+                </button>}
                 <button onClick={() => setShowOrderForm(true)} disabled={branches.length === 0 || !canEdit("orders")} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-40" style={{ background: C.amber, color: "#1A1500" }}>
                   <Plus size={16} /> Nueva orden
                 </button>
@@ -4883,7 +4899,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("reports") && view === "reports" && (
-            <VistaReports technicians={technicians} companyName={companyName} equipName={equipName} techReportTechFilter={techReportTechFilter} setTechReportTechFilter={setTechReportTechFilter} avgRepairTime={avgRepairTime} branchFilter={branchFilter} branchName={branchName} checklistCompliance={checklistCompliance} deadlineCompliance={deadlineCompliance} equipChartData={equipChartData} equipStats={equipStats} incidentEquipChartData={incidentEquipChartData} incidentSlaStats={incidentSlaStats} mtbf={mtbf} overdueOpenOrders={overdueOpenOrders} preventiveCompliance={preventiveCompliance} reopenStats={reopenStats} reportsIncidents={reportsIncidents} reportsOrders={reportsOrders} setHistoryFor={setHistoryFor} setTechReportDateFrom={setTechReportDateFrom} setTechReportDateTo={setTechReportDateTo} techChartData={techChartData} techName={techName} techReportDateFrom={techReportDateFrom} techReportDateTo={techReportDateTo} techStats={techStats} availabilityPeriod={availabilityPeriod} locationName={locationName} />
+            <VistaReports showEquipment={hasEquipos} showChecklists={hasChecklists} showPreventive={hasPreventivo} technicians={technicians} companyName={companyName} equipName={equipName} techReportTechFilter={techReportTechFilter} setTechReportTechFilter={setTechReportTechFilter} avgRepairTime={avgRepairTime} branchFilter={branchFilter} branchName={branchName} checklistCompliance={checklistCompliance} deadlineCompliance={deadlineCompliance} equipChartData={equipChartData} equipStats={equipStats} incidentEquipChartData={incidentEquipChartData} incidentSlaStats={incidentSlaStats} mtbf={mtbf} overdueOpenOrders={overdueOpenOrders} preventiveCompliance={preventiveCompliance} reopenStats={reopenStats} reportsIncidents={reportsIncidents} reportsOrders={reportsOrders} setHistoryFor={setHistoryFor} setTechReportDateFrom={setTechReportDateFrom} setTechReportDateTo={setTechReportDateTo} techChartData={techChartData} techName={techName} techReportDateFrom={techReportDateFrom} techReportDateTo={techReportDateTo} techStats={techStats} availabilityPeriod={availabilityPeriod} locationName={locationName} />
           )}
 
           {!loadingScope && hasPerm("equipmentAnalysis") && view === "equipmentAnalysis" && (
@@ -5019,11 +5035,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         </div>
       </div>
 
-      {showOrderForm && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} onClose={() => setShowOrderForm(false)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
+      {showOrderForm && <OrderFormModal showEquipment={hasEquipos} showChecklists={hasChecklists} branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} onClose={() => setShowOrderForm(false)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
       {showBulkOrders && <BulkOrderFormModal branches={branches} equipment={equipment} technicians={technicians} checklistTemplates={checklistTemplates} onClose={() => setShowBulkOrders(false)} onSave={createBulkOrders} saving={saving} />}
-      {editingOrder && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} initial={editingOrder} initialExtraTechIds={orderTechnicians.filter((wt) => wt.work_order_id === editingOrder.id).map((wt) => wt.technician_id)} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
+      {editingOrder && <OrderFormModal showEquipment={hasEquipos} showChecklists={hasChecklists} branches={branches} equipment={equipment} technicians={technicians} clients={clients} initial={editingOrder} initialExtraTechIds={orderTechnicians.filter((wt) => wt.work_order_id === editingOrder.id).map((wt) => wt.technician_id)} attachments={editingOrderAttachments} onDeleteAttachment={deleteOrderAttachment} onClose={() => { setEditingOrder(null); setEditingOrderAttachments([]); }} onSave={updateOrder} saving={saving} />}
       {orderFromIncident && (
-        <OrderFormModal
+        <OrderFormModal showEquipment={hasEquipos} showChecklists={hasChecklists}
           branches={branches}
           equipment={equipment}
           technicians={technicians}
@@ -5036,7 +5052,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         />
       )}
       {orderFromSalesOrder && (
-        <OrderFormModal
+        <OrderFormModal showEquipment={hasEquipos} showChecklists={hasChecklists}
           branches={branches}
           equipment={equipment}
           technicians={technicians}
@@ -5136,7 +5152,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
       {historyFor && <HistoryModal title={historyFor.title} orders={historyFor.orders} branchName={branchName} equipName={equipName} techName={techName} onClose={() => setHistoryFor(null)} />}
-      {qrEquipmentId && !loadingScope && companyHasModule("tecnico") && (
+      {qrEquipmentId && !loadingScope && hasEquipos && (
         <EquipmentQrModal
           companyId={companyId}
           downtime={equipmentDowntime}
@@ -5158,7 +5174,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       )}
       {portalClient && <ClientPortalLinkModal client={portalClient} companyId={companyId} companyName={companyName} canManage={!isTecnico} branches={branches} onClose={() => setPortalClient(null)} />}
       {showQrScanner && <QrScannerModal onDetected={handleQrScan} onClose={() => setShowQrScanner(false)} />}
-      {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
+      {orderPrefill && <OrderFormModal showEquipment={hasEquipos} showChecklists={hasChecklists} branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}
       {editingClient && <ClientFormModal initial={editingClient} onClose={() => setEditingClient(null)} onSave={saveClient} saving={saving} />}
       {showAddAsset && <ClientAssetFormModal clients={clients} branches={branches} technicians={technicians} checklistTemplates={checklistTemplates} onClose={() => setShowAddAsset(false)} onSave={saveClientAsset} saving={saving} onRequestNewClient={() => setShowAddClient(true)} autoSelectClientId={autoSelectClientId} autoSelectToken={autoSelectToken} />}
@@ -5428,7 +5444,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         />
       )}
       {(showAddIncident || incidentPrefill) && (
-        <IncidentFormModal
+        <IncidentFormModal showEquipment={hasEquipos}
           branches={branches}
           equipment={equipment}
           clients={clients}
@@ -5443,7 +5459,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         />
       )}
       {editingIncident && (
-        <IncidentFormModal
+        <IncidentFormModal showEquipment={hasEquipos}
           branches={branches}
           equipment={equipment}
           clients={clients}
@@ -5869,6 +5885,23 @@ export default function MantenProApp() {
           )}
           <div className="text-xs mb-5" style={{ color: C.muted }}>Contacta a quien administra tu suscripción de MantenPro para reactivar el acceso.</div>
           <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: "#8FD14F", color: "#1A1500" }}>Cerrar sesión</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Prueba gratis de la edición Pyme (30 días, pyme-edicion.sql). Al vencer, el servidor ya no
+  // deja leer ni escribir las tablas con candado de módulo (company_has_module revisa
+  // trial_ends_at); esta pantalla es la cara de ese bloqueo. Se quita desde Modo Soporte
+  // con "Activar suscripción" (borra trial_ends_at). Los datos se conservan.
+  if (company?.trial_ends_at && new Date(company.trial_ends_at).getTime() <= Date.now()) {
+    return (
+      <div className="w-full min-h-screen flex items-center justify-center" style={{ background: C.bg, color: C.text, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+        <div className="max-w-sm text-center p-6">
+          <div className="text-lg font-bold mb-2">Tu prueba gratis terminó</div>
+          <div className="text-sm mb-3" style={{ color: C.muted }}>Los 30 días de prueba de MantenPro para <b style={{ color: C.text }}>{company.name}</b> terminaron el {fmtDate(company.trial_ends_at.slice(0, 10))}.</div>
+          <div className="text-sm mb-5" style={{ color: C.muted }}>Todo lo que registraste está guardado. Contáctanos para activar tu suscripción y seguir donde te quedaste.</div>
+          <button onClick={signOut} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar sesión</button>
         </div>
       </div>
     );

@@ -9,7 +9,7 @@ import { C, Field, Modal, PRIORITY_CFG, SearchSelect, TYPE_CFG, defaultChecklist
 
 const sameType = (a, b) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 
-export function OrderFormModal({ branches, equipment, technicians, clients, checklistTemplates = [], initial, initialExtraTechIds, attachments, onDeleteAttachment, onClose, onSave, saving }) {
+export function OrderFormModal({ branches, equipment, technicians, clients, checklistTemplates = [], showEquipment = true, showChecklists = true, initial, initialExtraTechIds, attachments, onDeleteAttachment, onClose, onSave, saving }) {
   const isNew = !initial?.id;
   const [clientId, setClientId] = useState(initial?.client_id || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || branches[0]?.id || "");
@@ -96,12 +96,12 @@ export function OrderFormModal({ branches, equipment, technicians, clients, chec
             {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </Field>
-        <Field label="Equipo">
+        {showEquipment && <Field label="Equipo">
           <select className={inputClass} style={inputStyle} value={equipmentId} onChange={(e) => onEquipmentChange(e.target.value)}>
             <option value="">Sin especificar</option>
             {branchEquip.map((eq) => <option key={eq.id} value={eq.id}>{eq.name}</option>)}
           </select>
-        </Field>
+        </Field>}
         <Field label="Técnico principal">
           <select className={inputClass} style={inputStyle} value={technicianId} onChange={(e) => setTechnicianId(e.target.value)}>
             <option value="">Sin asignar</option>
@@ -121,7 +121,7 @@ export function OrderFormModal({ branches, equipment, technicians, clients, chec
           </div>
         </Field>
       )}
-      {isNew && (
+      {isNew && showChecklists && (
         <Field label="Checklist (opcional — se carga en la orden al crearla)">
           {checklistTemplates.length > 0 ? (
             <>

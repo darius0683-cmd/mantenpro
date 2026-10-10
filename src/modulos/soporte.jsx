@@ -153,7 +153,13 @@ export function SupportViewer({ onSignOut }) {
   // tiene contratados; el frontend de la empresa (hasPerm) lo usa para ocultar el menú.
   const toggleCompanyModule = async (companyId, mod) => {
     const current = companies.find((c) => c.id === companyId)?.enabled_modules || [];
-    const next = current.includes(mod) ? current.filter((m) => m !== mod) : [...current, mod];
+    const turningOn = !current.includes(mod);
+    let next = turningOn ? [...current, mod] : current.filter((m) => m !== mod);
+    // Dependencias de las piezas del técnico: una pieza necesita el Técnico base, y
+    // Mantenimiento programado / Análisis necesitan Gestión de equipos.
+    const deps = { equipos: ["tecnico"], checklists: ["tecnico"], inventario: ["tecnico"], preventivo: ["tecnico", "equipos"], analisis: ["tecnico", "equipos"] };
+    if (turningOn) (deps[mod] || []).forEach((d) => { if (!next.includes(d)) next.push(d); });
+    else next = next.filter((m) => !(deps[m] || []).includes(mod));
     setSavingModules(true);
     setError("");
     const { data: updated, error: err } = await supabase
@@ -166,6 +172,22 @@ export function SupportViewer({ onSignOut }) {
     if (err) { setError(err.message); return; }
     if (!updated) { setError("No se pudo actualizar los módulos."); return; }
     setCompanies((prev) => prev.map((c) => (c.id === companyId ? updated : c)));
+  };
+
+  // Edición (pyme / industrial) y prueba gratis. Solo el admin de la plataforma puede cambiar
+  // estas columnas (trigger protect_company_plan, pyme-edicion.sql).
+  const updateCompanyPlan = async (companyId, patch) => {
+    setSavingModules(true);
+    setError("");
+    const { data: updated, error: err } = await supabase.from("companies").update(patch).eq("id", companyId).select().maybeSingle();
+    setSavingModules(false);
+    if (err) { setError(err.message); return; }
+    if (!updated) { setError("No se pudo actualizar la empresa."); return; }
+    setCompanies((prev) => prev.map((c) => (c.id === companyId ? updated : c)));
+  };
+  const extendTrial = (company, days) => {
+    const base = Math.max(Date.now(), company.trial_ends_at ? new Date(company.trial_ends_at).getTime() : 0);
+    updateCompanyPlan(company.id, { trial_ends_at: new Date(base + days * 86400000).toISOString() });
   };
 
   // Candado del lado del cliente: refleja lo mismo que la función del servidor va a
@@ -293,11 +315,49 @@ export function SupportViewer({ onSignOut }) {
               </div>
 
               <div className="mb-6 p-4" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
+                <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>Edición y prueba</div>
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  {[["pyme", "Pyme"], ["industrial", "Industrial"]].map(([key, label]) => {
+                    const on = (selectedCompany.edition || "industrial") === key;
+                    return (
+                      <button key={key} disabled={savingModules || on} onClick={() => updateCompanyPlan(selectedCompany.id, { edition: key })}
+                        className="px-3 py-2 text-xs font-semibold"
+                        style={{ background: on ? C.amber + "20" : C.panelAlt, color: on ? C.amber : C.muted, border: `1px solid ${on ? C.amber + "60" : C.border}`, opacity: savingModules ? 0.6 : 1 }}>
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {selectedCompany.trial_ends_at ? (
+                  <div className="mb-5">
+                    <div className="text-sm mb-2" style={{ color: new Date(selectedCompany.trial_ends_at).getTime() <= Date.now() ? C.red : C.text }}>
+                      {new Date(selectedCompany.trial_ends_at).getTime() <= Date.now() ? "Prueba vencida el " : "En prueba gratis hasta el "}<b>{fmtDate(selectedCompany.trial_ends_at.slice(0, 10))}</b>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button disabled={savingModules} onClick={() => { if (window.confirm(`¿Activar la suscripción de ${selectedCompany.name}? Se quita la fecha de fin de prueba y queda con los módulos marcados abajo.`)) updateCompanyPlan(selectedCompany.id, { trial_ends_at: null }); }}
+                        className="px-3 py-2 text-xs font-semibold" style={{ background: C.green, color: "#fff", opacity: savingModules ? 0.6 : 1 }}>
+                        Activar suscripción (quitar prueba)
+                      </button>
+                      <button disabled={savingModules} onClick={() => extendTrial(selectedCompany, 15)}
+                        className="px-3 py-2 text-xs font-semibold" style={{ background: C.panelAlt, color: C.text, border: `1px solid ${C.border}`, opacity: savingModules ? 0.6 : 1 }}>
+                        Dar 15 días más
+                      </button>
+                    </div>
+                    <div className="text-xs mt-2" style={{ color: C.muted }}>Antes de activar, desmarca abajo las piezas que no contrató.</div>
+                  </div>
+                ) : (
+                  <div className="text-xs mb-5" style={{ color: C.muted }}>Sin prueba: suscripción activa.</div>
+                )}
                 <div className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: C.muted }}>Módulos contratados</div>
                 <div className="text-xs mb-3" style={{ color: C.muted }}>Lo que desmarques aquí desaparece del menú de la empresa y queda bloqueado por RLS, aunque alguien llame la API directo.</div>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { key: "tecnico", label: "Departamento técnico" },
+                    { key: "tecnico", label: "Técnico base" },
+                    { key: "equipos", label: "+ Gestión de equipos" },
+                    { key: "checklists", label: "+ Checklists" },
+                    { key: "inventario", label: "+ Herramientas" },
+                    { key: "preventivo", label: "+ Mantenimiento programado" },
+                    { key: "analisis", label: "+ Análisis de equipos" },
                     { key: "comercial", label: "Comercial" },
                     { key: "administracion", label: "Administración" },
                     { key: "contable", label: "Gestión Contable" },

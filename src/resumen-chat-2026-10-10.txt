@@ -1,0 +1,70 @@
+MANTENPRO — RESUMEN DEL CHAT (8 al 10 de octubre de 2026) — Capítulo 11
+======================================================================
+
+ESTADO
+------
+Todo lo de este chat está EN PRODUCCIÓN y probado por el usuario (10-oct, app.manticrd.com),
+excepto el interruptor de Mantenimiento automático (admin.jsx), que falta subir.
+
+ACUERDOS / DECISIONES
+---------------------
+- El técnico NO puede cargar un checklist en la orden; si el supervisor no lo cargó, el técnico se comunica.
+- El técnico puede cerrar una orden sin firma del cliente, indicando el motivo.
+- Mantenimiento automático: las órdenes preventivas se crean solas cada mañana (desde 6:00 RD).
+  La orden lleva la fecha que tocaba y el próximo mantenimiento se cuenta desde esa fecha.
+  Viene ENCENDIDO por empresa (companies.auto_maintenance = true). Se apaga en
+  Perfil de la empresa > "Mantenimiento automático" (cuando se suba admin.jsx) o por SQL.
+- Materiales anotados por el técnico: quedan "por aprobar"; el inventario se descuenta solo al aprobar
+  (administrador o supervisor, puede corregir la cantidad).
+- QR del equipo: el técnico ve el historial completo del equipo aunque no sea de su sucursal.
+- Portal del cliente por sucursal: un cliente puede tener varios enlaces (general o por sedes);
+  cada enlace solo ve equipos, trabajos, averías y facturas de sus sedes.
+- Capacidad del equipo: número y unidad por separado, con sugerencias de lo ya usado.
+- Re-subir el Excel de equipos actualiza los existentes; las columnas opcionales que no vengan no se tocan.
+- Flujo de trabajo: primero pruebas (rama pruebas + Supabase mantenpro-pruebas), luego producción
+  (SQL en mantenpro + merge pruebas -> main).
+
+QUÉ ENTRÓ (FUNCIONES)
+---------------------
+- Checklist fijo por equipo/activo; se carga solo en órdenes programadas, automáticas y "Crear varias".
+- Checklist con punto Foto, Obligatorio/Opcional y Unidad; Excel de checklists con esas columnas.
+- Fotos en averías; documentos del equipo (manual, placa, etc.) visibles en el QR.
+- Tiempo fuera de servicio por equipo (se registra solo) y disponibilidad %.
+- Reportes: costo real por equipo (mano de obra + materiales), disponibilidad y buscadores de
+  equipos y técnicos.
+- Excel de equipos: Capacidad, Unidad de capacidad, Checklist del mantenimiento.
+- Portal: historial por equipo y QR para el cliente.
+- Aviso "Hay una versión nueva" en la app.
+- sla-monitor (cada 10 min) también corre mp_daily_tasks y manda push/correo de materiales por aprobar.
+
+CÓDIGO FINAL
+------------
+Frontend (src/): mantenpro-prototipo.jsx; modulos/base.jsx, tecnico.jsx, orden-form.jsx, offline.jsx,
+vistas-tecnico.jsx, equipos-excel.jsx, equipos-qr.jsx, portal.jsx, auth.jsx, admin.jsx (interruptor,
+PENDIENTE de subir); vite.config.js.
+Edge Function: supabase/functions/sla-monitor/index.ts (desplegada en producción).
+SQL corrido en producción (fuera del repo, en Desktop\mantenpro-bd), en este orden y con su revisión:
+  parte-a-checklist-firma.sql (5) · parte-b-mantenimiento-automatico.sql (6) ·
+  parte-c-materiales-tecnico.sql (3) · capacidad-equipos.sql (2) · parte-d-tecnico.sql (4) ·
+  parte-e-portal-por-sede.sql (2) · notify pgrst, 'reload schema';
+
+COMANDOS ÚTILES
+---------------
+Subir a pruebas:     git checkout pruebas; git add .; git commit -m "..."; git push
+Subir a producción:  git checkout main; git pull; git merge pruebas; git push; git checkout pruebas
+Apagar automático:   update companies set auto_maintenance = false where name = 'EMPRESA';
+Ver corridas:        select * from mp_daily_runs order by run_date desc;
+Tras cambiar tablas: notify pgrst, 'reload schema';
+
+PENDIENTES
+----------
+1. Subir admin.jsx (interruptor) a pruebas y luego a producción.
+2. Revisar mañana las órdenes creadas por la primera corrida automática.
+3. Supabase Pro + prueba de restauración de respaldo.
+4. Migrar a Cloudflare Pages (pruebas.manticrd.com / app.manticrd.com); Edge Functions en pruebas.
+5. Poner privado el repositorio de GitHub.
+
+SEGURIDAD (SIEMPRE)
+-------------------
+Nunca subir ni compartir la clave sb_secret/service_role; SQL y scripts fuera del repo;
+no usar el enlace "allow secret" de GitHub; los scripts deben rechazar el proyecto equivocado.
