@@ -259,7 +259,18 @@ function ChecklistDefaultField({ templates, equipType, value, onChange }) {
   );
 }
 
-export function EquipmentFormModal({ branches, locations, technicians, clients, checklistTemplates = [], initial, onClose, onSave, saving, onRequestNewLocation }) {
+// Valores ya usados en otros equipos (sin repetir, sin importar mayúsculas), para sugerirlos
+function usedValues(list, field, filterFn) {
+  const seen = new Map();
+  (list || []).forEach((e) => {
+    if (filterFn && !filterFn(e)) return;
+    const v = String(e[field] || "").trim();
+    if (v && !seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), v);
+  });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+}
+
+export function EquipmentFormModal({ branches, locations, technicians, clients, checklistTemplates = [], equipment = [], initial, onClose, onSave, saving, onRequestNewLocation }) {
   const [clientId, setClientId] = useState(initial?.client_id || "");
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "");
@@ -276,10 +287,21 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
   const [currentUsage, setCurrentUsage] = useState(initial?.current_usage ?? "");
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
   const [operationalStatus, setOperationalStatus] = useState(initial?.operational_status || "operativo");
+  const [capacity, setCapacity] = useState(initial?.capacity || "");
   const [checklistId, setChecklistId] = useState(initial?.default_checklist_template_id || "");
 
   const branchLocations = locations.filter((l) => l.branch_id === branchId);
   const branchTechs = technicians.filter((t) => techWorksAtBranch(t, branchId) && (t.is_active !== false || t.id === defaultTechId));
+
+  // Sugerencias tomadas de los equipos ya registrados. La capacidad se sugiere primero de los
+  // del mismo tipo; si no hay de ese tipo, de todos.
+  const others = equipment.filter((e) => e.id !== initial?.id);
+  const sameTypeFn = (e) => type.trim() && (e.type || "").trim().toLowerCase() === type.trim().toLowerCase();
+  const capSameType = usedValues(others, "capacity", sameTypeFn);
+  const capacityOptions = capSameType.length > 0 ? capSameType : usedValues(others, "capacity");
+  const typeOptions = usedValues(others, "type");
+  const brandOptions = usedValues(others, "brand");
+  const modelOptions = usedValues(others, "model", (e) => !brand.trim() || (e.brand || "").trim().toLowerCase() === brand.trim().toLowerCase());
 
   const submit = () => {
     if (!name.trim() || !branchId) return;
@@ -294,6 +316,7 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
       usage_interval: usageInterval === "" ? null : Number(usageInterval),
       usage_last_maintenance: initial?.usage_last_maintenance ?? null,
       operational_status: operationalStatus,
+      capacity: capacity.trim() || null,
       default_checklist_template_id: checklistId || null,
       ...(clients ? { client_id: clientId || null } : {}),
     });
@@ -306,10 +329,16 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
           <input className={inputClass} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Ej. Compresor Scroll 15Ton" />
         </Field>
         <Field label="Tipo de equipo">
-          <input className={inputClass} style={inputStyle} value={type} onChange={(e) => setType(e.target.value)} placeholder="Ej. Compresor, Chiller, AC Central" />
+          <input list="mp-eq-types" className={inputClass} style={inputStyle} value={type} onChange={(e) => setType(e.target.value)} placeholder="Ej. Compresor, Chiller, AC Central" />
+          <datalist id="mp-eq-types">{typeOptions.map((v) => <option key={v} value={v} />)}</datalist>
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">
+        <Field label="Capacidad (con su unidad)">
+          <input list="mp-eq-capacities" className={inputClass} style={inputStyle} value={capacity} onChange={(e) => setCapacity(e.target.value)} placeholder="Ej. 24,000 BTU · 5 TR · 60 kVA" maxLength={60} />
+          <datalist id="mp-eq-capacities">{capacityOptions.map((v) => <option key={v} value={v} />)}</datalist>
+          {capacityOptions.length > 0 && <div className="text-[11px] mt-1" style={{ color: C.muted }}>Escribe o elige una capacidad ya usada{type.trim() ? ` en equipos tipo "${type.trim()}"` : ""}.</div>}
+        </Field>
         <Field label="Estado operativo">
           <select className={inputClass} style={inputStyle} value={operationalStatus} onChange={(e) => setOperationalStatus(e.target.value)}>
             <option value="operativo">Operativo</option>
@@ -324,10 +353,12 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Marca">
-          <input className={inputClass} style={inputStyle} value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Ej. Danfoss" />
+          <input list="mp-eq-brands" className={inputClass} style={inputStyle} value={brand} onChange={(e) => setBrand(e.target.value)} placeholder="Ej. Danfoss" />
+          <datalist id="mp-eq-brands">{brandOptions.map((v) => <option key={v} value={v} />)}</datalist>
         </Field>
         <Field label="Modelo">
-          <input className={inputClass} style={inputStyle} value={model} onChange={(e) => setModel(e.target.value)} placeholder="Ej. SH120A3ALC" />
+          <input list="mp-eq-models" className={inputClass} style={inputStyle} value={model} onChange={(e) => setModel(e.target.value)} placeholder="Ej. SH120A3ALC" />
+          <datalist id="mp-eq-models">{modelOptions.map((v) => <option key={v} value={v} />)}</datalist>
         </Field>
       </div>
       <div className="grid grid-cols-2 gap-3">

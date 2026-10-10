@@ -487,11 +487,11 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
   const operativos = list.filter((e) => !isOutOfService(e));
   const fuera = list.filter(isOutOfService);
   const byName = (a, b) => (a.name || "").localeCompare(b.name || "", "es");
-  const headers = ["#", "Equipo", "Tipo", "Marca", "Modelo", "Serie", "Ubicación", "Sucursal", "Técnico", "Estado"];
+  const headers = ["#", "Equipo", "Tipo", "Capacidad", "Marca", "Modelo", "Serie", "Ubicación", "Sucursal", "Técnico", "Estado"];
   const table = (rows) => {
     if (rows.length === 0) return `<div class="muted" style="margin-top:8px">No hay equipos en esta lista.</div>`;
     const body = rows.slice().sort(byName).map((e, i) => [
-      i + 1, e.name, e.type, e.brand, e.model, e.serial_number, locationName(e.location_id), branchName(e.branch_id), techLabel(e.default_technician_id),
+      i + 1, e.name, e.type, e.capacity, e.brand, e.model, e.serial_number, locationName(e.location_id), branchName(e.branch_id), techLabel(e.default_technician_id),
       isOutOfService(e) ? "Fuera de servicio" : "Operativo",
     ].map((c) => `<td>${c === null || c === undefined || c === "" ? "—" : escHtml(c)}</td>`).join(""));
     return `<table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${body.map((r) => `<tr>${r}</tr>`).join("")}</tbody></table>`;
@@ -586,7 +586,7 @@ export function VistaEquipment({ clients = [], companyLogo, openEquipmentCard, b
               <div className="flex flex-wrap gap-2 mb-4">
                 <div className="flex items-center gap-2 px-3 py-2 flex-1 min-w-[200px]" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
                   <Search size={14} style={{ color: C.muted }} />
-                  <input value={equipmentSearch} onChange={(e) => setEquipmentSearch(e.target.value)} placeholder="Buscar por nombre, marca, modelo o serie..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
+                  <input value={equipmentSearch} onChange={(e) => setEquipmentSearch(e.target.value)} placeholder="Buscar por nombre, marca, modelo, serie o capacidad..." className="bg-transparent outline-none text-sm w-full" style={{ color: C.text }} />
                 </div>
                 <select value={branchFilter} onChange={(e) => setBranchFilter(e.target.value)} className="px-3 py-2 text-sm" style={{ background: C.panel, border: `1px solid ${C.border}`, color: C.text }}>
                   <option value="all">Todas las sucursales</option>
@@ -647,6 +647,7 @@ export function VistaEquipment({ clients = [], companyLogo, openEquipmentCard, b
                       <div className="text-xs mt-3 space-y-1" style={{ color: C.muted }}>
                         {eq.brand && <div>Marca: <span style={{ color: C.text }}>{eq.brand}</span></div>}
                         {eq.model && <div>Modelo: <span style={{ color: C.text }}>{eq.model}</span></div>}
+                        {eq.capacity && <div>Capacidad: <span style={{ color: C.text }}>{eq.capacity}</span></div>}
                         {eq.serial_number && <div className="font-mono">S/N: <span style={{ color: C.text }}>{eq.serial_number}</span></div>}
                         {eq.installed_at && <div>Instalado: <span style={{ color: C.text }}>{fmtDate(eq.installed_at)}</span></div>}
                         {locationName(eq.location_id) && <div>Ubicación: <span style={{ color: C.text }}>{locationName(eq.location_id)}</span></div>}

@@ -1177,7 +1177,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (equipmentStatusFilter === "operativo" && e.operational_status === "fuera_servicio") return false;
     if (equipmentSearch) {
       const q = equipmentSearch.toLowerCase();
-      if (![e.name, e.brand, e.model, e.serial_number].some((v) => (v || "").toLowerCase().includes(q))) return false;
+      if (![e.name, e.brand, e.model, e.serial_number, e.capacity].some((v) => (v || "").toLowerCase().includes(q))) return false;
     }
     return true;
   }), [equipment, branchFilter, equipmentTechFilter, equipmentTypeFilter, equipmentStatusFilter, equipmentSearch]);
@@ -5024,11 +5024,11 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {showAddTech && <TechFormModal branches={branches} onClose={() => setShowAddTech(false)} onSave={saveTech} saving={saving} />}
       {editingTech && <TechFormModal branches={branches} initial={editingTech} onClose={() => setEditingTech(null)} onSave={saveTech} saving={saving} />}
       {showAddEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} equipment={equipment} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {editingEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} equipment={equipment} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
@@ -5051,7 +5051,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onClose={closeQrEquipment}
         />
       )}
-      {portalClient && <ClientPortalLinkModal client={portalClient} companyId={companyId} companyName={companyName} canManage={!isTecnico} onClose={() => setPortalClient(null)} />}
+      {portalClient && <ClientPortalLinkModal client={portalClient} companyId={companyId} companyName={companyName} canManage={!isTecnico} branches={branches} onClose={() => setPortalClient(null)} />}
       {showQrScanner && <QrScannerModal onDetected={handleQrScan} onClose={() => setShowQrScanner(false)} />}
       {orderPrefill && <OrderFormModal branches={branches} equipment={equipment} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} initial={orderPrefill} onClose={() => setOrderPrefill(null)} onSave={(p, f, x, o) => createOrder(p, f, x, null, null, o)} saving={saving} />}
       {showAddClient && <ClientFormModal onClose={() => setShowAddClient(false)} onSave={saveClient} saving={saving} />}

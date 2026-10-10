@@ -171,7 +171,10 @@ export function ClientPortal({ token }) {
           {company.logo_url && <img src={company.logo_url} alt="" className="h-10 w-auto max-w-[120px] object-contain" />}
           <div className="min-w-0 flex-1">
             <div className="font-bold truncate">{company.name}</div>
-            <div className="text-xs truncate" style={{ color: C.muted }}>Portal de {data.client?.name}</div>
+            <div className="text-xs truncate" style={{ color: C.muted }}>
+              Portal de {data.client?.name}
+              {data.scope?.branches?.length > 0 && <span style={{ color: C.text }}> · {data.scope.branches.join(", ")}</span>}
+            </div>
           </div>
           <button onClick={load} title="Actualizar" className="p-2" style={{ color: C.muted }}><RefreshCw size={18} /></button>
         </div>
@@ -294,7 +297,7 @@ export function ClientPortal({ token }) {
                     <Pill label={out ? "Fuera de servicio" : "Operativo"} color={out ? C.red : C.green} />
                   </div>
                   <div className="text-xs mt-1 space-y-0.5" style={{ color: C.muted }}>
-                    {[e.type, e.brand, e.model].filter(Boolean).length > 0 && <div>{[e.type, e.brand, e.model].filter(Boolean).join(" · ")}</div>}
+                    {[e.type, e.capacity, e.brand, e.model].filter(Boolean).length > 0 && <div>{[e.type, e.capacity, e.brand, e.model].filter(Boolean).join(" · ")}</div>}
                     {e.serial_number && <div className="font-mono">S/N: {e.serial_number}</div>}
                     {e.location && <div>Ubicación: {e.location}</div>}
                     {e.next_maintenance_date && <div>Próximo mantenimiento: <span style={{ color: C.text }}>{fmtDate(e.next_maintenance_date)}</span></div>}
@@ -346,90 +349,147 @@ export function ClientPortal({ token }) {
 // ---------------------------------------------------------------------------
 // Dentro de la app: crear / enviar / desactivar el enlace de un cliente.
 // ---------------------------------------------------------------------------
-export function ClientPortalLinkModal({ client, companyId, companyName, canManage, onClose }) {
-  const [link, setLink] = useState(undefined);
+export function ClientPortalLinkModal({ client, companyId, companyName, canManage, branches = [], onClose }) {
+  // Un cliente puede tener varios enlaces: uno general (todas sus sedes) y otros por sede
+  // (sucursal). Cada enlace de sede solo muestra lo de esas sucursales (parte-e-portal-por-sede.sql).
+  const [links, setLinks] = useState(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+  const [newLabel, setNewLabel] = useState("");
+  const [newAll, setNewAll] = useState(true);
+  const [newBranches, setNewBranches] = useState([]);
 
   const load = async () => {
-    const { data, error: e } = await supabase.from("client_portal_links").select("*").eq("client_id", client.id).is("revoked_at", null).order("created_at", { ascending: false }).limit(1);
-    if (e) { setError(e.message.includes("client_portal_links") ? "Falta correr el archivo portal-clientes.sql en Supabase." : e.message); setLink(null); return; }
-    setLink(data?.[0] || null);
+    const { data, error: e } = await supabase.from("client_portal_links").select("*").eq("client_id", client.id).is("revoked_at", null).order("created_at", { ascending: true });
+    if (e) { setError(e.message.includes("client_portal_links") ? "Falta correr el archivo portal-clientes.sql en Supabase." : e.message); setLinks([]); return; }
+    setLinks(data || []);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [client.id]);
 
-  const create = async (replace) => {
-    if (replace && !window.confirm("El enlace actual dejará de funcionar y se creará uno nuevo. ¿Continuar?")) return;
+  const branchNames = (ids) => (ids || []).map((id) => branches.find((b) => b.id === id)?.name || "—").join(", ");
+  const toggleBranch = (id) => setNewBranches((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+
+  const create = async () => {
+    if (!newAll && newBranches.length === 0) { setError("Elige al menos una sucursal, o marca \"Todas las sedes\"."); return; }
     setBusy(true); setError("");
-    if (replace && link) {
-      const { error: e1 } = await supabase.from("client_portal_links").update({ revoked_at: new Date().toISOString() }).eq("id", link.id);
-      if (e1) { setBusy(false); setError(e1.message); return; }
-    }
-    const { data, error: e2 } = await supabase.from("client_portal_links").insert({ company_id: companyId, client_id: client.id }).select().single();
+    const row = { company_id: companyId, client_id: client.id, label: newLabel.trim() || null };
+    if (!newAll) row.branch_ids = newBranches;
+    const { error: e } = await supabase.from("client_portal_links").insert(row);
+    setBusy(false);
+    if (e) { setError(/branch_ids|label/.test(e.message) ? "Falta correr parte-e-portal-por-sede.sql en Supabase para los enlaces por sede." : e.message); return; }
+    setShowNew(false); setNewLabel(""); setNewAll(true); setNewBranches([]);
+    load();
+  };
+  const renew = async (link) => {
+    if (!window.confirm("Este enlace dejará de funcionar y se creará uno nuevo con las mismas sedes. ¿Continuar?")) return;
+    setBusy(true); setError("");
+    const { error: e1 } = await supabase.from("client_portal_links").update({ revoked_at: new Date().toISOString() }).eq("id", link.id);
+    if (e1) { setBusy(false); setError(e1.message); return; }
+    const row = { company_id: companyId, client_id: client.id };
+    if (link.label) row.label = link.label;
+    if (link.branch_ids) row.branch_ids = link.branch_ids;
+    const { error: e2 } = await supabase.from("client_portal_links").insert(row);
     setBusy(false);
     if (e2) { setError(e2.message); return; }
-    setLink(data);
+    load();
   };
-  const revoke = async () => {
-    if (!window.confirm(`¿Desactivar el portal de ${client.name}? El enlace dejará de funcionar.`)) return;
+  const revoke = async (link) => {
+    if (!window.confirm(`¿Desactivar este enlace${link.label ? ` (${link.label})` : ""}? Dejará de funcionar.`)) return;
     setBusy(true);
     const { error: e } = await supabase.from("client_portal_links").update({ revoked_at: new Date().toISOString() }).eq("id", link.id);
     setBusy(false);
     if (e) { setError(e.message); return; }
-    setLink(null);
+    load();
   };
 
-  const url = link ? portalUrl(link.token) : "";
-  const message = `Hola, le compartimos el portal de ${client.name} con ${companyName}. Desde aquí puede reportar averías y ver sus trabajos y facturas: ${url}`;
   const digits = String(client.phone || "").replace(/\D/g, "");
   const waNumber = digits.length === 10 ? `1${digits}` : digits;
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { window.prompt("Copia el enlace:", url); }
+  const copy = async (link) => {
+    const url = portalUrl(link.token);
+    try { await navigator.clipboard.writeText(url); setCopiedId(link.id); setTimeout(() => setCopiedId(null), 2000); } catch { window.prompt("Copia el enlace:", url); }
   };
   const btn = { border: `1px solid ${C.border}`, color: C.text };
 
   return (
-    <Modal title={`Portal de ${client.name}`} onClose={onClose}>
+    <Modal title={`Portal de ${client.name}`} onClose={onClose} wide>
       <div className="text-sm mb-4" style={{ color: C.muted }}>
-        Con este enlace el cliente reporta averías y ve sus trabajos, sus equipos y sus facturas, sin usuario ni contraseña.
+        Con el enlace el cliente reporta averías y ve sus trabajos, sus equipos y sus facturas, sin usuario ni contraseña.
+        Puedes tener un enlace general (todas sus sedes) y enlaces por sede para cada encargado: cada uno solo ve lo de sus sucursales.
       </div>
-      {link === undefined && <div className="text-sm" style={{ color: C.muted }}>Cargando...</div>}
-      {link === null && (
-        <div className="text-center py-3">
-          <div className="text-sm mb-3" style={{ color: C.muted }}>Este cliente todavía no tiene portal.</div>
-          {canManage && !error && (
-            <button onClick={() => create(false)} disabled={busy} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
-              <Link2 size={15} /> {busy ? "Creando..." : "Crear enlace del portal"}
-            </button>
-          )}
-        </div>
+      {links === undefined && <div className="text-sm" style={{ color: C.muted }}>Cargando...</div>}
+      {links && links.length === 0 && !showNew && (
+        <div className="text-sm text-center py-3" style={{ color: C.muted }}>Este cliente todavía no tiene portal.</div>
       )}
-      {link && (
-        <>
-          <div className="flex gap-2 mb-3">
-            <input readOnly value={url} onFocus={(e) => e.target.select()} className={`${inputClass} font-mono text-xs`} style={inputStyle} />
-            <button onClick={copy} className="flex items-center gap-1 px-3 text-sm flex-shrink-0" style={btn}><Copy size={14} /> {copied ? "¡Copiado!" : "Copiar"}</button>
-          </div>
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <a href={`https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-semibold" style={{ background: "#25D366", color: "#062E16" }}><MessageCircle size={15} /> WhatsApp</a>
-            <a href={`mailto:${client.email || ""}?subject=${encodeURIComponent(`Portal de servicio — ${companyName}`)}&body=${encodeURIComponent(message)}`} className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm" style={btn}><Mail size={15} /> Correo</a>
-            <a href={url} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm" style={btn}><ExternalLink size={15} /> Abrir</a>
-          </div>
-          <div className="text-xs mb-4" style={{ color: C.muted }}>
-            Creado el {fmtDate(String(link.created_at).slice(0, 10))} · {link.last_used_at ? `Último acceso: ${fmtDate(String(link.last_used_at).slice(0, 10))}` : "El cliente todavía no lo ha abierto"}
-          </div>
-          <div className="text-xs p-3 mb-3" style={{ background: C.panelAlt, color: C.muted }}>
-            Quien tenga este enlace puede ver la información de este cliente: compártelo solo con él. Si se filtra, crea uno nuevo y el anterior deja de funcionar.
-          </div>
-          {canManage && (
-            <div className="flex justify-between gap-2 flex-wrap">
-              <button onClick={revoke} disabled={busy} className="flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50" style={{ color: C.red, border: `1px solid ${C.red}60` }}><Ban size={14} /> Desactivar portal</button>
-              <button onClick={() => create(true)} disabled={busy} className="flex items-center gap-1.5 px-3 py-2 text-sm disabled:opacity-50" style={btn}><RefreshCw size={14} /> Crear enlace nuevo</button>
+      <div className="space-y-3">
+        {(links || []).map((link) => {
+          const url = portalUrl(link.token);
+          const scopeText = link.branch_ids ? `Solo: ${branchNames(link.branch_ids)}` : "Todas las sedes";
+          const message = `Hola, le compartimos el portal de ${client.name}${link.branch_ids ? ` (${branchNames(link.branch_ids)})` : ""} con ${companyName}. Desde aquí puede reportar averías y ver sus trabajos${link.branch_ids ? "" : " y facturas"}: ${url}`;
+          return (
+            <div key={link.id} className="p-3" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+              <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                <div className="text-sm font-semibold">{link.label || (link.branch_ids ? "Enlace de sede" : "Enlace general")}</div>
+                <span className="text-[11px] px-1.5 py-0.5" style={{ color: link.branch_ids ? C.blue : C.green, border: `1px solid ${link.branch_ids ? C.blue : C.green}60` }}>{scopeText}</span>
+              </div>
+              <div className="flex gap-2 mb-2">
+                <input readOnly value={url} onFocus={(e) => e.target.select()} className={`${inputClass} font-mono text-xs`} style={inputStyle} />
+                <button onClick={() => copy(link)} className="flex items-center gap-1 px-3 text-sm flex-shrink-0" style={btn}><Copy size={14} /> {copiedId === link.id ? "¡Copiado!" : "Copiar"}</button>
+              </div>
+              <div className="grid grid-cols-3 gap-2 mb-2">
+                <a href={`https://wa.me/${waNumber}?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-semibold" style={{ background: "#25D366", color: "#062E16" }}><MessageCircle size={15} /> WhatsApp</a>
+                <a href={`mailto:${client.email || ""}?subject=${encodeURIComponent(`Portal de servicio — ${companyName}`)}&body=${encodeURIComponent(message)}`} className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm" style={btn}><Mail size={15} /> Correo</a>
+                <a href={url} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-1.5 px-3 py-2 text-sm" style={btn}><ExternalLink size={15} /> Abrir</a>
+              </div>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-xs" style={{ color: C.muted }}>
+                  Creado el {fmtDate(String(link.created_at).slice(0, 10))} · {link.last_used_at ? `Último acceso: ${fmtDate(String(link.last_used_at).slice(0, 10))}` : "Todavía no lo han abierto"}
+                </div>
+                {canManage && (
+                  <div className="flex gap-2">
+                    <button onClick={() => renew(link)} disabled={busy} className="flex items-center gap-1 px-2 py-1 text-xs disabled:opacity-50" style={btn} title="Si el enlace se filtró: el anterior deja de funcionar"><RefreshCw size={12} /> Cambiar enlace</button>
+                    <button onClick={() => revoke(link)} disabled={busy} className="flex items-center gap-1 px-2 py-1 text-xs disabled:opacity-50" style={{ color: C.red, border: `1px solid ${C.red}60` }}><Ban size={12} /> Desactivar</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {canManage && links !== undefined && !showNew && (
+        <button onClick={() => { setShowNew(true); setError(""); }} className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+          <Link2 size={15} /> {links && links.length > 0 ? "Crear otro enlace" : "Crear enlace del portal"}
+        </button>
+      )}
+      {showNew && (
+        <div className="mt-3 p-3" style={{ border: `1px dashed ${C.amber}` }}>
+          <Field label="Nombre del enlace (opcional, para identificarlo)">
+            <input className={inputClass} style={inputStyle} value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Ej. Encargado de mantenimiento Bávaro" maxLength={80} />
+          </Field>
+          <label className="flex items-center gap-2 text-sm mb-2 cursor-pointer">
+            <input type="checkbox" checked={newAll} onChange={(e) => setNewAll(e.target.checked)} /> Todas las sedes (enlace general)
+          </label>
+          {!newAll && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {branches.map((b) => (
+                <label key={b.id} className="flex items-center gap-1.5 text-sm px-3 py-1.5 cursor-pointer" style={{ border: `1px solid ${C.border}`, background: newBranches.includes(b.id) ? C.panelAlt : "transparent" }}>
+                  <input type="checkbox" checked={newBranches.includes(b.id)} onChange={() => toggleBranch(b.id)} /> {b.name}
+                </label>
+              ))}
             </div>
           )}
-        </>
+          {!newAll && <div className="text-xs mb-2" style={{ color: C.muted }}>Este enlace solo verá los equipos, trabajos, averías y facturas de las sucursales marcadas.</div>}
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowNew(false)} className="px-3 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
+            <button onClick={create} disabled={busy} className="px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>{busy ? "Creando..." : "Crear enlace"}</button>
+          </div>
+        </div>
       )}
+      <div className="text-xs p-3 mt-3" style={{ background: C.panelAlt, color: C.muted }}>
+        Quien tenga un enlace puede ver la información que ese enlace muestra: compártelo solo con la persona indicada. Si se filtra, usa "Cambiar enlace" y el anterior deja de funcionar.
+      </div>
       {error && <div className="text-xs mt-3" style={{ color: C.red }}>{error}</div>}
       <div className="flex justify-end mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>Cerrar</button>
