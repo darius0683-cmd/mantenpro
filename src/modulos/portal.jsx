@@ -59,10 +59,31 @@ function Stat({ label, value, color }) {
   );
 }
 
+// Enlaces de portal abiertos en este teléfono (el más reciente primero). Sirven para que, al
+// escanear el QR de un equipo sin sesión de empleado, se abra directo con el portal del cliente.
+const PORTAL_LINKS_KEY = "mp-portal-links";
+function rememberPortalLink(token, d) {
+  try {
+    const list = JSON.parse(localStorage.getItem(PORTAL_LINKS_KEY) || "[]").filter((x) => x && x.token && x.token !== token);
+    list.unshift({ token, client: d?.client?.name || "", company: d?.company?.name || "", at: new Date().toISOString() });
+    localStorage.setItem(PORTAL_LINKS_KEY, JSON.stringify(list.slice(0, 5)));
+  } catch { /* sin almacenamiento */ }
+}
+function forgetPortalLink(token) {
+  try {
+    const list = JSON.parse(localStorage.getItem(PORTAL_LINKS_KEY) || "[]").filter((x) => x && x.token !== token);
+    localStorage.setItem(PORTAL_LINKS_KEY, JSON.stringify(list));
+  } catch { /* sin almacenamiento */ }
+}
+
 export function ClientPortal({ token }) {
   const [data, setData] = useState(undefined); // undefined = cargando, null = enlace inválido
   const [loadError, setLoadError] = useState("");
   const [tab, setTab] = useState(null);
+  // Equipo abierto en la pestaña Equipos (también al llegar escaneando su QR: ?eq=)
+  const [qrEqId] = useState(() => new URLSearchParams(window.location.search).get("eq"));
+  const [selectedEqId, setSelectedEqId] = useState(null);
+  const [qrHandled, setQrHandled] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [docError, setDocError] = useState("");
   // formulario de avería
@@ -80,6 +101,7 @@ export function ClientPortal({ token }) {
     const { data: d, error } = await supabase.rpc("portal_data", { p_token: token });
     if (error) { setLoadError("No se pudo cargar el portal. Revisa tu conexión e intenta de nuevo."); setData((prev) => (prev === undefined ? null : prev)); return; }
     setData(d || null);
+    if (d) rememberPortalLink(token, d); else forgetPortalLink(token);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [token]);
   useEffect(() => { if (data?.company?.name) document.title = `Portal · ${data.company.name}`; }, [data]);
@@ -94,6 +116,14 @@ export function ClientPortal({ token }) {
     hasCom && { key: "facturas", label: "Facturas", Icon: Receipt },
   ].filter(Boolean), [hasTec, hasCom, data]);
   const current = tab && tabs.some((t) => t.key === tab) ? tab : tabs[0]?.key;
+  // Llegó escaneando un QR: abre ese equipo (si es de este portal)
+  useEffect(() => {
+    if (!data || qrHandled || !qrEqId) return;
+    setQrHandled(true);
+    if ((data.equipment || []).some((e) => e.id === qrEqId)) { setSelectedEqId(qrEqId); setTab("equipos"); }
+    else setDocError("Ese equipo no aparece en tu portal (puede ser de otra sede o de otro cliente).");
+    // eslint-disable-next-line
+  }, [data]);
 
   if (data === undefined) {
     return <div className="min-h-screen flex items-center justify-center text-sm" style={{ background: C.bg, color: C.muted }}>{loadError || "Cargando portal..."}</div>;
@@ -190,7 +220,7 @@ export function ClientPortal({ token }) {
 
         <div className="flex gap-1 mb-4 overflow-x-auto" style={{ borderBottom: `1px solid ${C.border}` }}>
           {tabs.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)} className="flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap"
+            <button key={t.key} onClick={() => { setTab(t.key); if (t.key === "equipos") setSelectedEqId(null); }} className="flex items-center gap-1.5 px-3 py-2 text-sm whitespace-nowrap"
               style={{ color: current === t.key ? C.text : C.muted, borderBottom: `2px solid ${current === t.key ? C.amber : "transparent"}`, fontWeight: current === t.key ? 600 : 400 }}>
               <t.Icon size={15} /> {t.label}
             </button>
@@ -287,12 +317,81 @@ export function ClientPortal({ token }) {
           </div>
         )}
 
-        {current === "equipos" && (
+        {current === "equipos" && selectedEqId && (() => {
+          const e = (data.equipment || []).find((x) => x.id === selectedEqId);
+          if (!e) return null;
+          const out = e.operational_status === "fuera_servicio";
+          const eqOrders = orders.filter((o) => o.equipment_id === e.id);
+          const eqIncidents = incidents.filter((i) => i.equipment_id === e.id);
+          return (
+            <div>
+              <button onClick={() => setSelectedEqId(null)} className="text-xs mb-3" style={{ color: C.amber }}>← Todos los equipos</button>
+              <div className="p-4 mb-3" style={card}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-semibold">{e.name}</div>
+                  <Pill label={out ? "Fuera de servicio" : "Operativo"} color={out ? C.red : C.green} />
+                </div>
+                <div className="text-xs mt-1 space-y-0.5" style={{ color: C.muted }}>
+                  {[e.type, fmtCapacity(e), e.brand, e.model].filter(Boolean).length > 0 && <div>{[e.type, fmtCapacity(e), e.brand, e.model].filter(Boolean).join(" · ")}</div>}
+                  {e.serial_number && <div className="font-mono">S/N: {e.serial_number}</div>}
+                  {e.location && <div>Ubicación: {e.location}</div>}
+                  {e.next_maintenance_date && <div>Próximo mantenimiento: <span style={{ color: C.text }}>{fmtDate(e.next_maintenance_date)}</span></div>}
+                </div>
+                {hasTec && (
+                  <button onClick={() => { setEqId(e.id); setTab("reportar"); setSentAt(null); }} className="mt-3 flex items-center gap-2 px-3 py-2 text-sm font-semibold" style={{ background: C.red, color: "#fff" }}>
+                    <AlertTriangle size={15} /> Reportar avería de este equipo
+                  </button>
+                )}
+              </div>
+              {eqIncidents.length > 0 && (
+                <div className="mb-3">
+                  <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Averías reportadas</div>
+                  <div className="space-y-2">
+                    {eqIncidents.map((i) => {
+                      const st = INCIDENT_STATUS_CFG[i.status] || INCIDENT_STATUS_CFG.abierto;
+                      return (
+                        <div key={i.id} className="p-3 flex items-start justify-between gap-2" style={card}>
+                          <div className="text-sm min-w-0">{i.title}<div className="text-xs" style={{ color: C.muted }}>{fmtDate(String(i.created_at).slice(0, 10))}</div></div>
+                          <Pill label={st.label} color={st.color} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Trabajos de este equipo ({eqOrders.length})</div>
+              <div className="space-y-2">
+                {eqOrders.map((o) => {
+                  const t = TYPE_CFG[o.type] || { label: o.type, color: C.muted }, s2 = STATUS_CFG[o.status] || { label: o.status, color: C.muted };
+                  return (
+                    <div key={o.id} className="p-3" style={{ ...card, borderLeft: `3px solid ${t.color}` }}>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="font-mono text-xs" style={{ color: C.muted }}>{o.code} · {fmtDate(o.scheduled)}</div>
+                        <div className="flex gap-2"><Pill label={t.label} color={t.color} /><Pill label={s2.label} color={s2.color} /></div>
+                      </div>
+                      <div className="text-sm mt-1">{o.title}</div>
+                      <div className="flex items-center justify-between gap-2 mt-1">
+                        <div className="text-xs" style={{ color: C.muted }}>{o.technician ? `Técnico: ${o.technician}` : ""}</div>
+                        {o.status === "completada" && (
+                          <button onClick={() => printOrder(o)} disabled={busyId === o.id} className="flex items-center gap-1 text-xs flex-shrink-0 disabled:opacity-50" style={{ color: C.amber }}><FileText size={13} /> {busyId === o.id ? "Abriendo..." : "Informe"}</button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {eqOrders.length === 0 && <div className="text-sm p-6 text-center" style={{ ...card, color: C.muted }}>Este equipo todavía no tiene trabajos registrados.</div>}
+              </div>
+            </div>
+          );
+        })()}
+
+        {current === "equipos" && !selectedEqId && (
           <div className="grid sm:grid-cols-2 gap-2">
             {(data.equipment || []).map((e) => {
               const out = e.operational_status === "fuera_servicio";
+              const n = orders.filter((o) => o.equipment_id === e.id).length;
               return (
-                <div key={e.id} className="p-3" style={card}>
+                <button key={e.id} onClick={() => setSelectedEqId(e.id)} className="p-3 text-left" style={card}>
                   <div className="flex items-start justify-between gap-2">
                     <div className="font-semibold text-sm">{e.name}</div>
                     <Pill label={out ? "Fuera de servicio" : "Operativo"} color={out ? C.red : C.green} />
@@ -302,8 +401,9 @@ export function ClientPortal({ token }) {
                     {e.serial_number && <div className="font-mono">S/N: {e.serial_number}</div>}
                     {e.location && <div>Ubicación: {e.location}</div>}
                     {e.next_maintenance_date && <div>Próximo mantenimiento: <span style={{ color: C.text }}>{fmtDate(e.next_maintenance_date)}</span></div>}
+                    <div style={{ color: C.amber }}>{n} trabajo{n !== 1 ? "s" : ""} · ver historial →</div>
                   </div>
-                </div>
+                </button>
               );
             })}
             {(data.assets || []).map((a) => (

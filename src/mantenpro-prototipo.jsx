@@ -5616,7 +5616,21 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
 export default function MantenProApp() {
   const [inviteToken] = useState(() => new URLSearchParams(window.location.search).get("invite"));
   // Portal del cliente: con ?portal=<token> se muestra el portal sin pedir inicio de sesión.
-  const [portalToken] = useState(() => new URLSearchParams(window.location.search).get("portal"));
+  // QR de un equipo (?eq=) abierto sin sesión de empleado en este teléfono: si aquí ya se abrió
+  // antes un portal de cliente, se entra con ese enlace directo a la ficha del equipo.
+  const [portalToken] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const direct = params.get("portal");
+    if (direct) return direct;
+    if (params.get("eq") && !findStoredAuthUser()) {
+      try {
+        const saved = JSON.parse(localStorage.getItem("mp-portal-links") || "[]");
+        if (Array.isArray(saved) && saved[0]?.token) return saved[0].token;
+      } catch { /* sin almacenamiento */ }
+    }
+    return null;
+  });
+  const qrWithoutSession = !!new URLSearchParams(window.location.search).get("eq");
   const [authLoading, setAuthLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(undefined);
@@ -5810,7 +5824,7 @@ export default function MantenProApp() {
   if (portalToken) return <ClientPortal token={portalToken} />;
   if (noCopy) return <NoCopyScreen onRetry={() => { setAuthLoading(true); startSession(); }} />;
   if (authLoading || inviteInfo === undefined) return <FullScreenLoader label="Cargando..." />;
-  if (!session) return <AuthScreen inviteInfo={inviteInfo} />;
+  if (!session) return <AuthScreen inviteInfo={inviteInfo} qrHint={qrWithoutSession} />;
 
   if (passwordRecovery) {
     return <ChangePasswordModal title="Pon tu nueva contraseña" onDone={() => setPasswordRecovery(false)} />;

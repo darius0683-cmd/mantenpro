@@ -9,7 +9,7 @@ import { APP_URL, C, Field, ROLE_CFG, inputClass, inputStyle } from "./base.jsx"
 // ---------------------------------------------------------------------------
 // Pantalla de acceso (login / crear cuenta)
 // ---------------------------------------------------------------------------
-export function AuthScreen({ inviteInfo }) {
+export function AuthScreen({ inviteInfo, qrHint }) {
   const [mode, setMode] = useState("login");
   const [email, setEmail] = useState(inviteInfo?.email || "");
   const [password, setPassword] = useState("");
@@ -89,6 +89,12 @@ export function AuthScreen({ inviteInfo }) {
           </div>
         </div>
 
+        {qrHint && !inviteInfo && (
+          <div className="text-xs mb-4 px-3 py-2" style={{ background: C.panelAlt, color: C.text, border: `1px solid ${C.border}` }}>
+            <b>¿Eres cliente?</b> Para ver este equipo, abre una vez en este teléfono el enlace del portal que te envió la empresa que te da servicio. Después, al escanear las etiquetas QR se abrirá directo la ficha del equipo.
+            <div className="mt-1" style={{ color: C.muted }}>Si trabajas en la empresa, inicia sesión abajo.</div>
+          </div>
+        )}
         {inviteInfo && (
           <div className="text-xs mb-4 px-3 py-2" style={{ background: C.panelAlt, color: C.amber, border: `1px solid ${C.border}` }}>
             Te invitaron a unirte a <b>{inviteInfo.companyName}</b> como {ROLE_CFG[inviteInfo.role]?.label || inviteInfo.role}. Inicia sesión o crea tu cuenta con el correo <b>{inviteInfo.email}</b>.
