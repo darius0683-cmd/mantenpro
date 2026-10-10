@@ -513,7 +513,7 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
 }
 
 // Pantalla: equipment
-export function VistaEquipment({ clients = [], companyLogo, openEquipmentCard, branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+export function VistaEquipment({ clients = [], checklistTemplates = [], companyLogo, openEquipmentCard, branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
   // Imprime lo que se ve en pantalla (filtros aplicados) o, si hay equipos marcados, solo esos.
   const printEquipment = (mode) => {
     const list = selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered;
@@ -567,6 +567,7 @@ export function VistaEquipment({ clients = [], companyLogo, openEquipmentCard, b
                     locations={locations}
                     technicians={technicians}
                     clients={clients}
+                    checklistTemplates={checklistTemplates}
                     setEquipment={setEquipment}
                     setLocations={setLocations}
                   />

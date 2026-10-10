@@ -32,6 +32,7 @@ const COLS = {
   unit: "Unidad de uso",
   usage: "Lectura actual",
   interval: "Cada cuántas unidades",
+  checklist: "Checklist del mantenimiento",
 };
 const HEADERS = Object.values(COLS);
 const STATUS_LABEL = { operativo: "Operativo", fuera_servicio: "Fuera de servicio" };
@@ -84,7 +85,16 @@ const sameVal = (a, b) => (a ?? null) === (b ?? null) || (a != null && b != null
 // ---------------------------------------------------------------------------
 // Descargar
 // ---------------------------------------------------------------------------
-export async function downloadEquipmentExcel({ list, branches, locations, technicians, clients = [], companyName }) {
+// Nombre con que sale cada checklist en el Excel. Si dos checklists se llaman igual, se le agrega
+// el tipo de equipo entre paréntesis para distinguirlos: "Mensual (Chiller)".
+export function checklistExcelNames(templates) {
+  const count = new Map();
+  (templates || []).forEach((t) => count.set(norm(t.name), (count.get(norm(t.name)) || 0) + 1));
+  return new Map((templates || []).map((t) => [t.id, count.get(norm(t.name)) > 1 ? `${t.name} (${t.equipment_type})` : t.name]));
+}
+
+export async function downloadEquipmentExcel({ list, branches, locations, technicians, clients = [], checklistTemplates = [], companyName }) {
+  const ckNames = checklistExcelNames(checklistTemplates);
   const XLSX = await loadXlsx();
   const branchName = (id) => branches.find((b) => b.id === id)?.name || "";
   const locName = (id) => locations.find((l) => l.id === id)?.name || "";
@@ -111,6 +121,7 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
     [COLS.unit]: e.usage_unit || "",
     [COLS.usage]: e.current_usage ?? "",
     [COLS.interval]: e.usage_interval ?? "",
+    [COLS.checklist]: e.default_checklist_template_id ? (ckNames.get(e.default_checklist_template_id) || "") : "",
   }));
   const ws = XLSX.utils.json_to_sheet(rows, { header: HEADERS });
 
@@ -125,17 +136,18 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
       else delete ws[ref];
     });
   }
-  ws["!cols"] = [38, 30, 16, 16, 14, 16, 12, 12, 18, 14, 18, 18, 20, 26, 14, 14, 10, 10, 12].map((wch) => ({ wch }));
-  ws["!autofilter"] = { ref: `A1:S${Math.max(rows.length, 1) + 1}` };
+  ws["!cols"] = [38, 30, 16, 16, 14, 16, 12, 12, 18, 14, 18, 18, 20, 26, 14, 14, 10, 10, 12, 30].map((wch) => ({ wch }));
+  ws["!autofilter"] = { ref: `A1:T${Math.max(rows.length, 1) + 1}` };
 
-  const listas = [["Sucursales", "Ubicaciones (sucursal → ubicación)", "Técnicos activos", "Estado", "Unidad de uso", "Clientes"]];
+  const listas = [["Sucursales", "Ubicaciones (sucursal → ubicación)", "Técnicos activos", "Estado", "Unidad de uso", "Clientes", "Checklists (tipo de equipo)"]];
+  const ckRows = checklistTemplates.map((t) => [ckNames.get(t.id), t.equipment_type]).sort((a, b) => a[0].localeCompare(b[0], "es"));
   const locRows = locations.map((l) => `${branchName(l.branch_id)} → ${l.name}`).sort();
   const techRows = technicians.filter((t) => t.is_active !== false).map((t) => t.name).sort();
   const clientRows = clients.map((c) => c.name).filter(Boolean).sort((a, b) => a.localeCompare(b, "es"));
-  const n = Math.max(branches.length, locRows.length, techRows.length, clientRows.length, 2);
-  for (let i = 0; i < n; i++) listas.push([branches[i]?.name || "", locRows[i] || "", techRows[i] || "", ["Operativo", "Fuera de servicio"][i] || "", ["horas", "km"][i] || "", clientRows[i] || ""]);
+  const n = Math.max(branches.length, locRows.length, techRows.length, clientRows.length, ckRows.length, 2);
+  for (let i = 0; i < n; i++) listas.push([branches[i]?.name || "", locRows[i] || "", techRows[i] || "", ["Operativo", "Fuera de servicio"][i] || "", ["horas", "km"][i] || "", clientRows[i] || "", ckRows[i] ? `${ckRows[i][0]}  →  ${ckRows[i][1]}` : ""]);
   const wsListas = XLSX.utils.aoa_to_sheet(listas);
-  wsListas["!cols"] = [{ wch: 24 }, { wch: 40 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 34 }];
+  wsListas["!cols"] = [{ wch: 24 }, { wch: 40 }, { wch: 28 }, { wch: 18 }, { wch: 14 }, { wch: 34 }, { wch: 44 }];
 
   const ayuda = [
     ["Cómo usar este archivo"],
@@ -158,6 +170,7 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
     ["• Si escribes 03/10/2026 y tu Excel está configurado en inglés (mes/día), Excel la puede guardar como 10 de marzo. Para evitarlo, usa 2026-10-03."],
     ["• Para revisar: al subir el archivo, la app muestra los equipos que cambian; verifica ahí que las fechas sean las correctas antes de cargar."],
     [""],
+    ["Checklist del mantenimiento: escribe el nombre del checklist tal como sale en la hoja \"Listas\" (lo de antes de la flecha). El equipo lo adopta y se carga solo en sus órdenes de mantenimiento. Vacío = sin checklist fijo (se usa el único de su tipo, si hay uno)."],
     ["Unidad de uso: horas o km. Si la dejas vacía, no se guardan Lectura actual ni Cada cuántas unidades."],
     [""],
     ["Al subir el archivo, la app muestra primero un resumen (nuevos, a actualizar, sin cambios y filas con errores) y solo guarda cuando confirmas."],
@@ -177,7 +190,13 @@ export async function downloadEquipmentExcel({ list, branches, locations, techni
 // ---------------------------------------------------------------------------
 // Leer y validar el Excel (sin guardar nada)
 // ---------------------------------------------------------------------------
-export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, technicians, clients = [] }) {
+export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, technicians, clients = [], checklistTemplates = [] }) {
+  // Checklists por nombre (como salen en el Excel) y por nombre solo
+  const ckNames = checklistExcelNames(checklistTemplates);
+  const ckByExcelName = new Map();
+  checklistTemplates.forEach((t) => {
+    for (const k of new Set([norm(ckNames.get(t.id)), norm(t.name)])) ckByExcelName.set(k, [...(ckByExcelName.get(k) || []), t]);
+  });
   const byId = new Map(equipment.map((e) => [e.id, e]));
   const bySerial = new Map();
   equipment.forEach((e) => { const k = norm(e.serial_number); if (k) bySerial.set(k, [...(bySerial.get(k) || []), e]); });
@@ -254,6 +273,23 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
     const hasClientCol = Object.prototype.hasOwnProperty.call(raw, COLS.client) || Object.prototype.hasOwnProperty.call(raw, "Cliente");
     // Archivos bajados antes de que existiera la columna Capacidad: no la borran
     const hasCapacityCol = Object.prototype.hasOwnProperty.call(raw, COLS.capacity);
+    // Checklist fijo (archivos viejos sin la columna: no lo tocan)
+    const hasChecklistCol = Object.prototype.hasOwnProperty.call(raw, COLS.checklist);
+    let checklistId = null;
+    if (hasChecklistCol) {
+      const ckText = text(get("checklist"));
+      if (ckText) {
+        let found = ckByExcelName.get(norm(ckText)) || [];
+        if (found.length > 1) {
+          const rowType = norm(get("type"));
+          const sameType = found.filter((t) => norm(t.equipment_type) === rowType);
+          if (sameType.length === 1) found = sameType;
+        }
+        if (found.length === 1) checklistId = found[0].id;
+        else if (found.length === 0) errs.push(`no existe el checklist "${ckText}" (mira la hoja "Listas")`);
+        else errs.push(`hay ${found.length} checklists llamados "${ckText}"; escríbelo como sale en la hoja "Listas", con el tipo entre paréntesis`);
+      }
+    }
     let capValue = null;
     if (hasCapacityCol) {
       const rawCap = String(get("capacity") ?? "").trim().replace(/,/g, "");
@@ -329,9 +365,10 @@ export function analyzeEquipmentRows(rawRows, { equipment, branches, locations, 
       usage_unit: unit, current_usage: usage, usage_interval: interval,
       ...(hasClientCol ? { client_id: clientId } : {}),
       ...(hasCapacityCol ? { capacity: capValue, capacity_unit: capValue === null ? null : text(get("capacityUnit")) } : {}),
+      ...(hasChecklistCol ? { default_checklist_template_id: checklistId } : {}),
     };
     if (target) {
-      const changed = locationKey || [...FIELDS, ...(hasClientCol ? ["client_id"] : []), ...(hasCapacityCol ? ["capacity", "capacity_unit"] : [])].some((f) => !sameVal(payload[f], target[f]));
+      const changed = locationKey || [...FIELDS, ...(hasClientCol ? ["client_id"] : []), ...(hasCapacityCol ? ["capacity", "capacity_unit"] : []), ...(hasChecklistCol ? ["default_checklist_template_id"] : [])].some((f) => !sameVal(payload[f], target[f]));
       if (!changed) { result.unchanged++; return; }
       result.updates.push({ row: rowNum, id: target.id, payload, locationKey, before: target });
     } else {
@@ -353,7 +390,7 @@ const FIELD_LABELS = { installed_at: "Instalación", next_maintenance_date: "Pr�
 // ---------------------------------------------------------------------------
 // Botones + ventana de carga
 // ---------------------------------------------------------------------------
-export function EquipmentExcelButtons({ canUpload, companyId, companyName, equipment, downloadList, branches, locations, technicians, clients = [], setEquipment, setLocations }) {
+export function EquipmentExcelButtons({ canUpload, companyId, companyName, equipment, downloadList, branches, locations, technicians, clients = [], checklistTemplates = [], setEquipment, setLocations }) {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState(null); // { fileName, analysis }
   const [saving, setSaving] = useState(false);
@@ -362,7 +399,7 @@ export function EquipmentExcelButtons({ canUpload, companyId, companyName, equip
 
   const download = async () => {
     setBusy(true);
-    try { await downloadEquipmentExcel({ list: downloadList, branches, locations, technicians, clients, companyName }); }
+    try { await downloadEquipmentExcel({ list: downloadList, branches, locations, technicians, clients, checklistTemplates, companyName }); }
     catch (err) { window.alert("No se pudo generar el Excel: " + err.message); }
     finally { setBusy(false); }
   };
@@ -381,7 +418,7 @@ export function EquipmentExcelButtons({ canUpload, companyId, companyName, equip
         window.alert("Este archivo no tiene el formato de equipos. Usa \"Descargar Excel\" para obtener el formato correcto (columnas \"Nombre *\" y \"Sucursal *\" como mínimo).");
         return;
       }
-      setPreview({ fileName: file.name, analysis: analyzeEquipmentRows(rows, { equipment, branches, locations, technicians, clients }) });
+      setPreview({ fileName: file.name, analysis: analyzeEquipmentRows(rows, { equipment, branches, locations, technicians, clients, checklistTemplates }) });
     } catch (err) {
       window.alert("No se pudo leer el Excel: " + err.message);
     } finally {
