@@ -15,6 +15,9 @@ export function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAc
   const [email, setEmail] = useState(company?.email || "");
   const [website, setWebsite] = useState(company?.website || "");
   const [acceptsUsd, setAcceptsUsd] = useState(!!company?.accepts_usd_payments);
+  // Mantenimiento automático (parte B): si la base todavía no tiene la columna, no se manda
+  const hasAutoMaint = !!company && Object.prototype.hasOwnProperty.call(company, "auto_maintenance");
+  const [autoMaint, setAutoMaint] = useState(company?.auto_maintenance !== false);
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(company?.logo_url || "");
 
@@ -31,6 +34,7 @@ export function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAc
       name: name.trim(), rnc: rnc.trim() || null, address: address.trim() || null,
       phone: phone.trim() || null, email: email.trim() || null, website: website.trim() || null,
       accepts_usd_payments: acceptsUsd,
+      ...(hasAutoMaint ? { auto_maintenance: autoMaint } : {}),
     }, logoFile);
   };
 
@@ -82,6 +86,15 @@ export function CompanyProfileForm({ company, bankAccounts, onSave, onSaveBankAc
             <div className="text-xs" style={{ color: C.muted }}>Activa la opción de cobrar en US$ con tasa del día y diferencia cambiaria, y el fondo y conteo en dólares de la caja. Si tu empresa solo cobra en pesos, déjalo apagado.</div>
           </div>
         </label>
+        {hasAutoMaint && (
+          <label className="flex items-start gap-2 text-sm mt-2 p-3 cursor-pointer" style={{ color: C.text, background: C.panelAlt, border: `1px solid ${C.border}` }}>
+            <input type="checkbox" className="mt-0.5" checked={autoMaint} onChange={(e) => setAutoMaint(e.target.checked)} />
+            <div>
+              <div>Mantenimiento automático</div>
+              <div className="text-xs" style={{ color: C.muted }}>Cada mañana (desde las 6:00) se crean solas las órdenes de mantenimiento preventivo de los equipos vencidos, con su técnico y checklist, y se avisa a los técnicos. Apagado, los avisos de órdenes atrasadas siguen llegando, pero las órdenes preventivas se crean a mano desde Mantenimiento programado.</div>
+            </div>
+          </label>
+        )}
         <div className="flex justify-end mt-4">
           <button onClick={submit} disabled={saving} className="px-4 py-2 text-sm font-semibold disabled:opacity-50" style={{ background: C.amber, color: "#1A1500" }}>
             {saving ? "Guardando..." : "Guardar cambios"}
