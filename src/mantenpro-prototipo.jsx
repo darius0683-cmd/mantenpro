@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "./supabaseClient";
 import { LayoutDashboard, BarChart3, AlertTriangle, CalendarDays, ClipboardList, FolderKanban, Settings2, ClipboardCheck, Users, Package, Wrench, Boxes, Users2, BadgeCheck, ShoppingCart, Truck, FileText, Receipt, Layers, RotateCcw, Wallet, Hash, Search, Banknote, Building2, ShieldCheck, History, Download, Briefcase, Pencil, Trash2, CheckCircle2, ChevronLeft, X, ChevronDown, ChevronRight, LogOut, Menu, Bell, BellOff, Plus, CircleHelp, ScanLine, ScrollText } from "lucide-react";
-import { ACTIVITY_TABLE_LABELS, addDaysToDateStr, defaultChecklistFor, fmtCapacity, addMonths, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, FullScreenLoader, iconBtnStyle, invoiceBalance, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, NCFSequenceFormModal, Pill, printDocument, PRIORITY_CFG, PushSetupInline, returnMaterialLine, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, ThemeToggleButton, todayStrRD, TOOL_STATUS_CFG, TYPE_CFG } from "./modulos/base.jsx";
+import { ACTIVITY_TABLE_LABELS, addDaysToDateStr, defaultChecklistFor, fmtCapacity, uploadEvidenceFile, addMonths, APP_URL, BANK_MATCH_WINDOW_DAYS, C, ChangePasswordModal, compressImage, daysBetween, fetchAllRows, fetchByIdChunks, fmtDate, fmtMoney, FullScreenLoader, iconBtnStyle, invoiceBalance, isRetentionMethod, issuableSequences, loadXlsx, logoToDataUrl, NCFSequenceFormModal, Pill, printDocument, PRIORITY_CFG, PushSetupInline, returnMaterialLine, ROLE_CFG, ROLE_DEFAULT_PERMISSIONS, ThemeToggleButton, todayStrRD, TOOL_STATUS_CFG, TYPE_CFG } from "./modulos/base.jsx";
 import { AccountFormModal, BranchFormModal, BulkOrderFormModal, BulkToolFormModal, ChecklistTemplateFormModal, ClientAssetFormModal, ClientFormModal, CompanyProfileForm, CreditNoteDetailModal, ExportDataPanel, CreditNoteFormModal, EquipmentFormModal, ExchangeRatePromptModal, ExpenseFormModal, GoodsReceiptDetailModal, GoodsReceiptFormModal, HistoryModal, IncidentDetailModal, IncidentFormModal, InviteFormModal, InvoiceDetailModal, InvoiceFormModal, LocationFormModal, MaterialFormModal, OrderDetailModal, OrderFormModal, PayrollSection, ProductFormModal, ProjectDetailModal, ProjectFormModal, PurchaseDetailModal, PurchaseFormModal, PurchaseOrderDetailModal, PurchaseOrderFormModal, QuoteDetailModal, QuoteFormModal, RecurringContractFormModal, SalesOrderDetailModal, StatementModal, StockAdjustModal, StockMovementsModal, StockTransferModal, SupplierFormModal, SupportViewer, TaxRateFormModal, TechFormModal, ToolFormModal, ToolListFormModal, UserPermissionsModal, VistaActivityLog, VistaAgenda, VistaBankReconciliation, VistaBranches, VistaCaja, VistaChartOfAccounts, VistaChecklists, VistaClients, VistaCreditNotes, VistaDeliveryNotes, VistaDgiiCatalog, VistaEquipment, VistaFinancialReports, VistaFiscalReports, VistaIncidents, VistaInvoices, VistaMaintenanceSchedule, VistaMaterials, VistaNcf, VistaOrders, VistaOtherExpenses, VistaPayables, VistaProductsServices, VistaProjects, VistaPurchaseLedger, VistaPurchaseOrders, VistaPurchases, VistaQuotes, VistaReceivables, VistaRecurringContracts, VistaReports, VistaSalesOrders, VistaSalesReports, VistaSupplierReceipts, VistaSuppliers, VistaTaxRates, VistaTechnicians, VistaTools, VistaUsers, VistaWarranty, VoidInvoiceModal, HelpCenter, EquipmentQrModal, QrScannerModal, ClientPortal, ClientPortalLinkModal, VisitsReportModal, VistaServiceContracts, ServiceContractFormModal, ServiceContractDetailModal, VistaDebitNotes, DebitNoteFormModal, DebitNoteDetailModal, VistaEquipmentAnalysis, prefetchForViews } from "./modulos/lazy.jsx";
 import { AuthScreen, InviteAcceptScreen, OnboardingScreen } from "./modulos/auth.jsx";
 import { CajaPinPrompt, cashReportHtml, isCajaPinError, notesInSession } from "./modulos/caja.jsx";
@@ -550,7 +550,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     (wocki.data || []).forEach((it) => {
       const cur = checklistSummary.get(it.work_order_id) || { total: 0, answered: 0 };
       cur.total += 1;
-      const answered = it.response_type === "ok_no_ok_na" ? !!(it.respuesta && it.respuesta.trim())
+      const answered = it.response_type === "photo" ? !!it.photo_path
+        : it.response_type === "ok_no_ok_na" ? !!(it.respuesta && it.respuesta.trim())
         : it.response_type === "numeric" ? !!(it.respuesta && it.respuesta.trim() !== "" && !isNaN(Number(it.respuesta)))
         : !!it.checked;
       if (answered) cur.answered += 1;
@@ -646,6 +647,36 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     if (!error) setOpenVisits(data || []);
   };
   useEffect(() => { reloadOpenVisits(); /* eslint-disable-next-line */ }, [companyId]);
+
+  // Periodos fuera de servicio de los equipos (parte-d-tecnico.sql). La base los anota sola al
+  // cambiar el estado; aquí se recargan cuando cambia la lista de equipos (formulario o Excel).
+  const [equipmentDowntime, setEquipmentDowntime] = useState([]);
+  const equipmentStatusKey = equipment.map((e) => `${e.id}:${e.operational_status}`).join("|");
+  useEffect(() => {
+    if (!companyId) return undefined;
+    const t = setTimeout(async () => {
+      if (!isOnline()) return;
+      const { data, error } = await fetchAllRows(() => supabase.from("equipment_downtime").select("id, equipment_id, started_at, ended_at, reason").eq("company_id", companyId));
+      if (!error) setEquipmentDowntime(data || []);
+    }, 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line
+  }, [companyId, equipmentStatusKey]);
+  const openDowntimeByEquipment = useMemo(() => new Map(equipmentDowntime.filter((d) => !d.ended_at).map((d) => [d.equipment_id, d])), [equipmentDowntime]);
+
+  // Costo de materiales por orden (para el costo real por equipo en Informes). Se carga al abrir Informes.
+  const [materialCostByOrder, setMaterialCostByOrder] = useState(null);
+  useEffect(() => {
+    if (view !== "reports" || !companyId || !canManage) return;
+    (async () => {
+      const { data, error } = await fetchAllRows(() => supabase.from("work_order_materials").select("id, work_order_id, quantity, unit_cost").eq("company_id", companyId));
+      if (error) return;
+      const m = new Map();
+      (data || []).forEach((r) => m.set(r.work_order_id, (m.get(r.work_order_id) || 0) + Number(r.quantity || 0) * Number(r.unit_cost || 0)));
+      setMaterialCostByOrder(m);
+    })();
+    // eslint-disable-next-line
+  }, [view, companyId]);
 
   // Materiales anotados por técnicos que esperan aprobación (parte-c-materiales-tecnico.sql)
   const [pendingMaterialRequests, setPendingMaterialRequests] = useState([]);
@@ -1315,19 +1346,40 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     };
   }), [technicians, reportsOrders, reportsIncidents, orderTechnicians, techReportTechFilter]);
 
+  // Periodo para la disponibilidad: las fechas del informe; sin fechas, los últimos 30 días
+  const availabilityPeriod = useMemo(() => {
+    const to = techReportDateTo || todayStrRD();
+    const from = techReportDateFrom || addDaysToDateStr(to, -29);
+    return { from, to, start: new Date(`${from}T00:00:00-04:00`).getTime(), end: Math.min(Date.now(), new Date(`${to}T23:59:59-04:00`).getTime()) };
+  }, [techReportDateFrom, techReportDateTo]);
+  const downtimeMsInPeriod = (equipmentId) => equipmentDowntime.filter((d) => d.equipment_id === equipmentId).reduce((sum, d) => {
+    const a = Math.max(new Date(d.started_at).getTime(), availabilityPeriod.start);
+    const b = Math.min(d.ended_at ? new Date(d.ended_at).getTime() : Date.now(), availabilityPeriod.end);
+    return sum + Math.max(0, b - a);
+  }, 0);
+
   const equipStats = useMemo(() => reportsEquipment.map((eq) => {
     const own = reportsOrders.filter((o) => o.equipment_id === eq.id);
     const ownIncidents = reportsIncidents.filter((i) => i.equipment_id === eq.id);
+    const laborCost = own.reduce((sum, o) => sum + orderLaborCost(o), 0);
+    const materialsCost = materialCostByOrder ? own.reduce((sum, o) => sum + (materialCostByOrder.get(o.id) || 0), 0) : null;
+    const periodMs = Math.max(1, availabilityPeriod.end - availabilityPeriod.start);
+    const downMs = downtimeMsInPeriod(eq.id);
     return {
+      materialsCost,
+      totalCost: laborCost + (materialsCost || 0),
+      downtimeHours: downMs / 3600000,
+      availabilityPct: Math.max(0, 100 - (downMs / periodMs) * 100),
       ...eq,
       total: own.length,
       correctivo: own.filter((o) => o.type === "correctivo").length,
       open: own.filter((o) => o.status !== "completada").length,
       incidentesTotal: ownIncidents.length,
       incidentesAbiertos: ownIncidents.filter((i) => i.status === "abierto" || i.status === "en_revision").length,
-      laborCost: own.reduce((sum, o) => sum + orderLaborCost(o), 0),
+      laborCost,
     };
-  }), [reportsEquipment, reportsOrders, reportsIncidents, orderTechnicians, technicians]);
+    // eslint-disable-next-line
+  }), [reportsEquipment, reportsOrders, reportsIncidents, orderTechnicians, technicians, materialCostByOrder, equipmentDowntime, availabilityPeriod]);
 
   // % cumplimiento del preventivo: de las órdenes preventivas programadas en el rango de fechas
   // filtrado, cuántas ya se completaron.
@@ -1844,7 +1896,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   // opts.background: la orden no está abierta en pantalla (se acaba de crear sola o en lote)
   const loadChecklistFromTemplate = async (order, template, opts = {}) => {
     const sortedItems = (template.items || []).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
-    const rows = sortedItems.map((it, i) => ({ id: newId(), work_order_id: order.id, text: it.text, section: it.section || null, checked: false, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
+    const rows = sortedItems.map((it, i) => ({ id: newId(), work_order_id: order.id, text: it.text, section: it.section || null, checked: false, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null, required: it.required !== false, unit: it.unit || null }));
     const res = await perform("checklist_load", order.id, { rows }, `${order.code} · ${template.name || "checklist"}`);
     if (res.error) { setErrorMsg(res.error.message); return; }
     const list = (res.data && res.data.length ? res.data : rows).slice().sort((a, b) => (a.position || 0) - (b.position || 0));
@@ -1859,6 +1911,20 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     patchChecklistCopy(item.work_order_id, (list) => list.map((it) => (it.id === item.id ? { ...it, checked } : it)));
     const res = await perform("checklist_update", item.work_order_id, { itemId: item.id, fields: { checked } }, `${detailOrder?.code || ""} · ${String(item.text || "").slice(0, 40)}`);
     if (res.error) setErrorMsg(res.error.message);
+  };
+
+  // Foto de un punto del checklist (sin señal queda en la cola y se sube después)
+  const takeChecklistPhoto = async (order, item, file) => {
+    try {
+      const blob = await compressImage(file);
+      const ext = (blob.name || "foto.jpg").split(".").pop().toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+      const path = `checklist/${companyId}/${order.id}-${item.id}-${Date.now()}.${ext}`;
+      const res = await perform("checklist_photo", order.id, { itemId: item.id, path, blob }, `${order.code} · foto: ${String(item.text || "").slice(0, 40)}`);
+      if (res.error) { setErrorMsg(res.error.message); return; }
+      const local = res.queued ? URL.createObjectURL(blob) : null;
+      setDetailOrderChecklist((prev) => prev.map((it) => (it.id === item.id ? { ...it, photo_path: path, photo_local: local } : it)));
+      patchChecklistCopy(order.id, (list) => list.map((it) => (it.id === item.id ? { ...it, photo_path: path } : it)));
+    } catch (e) { setErrorMsg(e.message); }
   };
 
   const editChecklistItemField = (item, field, value) => {
@@ -2990,7 +3056,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         setErrorMsg("No se pudieron borrar los puntos anteriores de este checklist (probablemente falta un permiso DELETE en checklist_template_items). No se guardaron los cambios para evitar duplicados.");
         return;
       }
-      const rows = itemTexts.map((it, i) => ({ template_id: editingChecklist.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
+      const rows = itemTexts.map((it, i) => ({ template_id: editingChecklist.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null, required: it.required !== false, unit: it.unit || null }));
       const { error: insError } = await supabase.from("checklist_template_items").insert(rows);
       if (insError) { setSaving(false); setErrorMsg(insError.message); return; }
       setSaving(false);
@@ -2999,7 +3065,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     } else {
       const { data: tpl, error: tplError } = await supabase.from("checklist_templates").insert({ ...payload, company_id: companyId }).select().single();
       if (tplError) { setSaving(false); setErrorMsg(tplError.message); return; }
-      const rows = itemTexts.map((it, i) => ({ template_id: tpl.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null }));
+      const rows = itemTexts.map((it, i) => ({ template_id: tpl.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type || "check", range_min: it.range_min ?? null, range_max: it.range_max ?? null, required: it.required !== false, unit: it.unit || null }));
       await supabase.from("checklist_template_items").insert(rows);
       setSaving(false);
       setShowAddChecklist(false);
@@ -3018,23 +3084,38 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     setChecklistTemplates((prev) => prev.filter((t) => t.id !== id));
   };
 
+  const CHECKLIST_RESPONSE_LABELS = { check: "Cotejo", ok_no_ok_na: "OK / No OK / N/A", numeric: "Numérico", photo: "Foto" };
   const downloadChecklistsExcel = async (templates) => {
     const XLSX = await loadXlsx();
     const rows = [];
     templates.forEach((tpl) => {
       const items = (tpl.items || []).slice().sort((a, b) => a.position - b.position);
       if (items.length === 0) {
-        rows.push({ "Tipo de equipo": tpl.equipment_type, "Nombre del checklist": tpl.name, "Tema": "", "Punto a revisar": "" });
+        rows.push({ "Tipo de equipo": tpl.equipment_type, "Nombre del checklist": tpl.name, "Tema": "", "Punto a revisar": "", "Tipo de respuesta": "", "Mínimo": "", "Máximo": "", "Unidad": "", "Obligatorio": "" });
       } else {
         items.forEach((it) => {
-          rows.push({ "Tipo de equipo": tpl.equipment_type, "Nombre del checklist": tpl.name, "Tema": it.section || "", "Punto a revisar": it.text });
+          rows.push({
+            "Tipo de equipo": tpl.equipment_type, "Nombre del checklist": tpl.name, "Tema": it.section || "", "Punto a revisar": it.text,
+            "Tipo de respuesta": CHECKLIST_RESPONSE_LABELS[it.response_type || "check"] || "Cotejo",
+            "Mínimo": it.range_min ?? "", "Máximo": it.range_max ?? "", "Unidad": it.unit || "",
+            "Obligatorio": it.required === false ? "No" : "Sí",
+          });
         });
       }
     });
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [{ wch: 28 }, { wch: 34 }, { wch: 28 }, { wch: 55 }];
+    ws["!cols"] = [{ wch: 28 }, { wch: 34 }, { wch: 28 }, { wch: 55 }, { wch: 18 }, { wch: 9 }, { wch: 9 }, { wch: 10 }, { wch: 12 }];
+    const ayuda = XLSX.utils.aoa_to_sheet([
+      ["Columnas obligatorias: Tipo de equipo, Nombre del checklist y Punto a revisar. Tema es opcional (agrupa los puntos)."],
+      ["Tipo de respuesta: Cotejo, OK / No OK / N/A, Numérico o Foto. Vacío = Cotejo."],
+      ["Mínimo, Máximo y Unidad: solo para Numérico (ej. 10 · 20 · PSI)."],
+      ["Obligatorio: Sí o No (vacío = Sí). La orden no se puede cerrar sin responder los obligatorios."],
+      ["Al subir: si el tipo + nombre ya existen, se reemplazan sus puntos; si no, se crea el checklist."],
+    ]);
+    ayuda["!cols"] = [{ wch: 110 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Checklists");
+    XLSX.utils.book_append_sheet(wb, ayuda, "Instrucciones");
     XLSX.writeFile(wb, templates.length === checklistTemplates.length ? "checklists-mantenpro.xlsx" : "checklists-seleccion.xlsx");
   };
 
@@ -3056,12 +3137,25 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         const section = String(row["Tema"] || "").trim();
         const text = String(row["Punto a revisar"] || "").trim();
         if (!equipmentType || !name || !text) return;
+        // Columnas nuevas (archivos viejos sin ellas: cotejo obligatorio, como antes)
+        const typeLabel = String(row["Tipo de respuesta"] || "").trim().toLowerCase();
+        const response_type = Object.entries(CHECKLIST_RESPONSE_LABELS).find(([, l]) => l.toLowerCase() === typeLabel)?.[0]
+          || (typeLabel.startsWith("num") ? "numeric" : typeLabel.startsWith("ok") ? "ok_no_ok_na" : typeLabel.startsWith("foto") ? "photo" : "check");
+        const num = (v) => { const t = String(v ?? "").trim().replace(",", "."); return t === "" || isNaN(Number(t)) ? null : Number(t); };
+        const req = String(row["Obligatorio"] ?? "").trim().toLowerCase();
+        const extra = {
+          response_type,
+          range_min: response_type === "numeric" ? num(row["Mínimo"]) : null,
+          range_max: response_type === "numeric" ? num(row["Máximo"]) : null,
+          unit: response_type === "numeric" ? (String(row["Unidad"] || "").trim().slice(0, 20) || null) : null,
+          required: !["no", "n", "false", "0"].includes(req),
+        };
         const key = equipmentType.toLowerCase() + "||" + name.toLowerCase();
         if (!groupIndex.has(key)) {
           groupIndex.set(key, groups.length);
           groups.push({ equipmentType, name, items: [] });
         }
-        groups[groupIndex.get(key)].items.push({ text, section });
+        groups[groupIndex.get(key)].items.push({ text, section, ...extra });
       });
 
       if (groups.length === 0) {
@@ -3077,13 +3171,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         if (existing) {
           await supabase.from("checklist_templates").update({ equipment_type: g.equipmentType, name: g.name }).eq("id", existing.id);
           await supabase.from("checklist_template_items").delete().eq("template_id", existing.id);
-          const itemRows = g.items.map((it, i) => ({ template_id: existing.id, text: it.text, section: it.section || null, position: i }));
+          const itemRows = g.items.map((it, i) => ({ template_id: existing.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type, range_min: it.range_min, range_max: it.range_max, unit: it.unit, required: it.required }));
           await supabase.from("checklist_template_items").insert(itemRows);
           updated++;
         } else {
           const { data: tpl, error: tplError } = await supabase.from("checklist_templates").insert({ equipment_type: g.equipmentType, name: g.name, company_id: companyId }).select().single();
           if (tplError) { setErrorMsg(tplError.message); continue; }
-          const itemRows = g.items.map((it, i) => ({ template_id: tpl.id, text: it.text, section: it.section || null, position: i }));
+          const itemRows = g.items.map((it, i) => ({ template_id: tpl.id, text: it.text, section: it.section || null, position: i, response_type: it.response_type, range_min: it.range_min, range_max: it.range_max, unit: it.unit, required: it.required }));
           await supabase.from("checklist_template_items").insert(itemRows);
           created++;
         }
@@ -3909,7 +4003,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   };
 
   // ---- Incidentes ----
-  const saveIncident = async (payload) => {
+  const saveIncident = async (payload, photos) => {
     setSaving(true);
     if (editingIncident) {
       const { data, error } = await supabase.from("incidents").update(payload).eq("id", editingIncident.id).select().single();
@@ -3919,8 +4013,16 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       setEditingIncident(null);
     } else {
       const { data, error } = await supabase.from("incidents").insert({ ...payload, company_id: companyId, status: "abierto" }).select().single();
+      if (error) { setSaving(false); setErrorMsg(error.message); return; }
+      // Fotos de la avería (si alguna falla, el incidente queda creado igual)
+      for (const f of photos || []) {
+        try {
+          const up = await uploadEvidenceFile("incidents", companyId, data.id, f);
+          const { error: aErr } = await supabase.from("incident_attachments").insert({ company_id: companyId, incident_id: data.id, file_path: up.path, file_name: up.name });
+          if (aErr) throw aErr;
+        } catch (e) { setErrorMsg(`El incidente se guardó, pero una foto no se pudo subir: ${e.message}`); }
+      }
       setSaving(false);
-      if (error) { setErrorMsg(error.message); return; }
       setIncidents((prev) => [data, ...prev]);
       setShowAddIncident(false);
       setIncidentPrefill(null);
@@ -4745,7 +4847,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("equipment") && view === "equipment" && (
-            <VistaEquipment clients={clients} checklistTemplates={checklistTemplates} companyLogo={company?.logo_url} openEquipmentCard={setQrEquipmentId} branchFilter={branchFilter} branchName={branchName} branches={branches} bulkDeleteEquipment={bulkDeleteEquipment} canDelete={canDelete} canEdit={canEdit} companyId={companyId} companyName={companyName} deleteEquipment={deleteEquipment} equipment={equipment} equipmentFiltered={equipmentFiltered} equipmentSearch={equipmentSearch} equipmentStatusFilter={equipmentStatusFilter} equipmentTechFilter={equipmentTechFilter} equipmentTypeFilter={equipmentTypeFilter} equipmentTypes={equipmentTypes} locationName={locationName} locations={locations} orders={orders} selectedEquipment={selectedEquipment} setBranchFilter={setBranchFilter} setEditingEquipment={setEditingEquipment} setEquipment={setEquipment} setEquipmentSearch={setEquipmentSearch} setEquipmentStatusFilter={setEquipmentStatusFilter} setEquipmentTechFilter={setEquipmentTechFilter} setEquipmentTypeFilter={setEquipmentTypeFilter} setHistoryFor={setHistoryFor} setLocations={setLocations} setPendingLocationBranch={setPendingLocationBranch} setSelectedEquipment={setSelectedEquipment} setShowAddEquipment={setShowAddEquipment} setShowAddLocation={setShowAddLocation} technicians={technicians} />
+            <VistaEquipment clients={clients} checklistTemplates={checklistTemplates} openDowntimeByEquipment={openDowntimeByEquipment} companyLogo={company?.logo_url} openEquipmentCard={setQrEquipmentId} branchFilter={branchFilter} branchName={branchName} branches={branches} bulkDeleteEquipment={bulkDeleteEquipment} canDelete={canDelete} canEdit={canEdit} companyId={companyId} companyName={companyName} deleteEquipment={deleteEquipment} equipment={equipment} equipmentFiltered={equipmentFiltered} equipmentSearch={equipmentSearch} equipmentStatusFilter={equipmentStatusFilter} equipmentTechFilter={equipmentTechFilter} equipmentTypeFilter={equipmentTypeFilter} equipmentTypes={equipmentTypes} locationName={locationName} locations={locations} orders={orders} selectedEquipment={selectedEquipment} setBranchFilter={setBranchFilter} setEditingEquipment={setEditingEquipment} setEquipment={setEquipment} setEquipmentSearch={setEquipmentSearch} setEquipmentStatusFilter={setEquipmentStatusFilter} setEquipmentTechFilter={setEquipmentTechFilter} setEquipmentTypeFilter={setEquipmentTypeFilter} setHistoryFor={setHistoryFor} setLocations={setLocations} setPendingLocationBranch={setPendingLocationBranch} setSelectedEquipment={setSelectedEquipment} setShowAddEquipment={setShowAddEquipment} setShowAddLocation={setShowAddLocation} technicians={technicians} />
           )}
 
           {!loadingScope && hasPerm("technicians") && view === "technicians" && (
@@ -4781,7 +4883,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           )}
 
           {!loadingScope && hasPerm("reports") && view === "reports" && (
-            <VistaReports technicians={technicians} companyName={companyName} equipName={equipName} techReportTechFilter={techReportTechFilter} setTechReportTechFilter={setTechReportTechFilter} avgRepairTime={avgRepairTime} branchFilter={branchFilter} branchName={branchName} checklistCompliance={checklistCompliance} deadlineCompliance={deadlineCompliance} equipChartData={equipChartData} equipStats={equipStats} incidentEquipChartData={incidentEquipChartData} incidentSlaStats={incidentSlaStats} mtbf={mtbf} overdueOpenOrders={overdueOpenOrders} preventiveCompliance={preventiveCompliance} reopenStats={reopenStats} reportsIncidents={reportsIncidents} reportsOrders={reportsOrders} setHistoryFor={setHistoryFor} setTechReportDateFrom={setTechReportDateFrom} setTechReportDateTo={setTechReportDateTo} techChartData={techChartData} techName={techName} techReportDateFrom={techReportDateFrom} techReportDateTo={techReportDateTo} techStats={techStats} />
+            <VistaReports technicians={technicians} companyName={companyName} equipName={equipName} techReportTechFilter={techReportTechFilter} setTechReportTechFilter={setTechReportTechFilter} avgRepairTime={avgRepairTime} branchFilter={branchFilter} branchName={branchName} checklistCompliance={checklistCompliance} deadlineCompliance={deadlineCompliance} equipChartData={equipChartData} equipStats={equipStats} incidentEquipChartData={incidentEquipChartData} incidentSlaStats={incidentSlaStats} mtbf={mtbf} overdueOpenOrders={overdueOpenOrders} preventiveCompliance={preventiveCompliance} reopenStats={reopenStats} reportsIncidents={reportsIncidents} reportsOrders={reportsOrders} setHistoryFor={setHistoryFor} setTechReportDateFrom={setTechReportDateFrom} setTechReportDateTo={setTechReportDateTo} techChartData={techChartData} techName={techName} techReportDateFrom={techReportDateFrom} techReportDateTo={techReportDateTo} techStats={techStats} availabilityPeriod={availabilityPeriod} />
           )}
 
           {!loadingScope && hasPerm("equipmentAnalysis") && view === "equipmentAnalysis" && (
@@ -4986,6 +5088,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onChecklistFieldChange={editChecklistItemField}
           onChecklistFieldBlur={saveChecklistItemField}
           onClearChecklist={clearOrderChecklist}
+          onChecklistPhoto={takeChecklistPhoto}
           myTechnicianId={profile.technician_id}
           canManageVisits={canManage}
           onVisitsChanged={async () => {
@@ -5024,17 +5127,19 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       {showAddTech && <TechFormModal branches={branches} onClose={() => setShowAddTech(false)} onSave={saveTech} saving={saving} />}
       {editingTech && <TechFormModal branches={branches} initial={editingTech} onClose={() => setEditingTech(null)} onSave={saveTech} saving={saving} />}
       {showAddEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} equipment={equipment} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} equipment={equipment} companyId={companyId} canManageDocs={canManage} onClose={() => setShowAddEquipment(false)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {editingEquipment && (
-        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} equipment={equipment} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
+        <EquipmentFormModal branches={branches} locations={locations} technicians={technicians} clients={clients} checklistTemplates={checklistTemplates} equipment={equipment} companyId={companyId} canManageDocs={canManage} initial={editingEquipment} onClose={() => setEditingEquipment(null)} onSave={saveEquipment} saving={saving}
           onRequestNewLocation={(branchId) => { setPendingLocationBranch(branchId); setShowAddLocation(true); }} />
       )}
       {showAddLocation && <LocationFormModal branches={branches} defaultBranchId={pendingLocationBranch} onClose={() => setShowAddLocation(false)} onSave={addLocation} saving={saving} />}
       {historyFor && <HistoryModal title={historyFor.title} orders={historyFor.orders} branchName={branchName} equipName={equipName} techName={techName} onClose={() => setHistoryFor(null)} />}
       {qrEquipmentId && !loadingScope && companyHasModule("tecnico") && (
         <EquipmentQrModal
+          companyId={companyId}
+          downtime={equipmentDowntime}
           equipment={equipment.find((e) => e.id === qrEquipmentId) || null}
           orders={orders}
           incidents={visibleIncidents}
@@ -5354,6 +5459,8 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       )}
       {incidentDetail && (
         <IncidentDetailModal
+          companyId={companyId}
+          myUserId={session.user.id}
           incident={incidentDetail}
           contractLabel={contractCodeOf(incidentDetail.service_contract_id)}
           branchName={branchName}

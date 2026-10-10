@@ -10,6 +10,7 @@
 // Nadie de otra empresa puede ver el equipo: los datos siguen protegidos por RLS.
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Camera, ClipboardList, History, MapPin, Printer, QrCode, User, X } from "lucide-react";
+import { EquipmentDocumentsSection } from "./tecnico.jsx";
 import { APP_URL, C, fmtCapacity, INCIDENT_STATUS_CFG, Modal, Pill, STATUS_CFG, TYPE_CFG, fmtDate, todayStrRD } from "./base.jsx";
 
 export const equipmentQrUrl = (id) => `${APP_URL}/?eq=${id}`;
@@ -83,7 +84,7 @@ export async function printEquipmentQrLabels({ list, companyName, companyLogo, b
 const OPEN_INCIDENT = ["abierto", "en_revision"];
 
 // Ficha que se abre al escanear el QR de un equipo.
-export function EquipmentQrModal({ equipment, orders, incidents, branchName, locationName, techName, companyName, companyLogo, canCreateOrder, canReportIncident, onNewOrder, onReportIncident, onShowHistory, onClose }) {
+export function EquipmentQrModal({ companyId, downtime = [], equipment, orders, incidents, branchName, locationName, techName, companyName, companyLogo, canCreateOrder, canReportIncident, onNewOrder, onReportIncident, onShowHistory, onClose }) {
   if (!equipment) {
     return (
       <Modal title="Equipo no encontrado" onClose={onClose}>
@@ -121,6 +122,17 @@ export function EquipmentQrModal({ equipment, orders, incidents, branchName, loc
         <div>Próximo mantenimiento<br /><span style={{ color: overdue ? C.red : C.text }}>{next ? fmtDate(next) + (overdue ? " (vencido)" : "") : "—"}</span></div>
         <div>Último servicio<br /><span style={{ color: C.text }}>{lastDone ? fmtDate(lastDone.completed_at?.slice(0, 10) || lastDone.scheduled) : "—"}</span></div>
       </div>
+      {out && (() => {
+        const d = downtime.find((x) => x.equipment_id === equipment.id && !x.ended_at);
+        const reason = d?.reason || equipment.out_of_service_reason;
+        if (!d && !reason) return null;
+        const days = d ? Math.floor((Date.now() - new Date(d.started_at).getTime()) / 86400000) : null;
+        return (
+          <div className="text-xs mb-3 px-3 py-2" style={{ background: C.redBg, color: C.red }}>
+            Fuera de servicio{d ? ` desde ${fmtDate(String(d.started_at).slice(0, 10))} (${days === 0 ? "hoy" : `${days} día${days !== 1 ? "s" : ""}`})` : ""}{reason ? ` · ${reason}` : ""}
+          </div>
+        );
+      })()}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs mb-4" style={{ color: C.muted }}>
         {where && <span className="flex items-center gap-1"><MapPin size={12} /> {where}</span>}
         <span className="flex items-center gap-1"><User size={12} /> Técnico: <span style={{ color: C.text }}>{equipment.default_technician_id ? techName(equipment.default_technician_id) : "Sin asignar"}</span></span>
@@ -140,6 +152,8 @@ export function EquipmentQrModal({ equipment, orders, incidents, branchName, loc
           )}
         </div>
       )}
+
+      {companyId && <EquipmentDocumentsSection equipmentId={equipment.id} companyId={companyId} canManage={false} compact />}
 
       {openIncidents.length > 0 && (
         <div className="mb-4">

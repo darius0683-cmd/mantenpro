@@ -8,7 +8,150 @@ import { supabase } from "../supabaseClient";
 import { OrderVisitsSection } from "./visitas.jsx";
 import { SlaDetail } from "./sla.jsx";
 import { getOrderDetails, hasPendingFor, isNetworkError, isOnline, newId, patchOrderDetails, perform, useOfflineState } from "./offline.jsx";
-import { ActivityHistorySection, C, CAPACITY_UNITS, Field, SIGNATURE_SKIP_REASONS, fmtCapacity, defaultChecklistFor, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
+import { ActivityHistorySection, C, CAPACITY_UNITS, Field, SIGNATURE_SKIP_REASONS, fmtCapacity, signedUrlMap, uploadEvidenceFile, defaultChecklistFor, INCIDENT_STATUS_CFG, LEFTOVER_CONDITIONS, Modal, returnMaterialLine, PRIORITY_CFG, PROJECT_STATUS_CFG, Pill, STATUS_CFG, SearchSelect, TOOL_STATUS_CFG, TYPE_CFG, extractChecklistItemsFromPdf, fmtDate, fmtMoney, iconBtnStyle, inputClass, inputStyle, printDocument, techWorksAtBranch, todayStrRD } from "./base.jsx";
+
+// ---------------------------------------------------------------------------
+// Archivos en el almacenamiento "evidence" (privado): se guarda la ruta y se muestran con enlaces
+// firmados que se piden al abrir. Las rutas llevan la carpeta de la empresa en 2.º lugar.
+// ---------------------------------------------------------------------------
+const isImageName = (name) => /\.(png|jpe?g|gif|webp|heic)$/i.test(name || "");
+
+// Fotos de una avería: se ven en el detalle; se pueden agregar desde ahí
+export function IncidentPhotosSection({ incident, companyId, canAdd, canDeleteAll, myUserId }) {
+  const [rows, setRows] = useState(null);
+  const [urls, setUrls] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = async () => {
+    const { data, error } = await supabase.from("incident_attachments").select("*").eq("incident_id", incident.id).order("created_at");
+    if (error) { setRows([]); if (/incident_attachments/.test(error.message)) setErr("Falta correr parte-d-tecnico.sql en Supabase."); return; }
+    setRows(data || []);
+    setUrls(await signedUrlMap((data || []).map((r) => r.file_path)));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [incident.id]);
+  const add = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setBusy(true); setErr("");
+    try {
+      for (const f of files) {
+        const up = await uploadEvidenceFile("incidents", companyId, incident.id, f);
+        const { error } = await supabase.from("incident_attachments").insert({ company_id: companyId, incident_id: incident.id, file_path: up.path, file_name: up.name });
+        if (error) throw error;
+      }
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+    load();
+  };
+  const remove = async (r) => {
+    if (!window.confirm("¿Quitar esta foto?")) return;
+    const { error } = await supabase.from("incident_attachments").delete().eq("id", r.id);
+    if (error) { setErr(error.message); return; }
+    supabase.storage.from("evidence").remove([r.file_path]);
+    load();
+  };
+  if (rows === null) return null;
+  if (rows.length === 0 && !canAdd && !err) return null;
+  return (
+    <div className="mb-4">
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Fotos de la avería ({rows.length})</div>
+      {rows.length > 0 && (
+        <div className="grid grid-cols-3 md:grid-cols-4 gap-2 mb-2">
+          {rows.map((r) => (
+            <div key={r.id} className="relative">
+              <a href={urls[r.file_path]} target="_blank" rel="noreferrer">
+                {isImageName(r.file_path) && urls[r.file_path]
+                  ? <img src={urls[r.file_path]} alt="" className="w-full h-24 object-cover" style={{ border: `1px solid ${C.border}` }} />
+                  : <div className="w-full h-24 flex items-center justify-center text-xs" style={{ border: `1px solid ${C.border}`, color: C.muted }}><FileText size={16} /></div>}
+              </a>
+              {(canDeleteAll || r.uploaded_by === myUserId) && (
+                <button onClick={() => remove(r)} className="absolute top-1 right-1 p-0.5" style={{ background: "#000000a0", color: "#fff" }}><X size={12} /></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {canAdd && (
+        <label className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer w-fit" style={{ border: `1px solid ${C.border}`, color: C.amber, opacity: busy ? 0.5 : 1 }}>
+          <ImageIcon size={13} /> {busy ? "Subiendo..." : "Agregar foto"}
+          <input type="file" accept="image/*" multiple disabled={busy} className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ""; }} />
+        </label>
+      )}
+      {err && <div className="text-xs mt-1" style={{ color: C.red }}>{err}</div>}
+    </div>
+  );
+}
+
+// Documentos del equipo (manual, placa, fotos...). Los suben administrador / supervisor;
+// todos los ven (también desde el QR).
+export const EQUIPMENT_DOC_KINDS = { manual: "Manual", placa: "Placa de datos", foto: "Foto", diagrama: "Diagrama", garantia: "Garantía", otro: "Otro" };
+export function EquipmentDocumentsSection({ equipmentId, companyId, canManage, compact }) {
+  const [rows, setRows] = useState(null);
+  const [urls, setUrls] = useState({});
+  const [kind, setKind] = useState("manual");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const load = async () => {
+    const { data, error } = await supabase.from("equipment_documents").select("*").eq("equipment_id", equipmentId).order("created_at");
+    if (error) { setRows([]); if (/equipment_documents/.test(error.message) && canManage) setErr("Falta correr parte-d-tecnico.sql en Supabase."); return; }
+    setRows(data || []);
+    setUrls(await signedUrlMap((data || []).map((r) => r.file_path)));
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [equipmentId]);
+  const add = async (fileList) => {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    setBusy(true); setErr("");
+    try {
+      for (const f of files) {
+        if (f.size > 20 * 1024 * 1024) throw new Error(`"${f.name}" pesa más de 20 MB.`);
+        const up = await uploadEvidenceFile("equipment-docs", companyId, equipmentId, f);
+        const { error } = await supabase.from("equipment_documents").insert({ company_id: companyId, equipment_id: equipmentId, kind, file_path: up.path, file_name: up.name });
+        if (error) throw error;
+      }
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+    load();
+  };
+  const remove = async (r) => {
+    if (!window.confirm(`¿Quitar "${r.file_name || "este documento"}"?`)) return;
+    const { error } = await supabase.from("equipment_documents").delete().eq("id", r.id);
+    if (error) { setErr(error.message); return; }
+    supabase.storage.from("evidence").remove([r.file_path]);
+    load();
+  };
+  if (rows === null) return null;
+  if (rows.length === 0 && (!canManage || compact) && !err) return null;
+  return (
+    <div className="mb-4">
+      <div className="text-xs uppercase tracking-wide mb-2" style={{ color: C.muted }}>Documentos del equipo ({rows.length})</div>
+      {rows.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+          {rows.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 px-3 py-2 text-sm" style={{ background: C.panelAlt, border: `1px solid ${C.border}` }}>
+              {isImageName(r.file_path) ? <ImageIcon size={14} color={C.amber} /> : <FileText size={14} color={C.amber} />}
+              <a href={urls[r.file_path]} target="_blank" rel="noreferrer" className="truncate flex-1" style={{ color: C.amber }}>{r.file_name || "Documento"}</a>
+              <span className="text-[10px] uppercase flex-shrink-0" style={{ color: C.muted }}>{EQUIPMENT_DOC_KINDS[r.kind] || r.kind}</span>
+              {canManage && !compact && <button type="button" onClick={() => remove(r)} style={iconBtnStyle}><X size={13} /></button>}
+            </div>
+          ))}
+        </div>
+      )}
+      {canManage && !compact && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={kind} onChange={(e) => setKind(e.target.value)} className="px-2 py-2 text-xs" style={{ background: C.panelAlt, border: `1px solid ${C.border}`, color: C.text }}>
+            {Object.entries(EQUIPMENT_DOC_KINDS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <label className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer" style={{ border: `1px solid ${C.border}`, color: C.amber, opacity: busy ? 0.5 : 1 }}>
+            <Upload size={13} /> {busy ? "Subiendo..." : "Subir documento o foto"}
+            <input type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" disabled={busy} className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ""; }} />
+          </label>
+        </div>
+      )}
+      {err && <div className="text-xs mt-1" style={{ color: C.red }}>{err}</div>}
+    </div>
+  );
+}
 
 export function UsageQuickUpdate({ item, onUpdate }) {
   const [value, setValue] = useState(item.current_usage ?? "");
@@ -270,7 +413,7 @@ function usedValues(list, field, filterFn) {
   return [...seen.values()].sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
 }
 
-export function EquipmentFormModal({ branches, locations, technicians, clients, checklistTemplates = [], equipment = [], initial, onClose, onSave, saving, onRequestNewLocation }) {
+export function EquipmentFormModal({ branches, locations, technicians, clients, checklistTemplates = [], equipment = [], companyId, canManageDocs, initial, onClose, onSave, saving, onRequestNewLocation }) {
   const [clientId, setClientId] = useState(initial?.client_id || "");
   const [name, setName] = useState(initial?.name || "");
   const [type, setType] = useState(initial?.type || "");
@@ -288,6 +431,7 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
   const [usageInterval, setUsageInterval] = useState(initial?.usage_interval ?? "");
   const [operationalStatus, setOperationalStatus] = useState(initial?.operational_status || "operativo");
   const [capacity, setCapacity] = useState(initial?.capacity ?? "");
+  const [outReason, setOutReason] = useState(initial?.out_of_service_reason || "");
   const [capacityUnit, setCapacityUnit] = useState(initial?.capacity_unit || "");
   const [checklistId, setChecklistId] = useState(initial?.default_checklist_template_id || "");
 
@@ -328,6 +472,7 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
       usage_interval: usageInterval === "" ? null : Number(usageInterval),
       usage_last_maintenance: initial?.usage_last_maintenance ?? null,
       operational_status: operationalStatus,
+      ...(operationalStatus === "fuera_servicio" ? { out_of_service_reason: outReason.trim() || null } : {}),
       capacity: String(capacity).trim() === "" ? null : Number(String(capacity).replace(/,/g, "")),
       capacity_unit: String(capacity).trim() === "" ? null : (capacityUnit.trim() || null),
       default_checklist_template_id: checklistId || null,
@@ -376,6 +521,9 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
             <option value="operativo">Operativo</option>
             <option value="fuera_servicio">Fuera de servicio</option>
           </select>
+          {operationalStatus === "fuera_servicio" && (
+            <input className={`${inputClass} mt-2`} style={inputStyle} value={outReason} onChange={(e) => setOutReason(e.target.value)} placeholder="Motivo (ej. compresor quemado, esperando pieza)" maxLength={200} />
+          )}
         </Field>
         {clients && (
           <Field label="Cliente dueño del equipo (opcional)">
@@ -455,6 +603,7 @@ export function EquipmentFormModal({ branches, locations, technicians, clients, 
       {initial?.usage_last_maintenance != null && usageUnit && (
         <div className="text-xs mb-3 -mt-1" style={{ color: C.muted }}>Último mantenimiento generado a las/los {initial.usage_last_maintenance} {usageUnit}. Próximo a las/los {Number(initial.usage_last_maintenance) + (Number(usageInterval) || 0)} {usageUnit}.</div>
       )}
+      {initial?.id && companyId && <EquipmentDocumentsSection equipmentId={initial.id} companyId={companyId} canManage={!!canManageDocs} />}
       {initial && <ActivityHistorySection tableName="equipment" recordId={initial.id} title="Historial de este equipo" resolvers={{ branch_id: (id) => branches.find((b) => b.id === id)?.name, default_technician_id: (id) => branchTechs.find((t) => t.id === id)?.name }} />}
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onClose} className="px-4 py-2 text-sm" style={{ color: C.muted, border: `1px solid ${C.border}` }}>Cancelar</button>
@@ -512,9 +661,9 @@ export function checklistItemsToBlocks(items) {
       if (sec) blocks.push({ id: n++, kind: "section", name: sec });
       currentSection = sec;
     }
-    blocks.push({ id: n++, kind: "item", text: it.text, response_type: it.response_type || "check", range_min: it.range_min ?? "", range_max: it.range_max ?? "" });
+    blocks.push({ id: n++, kind: "item", text: it.text, response_type: it.response_type || "check", range_min: it.range_min ?? "", range_max: it.range_max ?? "", required: it.required !== false, unit: it.unit || "" });
   });
-  if (blocks.length === 0) blocks.push({ id: n++, kind: "item", text: "", response_type: "check", range_min: "", range_max: "" });
+  if (blocks.length === 0) blocks.push({ id: n++, kind: "item", text: "", response_type: "check", range_min: "", range_max: "", required: true, unit: "" });
   return blocks;
 }
 
@@ -524,7 +673,14 @@ export function checklistItemsToBlocks(items) {
 export const checklistItemMark = (it) => {
   if (it.response_type === "ok_no_ok_na") return it.respuesta === "OK" ? "✓" : it.respuesta === "No OK" ? "✗" : it.respuesta === "N/A" ? "N/A" : "";
   if (it.response_type === "numeric") return it.respuesta !== "" && it.respuesta != null ? "✓" : "";
+  if (it.response_type === "photo") return it.photo_path ? "✓" : "";
   return it.checked ? "✓" : "";
+};
+// Respuesta para los informes: la lectura con su unidad; en los de foto, "Foto tomada"
+export const checklistItemAnswerText = (it) => {
+  if (it.response_type === "photo") return it.photo_path ? "Foto tomada" : "";
+  const r = it.respuesta || "";
+  return r && it.response_type === "numeric" && it.unit ? `${r} ${it.unit}` : r;
 };
 
 export function checklistPrintHtml({ companyName, order, branchName, equipName, techName, checklistItems }) {
@@ -534,7 +690,7 @@ export function checklistPrintHtml({ companyName, order, branchName, equipName, 
     <tr>
       <td style="text-align:center;width:60px;">${checklistItemMark(it)}</td>
       <td>${it.text || ""}</td>
-      <td>${it.respuesta || ""}</td>
+      <td>${checklistItemAnswerText(it)}</td>
       <td>${it.observaciones || ""}</td>
     </tr>`;
   const rows = showSections
@@ -569,7 +725,7 @@ export function orderServiceReportHtml({ companyName, order, branchName, equipNa
     <tr>
       <td style="text-align:center;width:50px;">${checklistItemMark(it)}</td>
       <td>${it.text || ""}</td>
-      <td>${it.respuesta || ""}</td>
+      <td>${checklistItemAnswerText(it)}</td>
       <td>${it.observaciones || ""}</td>
     </tr>`;
   const checklistRows = showSections
@@ -1594,6 +1750,7 @@ export function ProjectDetailModal({
 }
 
 export function IncidentFormModal({ branches, equipment, clients, technicians, initial, onClose, onSave, saving, onRequestNewClient, autoSelectClientId, autoSelectToken }) {
+  const [photos, setPhotos] = useState([]);
   const [title, setTitle] = useState(initial?.title || "");
   const [description, setDescription] = useState(initial?.description || "");
   const [branchId, setBranchId] = useState(initial?.branch_id || "");
@@ -1620,7 +1777,7 @@ export function IncidentFormModal({ branches, equipment, clients, technicians, i
       title: title.trim(), description: description.trim() || null, branch_id: branchId || null,
       equipment_id: equipmentId || null, client_id: clientId || null, reported_by: reportedBy.trim() || null, priority,
       technician_id: technicianId || null,
-    });
+    }, photos);
   };
 
   return (
@@ -1662,6 +1819,12 @@ export function IncidentFormModal({ branches, equipment, clients, technicians, i
           </select>
         </Field>
       </div>
+      {!initial?.id && (
+        <Field label="Fotos de la avería (opcional)">
+          <input type="file" accept="image/*" multiple onChange={(e) => setPhotos(Array.from(e.target.files || []))} className={inputClass} style={inputStyle} />
+          {photos.length > 0 && <div className="text-xs mt-1" style={{ color: C.muted }}>{photos.length} foto{photos.length !== 1 ? "s" : ""} (se suben al guardar)</div>}
+        </Field>
+      )}
       <Field label="Cliente relacionado">
         <div className="flex gap-2">
           <div className="flex-1"><SearchSelect items={clients} value={clientId} onChange={setClientId} placeholder="Buscar cliente (opcional)..." getLabel={(c) => c.name} /></div>
@@ -1678,7 +1841,7 @@ export function IncidentFormModal({ branches, equipment, clients, technicians, i
   );
 }
 
-export function IncidentDetailModal({ contractLabel, incident, branchName, equipName, clientName, techName, technicians, orders, quotes, canEdit, canDelete, isTecnico, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete, onSaveProgress, onComplete, onEdit, onAssignTechnician, onReopen }) {
+export function IncidentDetailModal({ companyId, myUserId, contractLabel, incident, branchName, equipName, clientName, techName, technicians, orders, quotes, canEdit, canDelete, isTecnico, onClose, onMarkStatus, onConvertOrder, onConvertQuote, onDelete, onSaveProgress, onComplete, onEdit, onAssignTechnician, onReopen }) {
   const s = INCIDENT_STATUS_CFG[incident.status] || INCIDENT_STATUS_CFG.abierto;
   const p = PRIORITY_CFG[incident.priority] || PRIORITY_CFG.media;
   const linkedOrder = incident.work_order_id ? orders.find((o) => o.id === incident.work_order_id) : null;
@@ -1747,6 +1910,10 @@ export function IncidentDetailModal({ contractLabel, incident, branchName, equip
         </div>
       )}
 
+      {companyId && (
+        <IncidentPhotosSection incident={incident} companyId={companyId} myUserId={myUserId}
+          canAdd={incident.status !== "descartado" && (canEdit || isTecnico)} canDeleteAll={canEdit && !isTecnico} />
+      )}
       {linkedOrder && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Orden vinculada: <span className="font-mono">{linkedOrder.code}</span></div>}
       {linkedQuote && <div className="text-xs mb-2 px-3 py-2" style={{ background: C.panelAlt, color: C.blue }}>Cotización vinculada: <span className="font-mono">{linkedQuote.quote_number}</span></div>}
 
@@ -1812,7 +1979,7 @@ export function ChecklistTemplateFormModal({ initial, onClose, onSave, saving })
   const newBlockId = () => Date.now() + Math.random();
 
   const updateBlock = (id, patch) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
-  const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", text: "", response_type: "check", range_min: "", range_max: "" }]);
+  const addItemRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "item", text: "", response_type: "check", range_min: "", range_max: "", required: true, unit: "" }]);
   const addSectionRow = () => setBlocks((prev) => [...prev, { id: newBlockId(), kind: "section", name: "" }]);
   const removeBlock = (id) => setBlocks((prev) => prev.filter((b) => b.id !== id));
 
@@ -1821,7 +1988,7 @@ export function ChecklistTemplateFormModal({ initial, onClose, onSave, saving })
     const result = [];
     blocks.forEach((b) => {
       if (b.kind === "section") current = b.name.trim();
-      else result.push({ text: b.text, section: current, response_type: b.response_type || "check", range_min: b.range_min, range_max: b.range_max });
+      else result.push({ text: b.text, section: current, response_type: b.response_type || "check", range_min: b.range_min, range_max: b.range_max, required: b.required !== false, unit: b.unit || "" });
     });
     return result;
   }, [blocks]);
@@ -1846,7 +2013,7 @@ export function ChecklistTemplateFormModal({ initial, onClose, onSave, saving })
               newBlocks.push({ id: newBlockId(), kind: "section", name: sec });
               lastSection = sec;
             }
-            newBlocks.push({ id: newBlockId(), kind: "item", text: it.text, response_type: "check", range_min: "", range_max: "" });
+            newBlocks.push({ id: newBlockId(), kind: "item", text: it.text, response_type: "check", range_min: "", range_max: "", required: true, unit: "" });
           });
           return [...existing, ...newBlocks];
         });
@@ -1867,6 +2034,8 @@ export function ChecklistTemplateFormModal({ initial, onClose, onSave, saving })
         response_type: it.response_type || "check",
         range_min: it.response_type === "numeric" && it.range_min !== "" && it.range_min != null ? Number(it.range_min) : null,
         range_max: it.response_type === "numeric" && it.range_max !== "" && it.range_max != null ? Number(it.range_max) : null,
+        required: it.required !== false,
+        unit: it.response_type === "numeric" && String(it.unit || "").trim() ? String(it.unit).trim().slice(0, 20) : null,
       }))
       .filter((it) => it.text);
     if (!equipmentType.trim() || !name.trim() || cleanItems.length === 0) return;
@@ -1909,7 +2078,11 @@ export function ChecklistTemplateFormModal({ initial, onClose, onSave, saving })
                   <option value="check">Cotejo (✓)</option>
                   <option value="ok_no_ok_na">OK / No OK / N/A</option>
                   <option value="numeric">Numérico (con rango)</option>
+                  <option value="photo">Foto (el técnico toma una foto)</option>
                 </select>
+                <label className="flex items-center gap-1 text-xs flex-shrink-0 cursor-pointer" style={{ color: b.required === false ? C.muted : C.text }} title="Si es obligatorio, la orden no se puede cerrar sin responderlo">
+                  <input type="checkbox" checked={b.required !== false} onChange={(e) => updateBlock(b.id, { required: e.target.checked })} /> Obligatorio
+                </label>
                 <button onClick={() => removeBlock(b.id)} style={iconBtnStyle}><X size={16} /></button>
               </div>
               {b.response_type === "numeric" && (
@@ -1918,6 +2091,7 @@ export function ChecklistTemplateFormModal({ initial, onClose, onSave, saving })
                   <input type="number" className={inputClass} style={{ ...inputStyle, maxWidth: 110 }} value={b.range_min} onChange={(e) => updateBlock(b.id, { range_min: e.target.value })} placeholder="Mín" />
                   <span className="text-xs" style={{ color: C.muted }}>a</span>
                   <input type="number" className={inputClass} style={{ ...inputStyle, maxWidth: 110 }} value={b.range_max} onChange={(e) => updateBlock(b.id, { range_max: e.target.value })} placeholder="Máx" />
+                  <input className={inputClass} style={{ ...inputStyle, maxWidth: 110 }} value={b.unit || ""} onChange={(e) => updateBlock(b.id, { unit: e.target.value })} placeholder="Unidad (PSI)" maxLength={20} />
                 </div>
               )}
             </div>
@@ -2290,7 +2464,7 @@ export function MaterialRequestsSection({ order, isTecnico, canManageWarehouse, 
   );
 }
 
-export function OrderDetailModal({ contractLabel, order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onMaterialRequested, onMaterialRequestsChanged, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist, myTechnicianId, canManageVisits, onOrderStatusChange, onVisitsChanged }) {
+export function OrderDetailModal({ contractLabel, order, attachments, checklistItems, checklistTemplates, companyName, branchName, equipName, equipType, techName, technicians, extraTechnicianIds, extraTechnicianRows, onUpdateTechnicianHours, materials, onInventoryChanged, onRegisterLeftover, techUsesProducts, products, productStock, defaultBranchId, canManageWarehouse, onMaterialRequested, onMaterialRequestsChanged, onAddPhoto, onDeletePhoto, clients, onCreateIncidentFromChecklist, onSaveSignature, onClose, onSave, saving, readOnly, isTecnico, onLoadChecklist, onToggleChecklistItem, onChecklistFieldChange, onChecklistFieldBlur, onClearChecklist, onChecklistPhoto, myTechnicianId, canManageVisits, onOrderStatusChange, onVisitsChanged }) {
   const [notes, setNotes] = useState(order.resolution_notes || "");
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [uploadingStage, setUploadingStage] = useState(null);
@@ -2414,12 +2588,32 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
 
   const isImage = (name) => /\.(png|jpe?g|gif|webp)$/i.test(name || "");
   const isChecklistItemAnswered = (it) => {
+    if (it.response_type === "photo") return !!it.photo_path;
     if (it.response_type === "ok_no_ok_na") return !!(it.respuesta && it.respuesta.trim());
     if (it.response_type === "numeric") return !!(it.respuesta && it.respuesta.trim() !== "" && !isNaN(Number(it.respuesta)));
     return !!it.checked;
   };
   const checkedCount = (checklistItems || []).filter(isChecklistItemAnswered).length;
-  const uncheckedCount = (checklistItems || []).length - checkedCount;
+  // Para cerrar solo cuentan los obligatorios
+  const uncheckedCount = (checklistItems || []).filter((it) => it.required !== false && !isChecklistItemAnswered(it)).length;
+  // Fotos de puntos del checklist: enlaces firmados (las tomadas sin señal se ven desde el teléfono)
+  const [ckPhotoUrls, setCkPhotoUrls] = useState({});
+  const [ckPhotoBusy, setCkPhotoBusy] = useState(null);
+  const ckPhotoKey = (checklistItems || []).map((it) => it.photo_path || "").join("|");
+  useEffect(() => {
+    let active = true;
+    const paths = (checklistItems || []).map((it) => it.photo_path).filter((p) => p && !String(p).startsWith("blob:"));
+    if (!paths.length || !isOnline()) return undefined;
+    signedUrlMap(paths).then((m) => { if (active) setCkPhotoUrls((prev) => ({ ...prev, ...m })); });
+    return () => { active = false; };
+    // eslint-disable-next-line
+  }, [ckPhotoKey]);
+  const takeChecklistPhoto = async (it, file) => {
+    if (!file || !onChecklistPhoto) return;
+    setCkPhotoBusy(it.id);
+    await onChecklistPhoto(order, it, file);
+    setCkPhotoBusy(null);
+  };
   const checklistGroups = groupChecklistItemsBySection(checklistItems || []);
   const showChecklistSections = checklistGroups.length > 1 || (checklistGroups[0] && checklistGroups[0].section !== "General");
   const canRemoveChecklist = order.status !== "completada";
@@ -2431,7 +2625,7 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
   const visibleTemplates = (!orderEquipType || showAllTemplates || matchingTemplates.length === 0) ? (checklistTemplates || []) : matchingTemplates;
 
   const closeRequirements = [];
-  if (uncheckedCount > 0) closeRequirements.push(`checklist (${uncheckedCount} punto${uncheckedCount !== 1 ? "s" : ""} sin marcar)`);
+  if (uncheckedCount > 0) closeRequirements.push(`checklist (${uncheckedCount} punto${uncheckedCount !== 1 ? "s" : ""} obligatorio${uncheckedCount !== 1 ? "s" : ""} sin responder)`);
   if (!notes.trim()) closeRequirements.push("nota de cierre");
   if (!order.client_signature_url && !skipReason) closeRequirements.push("firma del cliente (o el motivo por el que no firmó)");
   const canCloseOrder = closeRequirements.length === 0;
@@ -2640,9 +2834,26 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
                     const needsIncident = outOfRange || isBadOkNoOkNa;
                     return (
                     <div key={it.id} className="px-3 py-2" style={{ background: C.panelAlt, border: needsIncident ? `1px solid ${C.red}` : "none" }}>
-                      {it.response_type === "ok_no_ok_na" ? (
+                      {it.response_type === "photo" ? (
                         <div className="mb-2">
-                          <div className="text-sm mb-1" style={{ color: C.text }}>{it.text}</div>
+                          <div className="text-sm mb-1" style={{ color: C.text }}>{it.text}{it.required === false && <span className="text-xs ml-2" style={{ color: C.muted }}>(opcional)</span>}</div>
+                          {it.photo_path && (
+                            <a href={ckPhotoUrls[it.photo_path] || it.photo_local || undefined} target="_blank" rel="noreferrer" className="inline-block mb-1">
+                              {(ckPhotoUrls[it.photo_path] || it.photo_local)
+                                ? <img src={ckPhotoUrls[it.photo_path] || it.photo_local} alt="" className="h-24 w-32 object-cover" style={{ border: `1px solid ${C.border}` }} />
+                                : <span className="text-xs" style={{ color: C.green }}>Foto tomada{String(it.photo_path).startsWith("pending:") ? " · por enviar" : ""}</span>}
+                            </a>
+                          )}
+                          {!readOnly && (
+                            <label className="flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer w-fit" style={{ border: `1px solid ${C.border}`, color: C.amber, opacity: ckPhotoBusy === it.id ? 0.5 : 1 }}>
+                              <ImageIcon size={13} /> {ckPhotoBusy === it.id ? "Subiendo..." : it.photo_path ? "Cambiar foto" : "Tomar foto"}
+                              <input type="file" accept="image/*" capture="environment" disabled={ckPhotoBusy === it.id} className="hidden" onChange={(e) => { takeChecklistPhoto(it, e.target.files?.[0]); e.target.value = ""; }} />
+                            </label>
+                          )}
+                        </div>
+                      ) : it.response_type === "ok_no_ok_na" ? (
+                        <div className="mb-2">
+                          <div className="text-sm mb-1" style={{ color: C.text }}>{it.text}{it.required === false && <span className="text-xs ml-2" style={{ color: C.muted }}>(opcional)</span>}</div>
                           <div className="flex items-center gap-1">
                             {["OK", "No OK", "N/A"].map((opt) => (
                               <button
@@ -2667,9 +2878,11 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
                           <div className="text-sm mb-1" style={{ color: C.text }}>
                             {it.text}
                             {(it.range_min != null || it.range_max != null) && (
-                              <span className="text-xs ml-2" style={{ color: C.muted }}>(rango: {it.range_min ?? "—"} a {it.range_max ?? "—"})</span>
+                              <span className="text-xs ml-2" style={{ color: C.muted }}>(rango: {it.range_min ?? "—"} a {it.range_max ?? "—"}{it.unit ? ` ${it.unit}` : ""})</span>
                             )}
+                            {it.required === false && <span className="text-xs ml-2" style={{ color: C.muted }}>(opcional)</span>}
                           </div>
+                          <div className="flex items-center gap-2">
                           <input
                             type="number"
                             className={inputClass}
@@ -2680,12 +2893,15 @@ export function OrderDetailModal({ contractLabel, order, attachments, checklistI
                             onBlur={(e) => onChecklistFieldBlur(it, "respuesta", e.target.value)}
                             disabled={readOnly}
                           />
+                          {it.unit && <span className="text-sm" style={{ color: C.muted }}>{it.unit}</span>}
+                          </div>
                           {outOfRange && <div className="text-xs mt-1" style={{ color: C.red }}>Fuera del rango esperado.</div>}
                         </div>
                       ) : (
                         <label className="flex items-center gap-2 text-sm cursor-pointer mb-2">
                           <input type="checkbox" checked={it.checked} onChange={(e) => onToggleChecklistItem(it, e.target.checked)} disabled={readOnly} />
                           <span style={{ color: it.checked ? C.muted : C.text, textDecoration: it.checked ? "line-through" : "none" }}>{it.text}</span>
+                          {it.required === false && <span className="text-xs" style={{ color: C.muted }}>(opcional)</span>}
                         </label>
                       )}
                       <div className="grid grid-cols-2 gap-2">

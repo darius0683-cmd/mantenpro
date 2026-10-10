@@ -332,6 +332,18 @@ const EXEC = {
     if (error) throw error;
     return data;
   },
+  // Foto de un punto del checklist: se sube y se anota en el punto
+  async checklist_photo(op) {
+    const p = op.payload;
+    const blob = p.blob || (await blobGet(p.blobKey));
+    if (!blob) throw new Error("La foto ya no está en el teléfono.");
+    const { error: upError } = await supabase.storage.from("evidence").upload(p.path, blob, { contentType: blob.type || undefined, upsert: true });
+    if (upError) throw upError;
+    const { data, error } = await supabase.from("work_order_checklist_items").update({ photo_path: p.path }).eq("id", p.itemId).select("id");
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error("Ese punto del checklist ya no existe en la orden (o no tienes permiso para cambiarlo).");
+    return true;
+  },
   // Material que anota el técnico (queda por aprobar; no toca el inventario)
   async material_request(op) {
     const { data, error } = await supabase.from("work_order_material_requests").insert(op.payload.row).select().single();
@@ -351,7 +363,7 @@ const EXEC = {
   },
 };
 // Fotos y firmas pueden tardar con señal mala: más tiempo antes de darlas por "sin red"
-const opTimeout = (op) => (op.type === "photo" || op.type === "signature" ? 120000 : 30000);
+const opTimeout = (op) => (op.type === "photo" || op.type === "signature" || op.type === "checklist_photo" ? 120000 : 30000);
 
 // ¿Hay sesión válida de Supabase? { userId } si sí; { netErr: true } si no se pudo saber por la red.
 export async function checkSession(ms = 15000) {
@@ -528,7 +540,7 @@ export function startOfflineSync() {
 // ---------------------------------------------------------------------------------------------
 const OP_KIND = {
   visit: "Llegada / salida", checklist_load: "Checklist cargado", checklist_update: "Checklist",
-  order_update: "Orden", signature: "Firma del cliente", photo: "Foto", material_add: "Material usado", material_request: "Material anotado",
+  order_update: "Orden", signature: "Firma del cliente", photo: "Foto", material_add: "Material usado", material_request: "Material anotado", checklist_photo: "Foto del checklist",
 };
 const fmtWhen = (iso) => (iso ? new Date(iso).toLocaleString("es-DO", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 

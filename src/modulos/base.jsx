@@ -616,6 +616,23 @@ export async function compressImage(file, { maxDimension = 1600, quality = 0.82 
     return file;
   }
 }
+// Archivos en el almacenamiento "evidence" (privado): se guarda la ruta y se muestran con enlaces
+// firmados que se piden al abrir. Las rutas llevan la carpeta de la empresa en 2.º lugar
+// (incidents/<empresa>/..., equipment-docs/<empresa>/...), como piden los permisos del almacenamiento.
+export async function uploadEvidenceFile(folder, companyId, prefix, file) {
+  const up = await compressImage(file);
+  const ext = (up.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const path = `${folder}/${companyId}/${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+  const { error } = await supabase.storage.from("evidence").upload(path, up, { contentType: up.type || undefined, upsert: false });
+  if (error) throw error;
+  return { path, name: file.name };
+}
+export async function signedUrlMap(paths, seconds = 3600) {
+  const list = [...new Set((paths || []).filter((p) => p && !String(p).startsWith("blob:")))];
+  if (list.length === 0) return {};
+  const { data } = await supabase.storage.from("evidence").createSignedUrls(list, seconds);
+  return Object.fromEntries((data || []).filter((x) => !x.error && x.signedUrl).map((x) => [x.path, x.signedUrl]));
+}
 // Logo de la empresa: se guarda como imagen pequeña dentro del propio registro de la empresa
 // (data URL). Así sale siempre en facturas, cotizaciones, recibos e informes, sin depender de
 // enlaces de almacenamiento que vencen o que no se pueden abrir desde la ventana de impresión.

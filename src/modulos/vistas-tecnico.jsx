@@ -513,7 +513,7 @@ function equipmentPrintHtml({ mode, list, companyName, filtersNote, branchName, 
 }
 
 // Pantalla: equipment
-export function VistaEquipment({ clients = [], checklistTemplates = [], companyLogo, openEquipmentCard, branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
+export function VistaEquipment({ clients = [], checklistTemplates = [], openDowntimeByEquipment, companyLogo, openEquipmentCard, branchFilter, branchName, branches, bulkDeleteEquipment, canDelete, canEdit, companyId, companyName, deleteEquipment, equipment, equipmentFiltered, equipmentSearch, equipmentStatusFilter, equipmentTechFilter, equipmentTypeFilter, equipmentTypes, locationName, locations, orders, selectedEquipment, setBranchFilter, setEditingEquipment, setEquipment, setEquipmentSearch, setEquipmentStatusFilter, setEquipmentTechFilter, setEquipmentTypeFilter, setHistoryFor, setLocations, setPendingLocationBranch, setSelectedEquipment, setShowAddEquipment, setShowAddLocation, technicians }) {
   // Imprime lo que se ve en pantalla (filtros aplicados) o, si hay equipos marcados, solo esos.
   const printEquipment = (mode) => {
     const list = selectedEquipment.size > 0 ? equipmentFiltered.filter((e) => selectedEquipment.has(e.id)) : equipmentFiltered;
@@ -645,6 +645,17 @@ export function VistaEquipment({ clients = [], checklistTemplates = [], companyL
                         {eq.type && <div className="text-xs" style={{ color: C.muted }}>{eq.type}</div>}
                         <Pill label={eq.operational_status === "fuera_servicio" ? "Fuera de servicio" : "Operativo"} color={eq.operational_status === "fuera_servicio" ? C.red : C.green} />
                       </div>
+                      {eq.operational_status === "fuera_servicio" && (() => {
+                        const d = openDowntimeByEquipment?.get(eq.id);
+                        if (!d && !eq.out_of_service_reason) return null;
+                        const days = d ? Math.floor((Date.now() - new Date(d.started_at).getTime()) / 86400000) : null;
+                        return (
+                          <div className="text-xs mt-1" style={{ color: C.red }}>
+                            {d && <>Desde {fmtDate(String(d.started_at).slice(0, 10))} ({days === 0 ? "hoy" : `${days} día${days !== 1 ? "s" : ""}`})</>}
+                            {(d?.reason || eq.out_of_service_reason) && <span style={{ color: C.muted }}>{d ? " · " : ""}{d?.reason || eq.out_of_service_reason}</span>}
+                          </div>
+                        );
+                      })()}
                       <div className="text-xs mt-3 space-y-1" style={{ color: C.muted }}>
                         {eq.brand && <div>Marca: <span style={{ color: C.text }}>{eq.brand}</span></div>}
                         {eq.model && <div>Modelo: <span style={{ color: C.text }}>{eq.model}</span></div>}
@@ -1304,7 +1315,7 @@ export function VistaChecklists({ canDelete, canEdit, checklistTemplates, delete
 }
 
 // Pantalla: reports
-export function VistaReports({ technicians = [], companyName, equipName, techReportTechFilter = "all", setTechReportTechFilter, avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
+export function VistaReports({ availabilityPeriod, technicians = [], companyName, equipName, techReportTechFilter = "all", setTechReportTechFilter, avgRepairTime, branchFilter, branchName, checklistCompliance, deadlineCompliance, equipChartData, equipStats, incidentEquipChartData, incidentSlaStats, mtbf, overdueOpenOrders, preventiveCompliance, reopenStats, reportsIncidents, reportsOrders, setHistoryFor, setTechReportDateFrom, setTechReportDateTo, techChartData, techName, techReportDateFrom, techReportDateTo, techStats }) {
   const oneTech = techReportTechFilter !== "all" ? technicians.find((t) => t.id === techReportTechFilter) : null;
   // Informe imprimible (en la ventana de impresión se elige "Guardar como PDF")
   const printReport = () => {
@@ -1323,7 +1334,7 @@ export function VistaReports({ technicians = [], companyName, equipName, techRep
     ].map((k) => `<tr><td>${k[0]}</td><td style="text-align:right"><b>${esc(k[1])}</b></td><td class="muted">${esc(k[2])}</td></tr>`).join("");
     const inc = (st) => reportsIncidents.filter((i) => i.status === st).length;
     const techRows = techStats.map((t) => `<tr><td>${esc(t.name)}</td><td style="text-align:center">${t.preventivo}</td><td style="text-align:center">${t.correctivo}</td><td style="text-align:center">${t.predictivo}</td><td style="text-align:center">${t.incidentesTotal}</td><td style="text-align:center">${t.total}</td><td style="text-align:center">${t.reopened}</td><td style="text-align:right">${fmtMoney(t.laborCost)}</td></tr>`).join("");
-    const equipRows = equipStats.filter((e) => e.total > 0 || e.incidentesTotal > 0).map((e) => `<tr><td>${esc(e.name)}</td><td>${esc(branchName(e.branch_id))}</td><td style="text-align:center">${e.open}</td><td style="text-align:center">${e.correctivo}</td><td style="text-align:center">${e.incidentesTotal}</td><td style="text-align:center">${e.total}</td><td style="text-align:right">${fmtMoney(e.laborCost)}</td></tr>`).join("");
+    const equipRows = equipStats.filter((e) => e.total > 0 || e.incidentesTotal > 0 || e.downtimeHours > 0).map((e) => `<tr><td>${esc(e.name)}</td><td>${esc(branchName(e.branch_id))}</td><td style="text-align:center">${e.open}</td><td style="text-align:center">${e.correctivo}</td><td style="text-align:center">${e.incidentesTotal}</td><td style="text-align:center">${e.total}</td><td style="text-align:right">${fmtMoney(e.laborCost)}</td><td style="text-align:right">${e.materialsCost == null ? "—" : fmtMoney(e.materialsCost)}</td><td style="text-align:right"><b>${fmtMoney(e.totalCost)}</b></td><td style="text-align:right">${e.availabilityPct.toFixed(1)}%</td></tr>`).join("");
     const overdueRows = overdueOpenOrders.map((o) => `<tr><td style="white-space:nowrap">${esc(o.code)}</td><td>${esc(o.title)}</td><td>${esc(techName(o.technician_id))}</td><td>${fmtDate(o.deadline)}</td><td style="text-align:right">${o.daysOverdue}</td></tr>`).join("");
     const slaRows = incidentSlaStats.map((x) => `<tr><td>${esc(x.label)}</td><td>${esc(x.responseLabel)} (${x.nResponse})</td><td>${esc(x.resolutionLabel)} (${x.nResolution})</td></tr>`).join("");
     const detail = oneTech ? reportsOrders.slice().sort((a, b) => String(a.scheduled || "").localeCompare(String(b.scheduled || ""))).map((o) => {
@@ -1341,7 +1352,7 @@ export function VistaReports({ technicians = [], companyName, equipName, techRep
       ${sec("Órdenes vencidas — pendientes de cerrar", ["Orden", "Título", "Técnico", "Fecha límite", "Días vencida"], overdueRows, "No hay órdenes vencidas.")}
       ${sec(oneTech ? "Resumen del técnico" : "Desempeño por técnico", ["Técnico", "Prev.", "Correc.", "Predic.", "Incidentes", "Total OT", "Reabiertas", "Costo M.O."], techRows, "Sin técnicos.")}
       ${oneTech ? sec(`Órdenes de ${esc(oneTech.name)} (${reportsOrders.length})`, ["Orden", "Fecha", "Trabajo", "Equipo", "Tipo", "Estado", "Rol", "Horas"], detail, "No tiene órdenes en este período.") : ""}
-      ${sec("Por equipo", ["Equipo", "Sucursal", "Abiertas", "Correctivas", "Incidentes", "Total OT", "Costo M.O."], equipRows, "Sin órdenes en equipos.")}
+      ${sec(`Por equipo (disponibilidad del ${availabilityPeriod ? fmtDate(availabilityPeriod.from) : ""} al ${availabilityPeriod ? fmtDate(availabilityPeriod.to) : ""})`, ["Equipo", "Sucursal", "Abiertas", "Correctivas", "Incidentes", "Total OT", "Mano de obra", "Materiales", "Costo total", "Disponib."], equipRows, "Sin órdenes en equipos.")}
     `);
   };
   return (
@@ -1427,6 +1438,18 @@ export function VistaReports({ technicians = [], companyName, equipName, techRep
                   accent={checklistCompliance.completePct === null ? C.muted : checklistCompliance.completePct >= 95 ? C.green : checklistCompliance.completePct >= 80 ? C.amber : C.red}
                   sub={`${checklistCompliance.complete} de ${checklistCompliance.withChecklist} con checklist quedaron 100% respondidas`}
                 />
+                {equipStats.length > 0 && (() => {
+                  const avg = equipStats.reduce((s2, e) => s2 + e.availabilityPct, 0) / equipStats.length;
+                  const down = equipStats.filter((e) => e.downtimeHours > 0).length;
+                  return (
+                    <KpiCard
+                      label="Disponibilidad de equipos"
+                      value={`${avg.toFixed(1)}%`}
+                      accent={avg >= 98 ? C.green : avg >= 90 ? C.amber : C.red}
+                      sub={`${down} equipo${down !== 1 ? "s" : ""} con tiempo fuera de servicio${availabilityPeriod ? ` · ${fmtDate(availabilityPeriod.from)} al ${fmtDate(availabilityPeriod.to)}` : ""}`}
+                    />
+                  );
+                })()}
               </div>
 
               {overdueOpenOrders.length > 0 && (
@@ -1563,27 +1586,36 @@ export function VistaReports({ technicians = [], companyName, equipName, techRep
                 </div>
               )}
               <div className="overflow-x-auto" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
-                <div className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
-                  <div className="col-span-3">Equipo</div>
-                  <div className="col-span-2 text-center">Abiertas</div>
-                  <div className="col-span-1 text-center">Correctivas</div>
-                  <div className="col-span-1 text-center">Incidentes</div>
+                <div className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-2 text-xs uppercase tracking-wide" style={{ color: C.muted, borderBottom: `1px solid ${C.border}` }}>
+                  <div className="col-span-2">Equipo</div>
+                  <div className="col-span-1 text-center">Abiertas</div>
+                  <div className="col-span-1 text-center">Correct.</div>
+                  <div className="col-span-1 text-center">Incid.</div>
                   <div className="col-span-1 text-center">Total OT</div>
-                  <div className="col-span-2 text-right">Costo M.O.</div>
-                  <div className="col-span-2 text-right">Historial</div>
+                  <div className="col-span-1 text-right">Mano obra</div>
+                  <div className="col-span-1 text-right">Materiales</div>
+                  <div className="col-span-1 text-right">Costo total</div>
+                  <div className="col-span-2 text-right" title="Tiempo que estuvo operativo en el periodo">Disponibilidad</div>
+                  <div className="col-span-1 text-right">Historial</div>
                 </div>
                 {equipStats.map((eq) => (
-                  <div key={eq.id} className="grid grid-cols-12 gap-2 min-w-[860px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <div className="col-span-3">
+                  <div key={eq.id} className="grid grid-cols-12 gap-2 min-w-[1080px] px-4 py-3 items-center text-sm" style={{ borderBottom: `1px solid ${C.border}` }}>
+                    <div className="col-span-2">
                       <div>{eq.name}</div>
                       <div className="text-xs" style={{ color: C.muted }}>{branchName(eq.branch_id)}</div>
                     </div>
-                    <div className="col-span-2 text-center font-mono" style={{ color: eq.open > 0 ? C.amber : C.muted }}>{eq.open}</div>
+                    <div className="col-span-1 text-center font-mono" style={{ color: eq.open > 0 ? C.amber : C.muted }}>{eq.open}</div>
                     <div className="col-span-1 text-center font-mono" style={{ color: eq.correctivo > 0 ? C.red : C.muted }}>{eq.correctivo}</div>
                     <div className="col-span-1 text-center font-mono" style={{ color: eq.incidentesAbiertos > 0 ? C.amber : C.muted }}>{eq.incidentesTotal}</div>
                     <div className="col-span-1 text-center font-mono">{eq.total}</div>
-                    <div className="col-span-2 text-right font-mono" style={{ color: C.muted }}>{fmtMoney(eq.laborCost)}</div>
-                    <div className="col-span-2 text-right">
+                    <div className="col-span-1 text-right font-mono text-xs" style={{ color: C.muted }}>{fmtMoney(eq.laborCost)}</div>
+                    <div className="col-span-1 text-right font-mono text-xs" style={{ color: C.muted }}>{eq.materialsCost == null ? "…" : fmtMoney(eq.materialsCost)}</div>
+                    <div className="col-span-1 text-right font-mono text-xs font-semibold">{fmtMoney(eq.totalCost)}</div>
+                    <div className="col-span-2 text-right font-mono" style={{ color: eq.availabilityPct >= 98 ? C.green : eq.availabilityPct >= 90 ? C.amber : C.red }}>
+                      {eq.availabilityPct.toFixed(1)}%
+                      {eq.downtimeHours > 0 && <div className="text-[10px] font-sans" style={{ color: C.muted }}>{eq.downtimeHours >= 48 ? `${(eq.downtimeHours / 24).toFixed(1)} días` : `${eq.downtimeHours.toFixed(1)} h`} fuera</div>}
+                    </div>
+                    <div className="col-span-1 text-right">
                       <button onClick={() => setHistoryFor({ title: `Historial de ${eq.name}`, orders: reportsOrders.filter((o) => o.equipment_id === eq.id) })} className="flex items-center gap-1 text-xs ml-auto" style={{ color: C.amber }}>
                         <History size={13} /> Ver
                       </button>

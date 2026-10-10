@@ -14,6 +14,7 @@ const openBlank = () => window.open("", "_blank", "width=800,height=900");
 const checkMark = (it) => {
   if (it.response_type === "ok_no_ok_na") return it.respuesta === "OK" ? "✓" : it.respuesta === "No OK" ? "✗" : it.respuesta === "N/A" ? "N/A" : "";
   if (it.response_type === "numeric") return it.respuesta !== "" && it.respuesta != null ? "✓" : "";
+  if (it.response_type === "photo") return it.photo ? "✓" : "";
   return it.checked ? "✓" : "";
 };
 
@@ -23,7 +24,7 @@ function orderReportHtml(company, r) {
   const rows = (r.checklist || []).map((it) => {
     const head = it.section && it.section !== lastSection ? `<tr><td colspan="4" style="background:#f2f2f2;font-weight:bold">${esc(it.section)}</td></tr>` : "";
     lastSection = it.section || lastSection;
-    return `${head}<tr><td style="text-align:center;width:50px">${checkMark(it)}</td><td>${esc(it.text)}</td><td>${esc(it.respuesta)}</td><td>${esc(it.observaciones)}</td></tr>`;
+    return `${head}<tr><td style="text-align:center;width:50px">${checkMark(it)}</td><td>${esc(it.text)}</td><td>${it.response_type === "photo" ? (it.photo ? "Foto tomada" : "") : esc([it.respuesta, it.respuesta && it.unit ? it.unit : ""].filter(Boolean).join(" "))}</td><td>${esc(it.observaciones)}</td></tr>`;
   }).join("");
   return `
     <div class="header-row">
