@@ -157,7 +157,10 @@ export function SupportViewer({ onSignOut }) {
     let next = turningOn ? [...current, mod] : current.filter((m) => m !== mod);
     // Dependencias de las piezas del técnico: una pieza necesita el Técnico base, y
     // Mantenimiento programado / Análisis necesitan Gestión de equipos.
-    const deps = { equipos: ["tecnico"], checklists: ["tecnico"], inventario: ["tecnico"], preventivo: ["tecnico", "equipos"], analisis: ["tecnico", "equipos"] };
+    const deps = {
+      equipos: ["tecnico"], checklists: ["tecnico"], inventario: ["tecnico"], preventivo: ["tecnico", "equipos"], analisis: ["tecnico", "equipos"],
+      recurrentes: ["comercial"], ventas_avanzado: ["comercial"], compras_avanzado: ["comercial"], auditoria: ["administracion"],
+    };
     if (turningOn) (deps[mod] || []).forEach((d) => { if (!next.includes(d)) next.push(d); });
     else next = next.filter((m) => !(deps[m] || []).includes(mod));
     setSavingModules(true);
@@ -358,8 +361,13 @@ export function SupportViewer({ onSignOut }) {
                     { key: "inventario", label: "+ Herramientas" },
                     { key: "preventivo", label: "+ Mantenimiento programado" },
                     { key: "analisis", label: "+ Análisis de equipos" },
-                    { key: "comercial", label: "Comercial" },
+                    { key: "comercial", label: "Comercial (facturación e inventario)" },
+                    { key: "recurrentes", label: "+ Contratos recurrentes" },
+                    { key: "sucursales", label: "+ Varias sucursales" },
+                    { key: "ventas_avanzado", label: "Órdenes de venta y notas de débito (Industrial)" },
+                    { key: "compras_avanzado", label: "Pedidos, notas de entrega y recibos de proveedor (Industrial)" },
                     { key: "administracion", label: "Administración" },
+                    { key: "auditoria", label: "Historial de actividad (Industrial)" },
                     { key: "contable", label: "Gestión Contable" },
                     { key: "nomina", label: "Nómina" },
                   ].map((m) => {

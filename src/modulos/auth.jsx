@@ -164,7 +164,7 @@ export function OnboardingScreen({ onDone }) {
       <div className="w-full max-w-sm p-6" style={{ background: C.panel, border: `1px solid ${C.border}` }}>
         <div className="font-bold text-base mb-1" style={{ color: C.text }}>Configura tu empresa</div>
         <div className="text-xs mb-3" style={{ color: C.muted }}>Este será tu espacio de trabajo — nadie fuera de tu empresa podrá verlo.</div>
-        <div className="text-xs mb-5 px-3 py-2" style={{ background: C.panelAlt, color: C.text, border: `1px solid ${C.border}` }}>Tienes <b>30 días de prueba gratis</b> con todo incluido: órdenes de trabajo, técnicos, equipos, checklists, mantenimiento programado, ventas, facturación y compras.</div>
+        <div className="text-xs mb-5 px-3 py-2" style={{ background: C.panelAlt, color: C.text, border: `1px solid ${C.border}` }}>Tienes <b>30 días de prueba gratis</b> con todo incluido: facturación, caja, inventario, compras, órdenes de trabajo, técnicos, equipos, checklists y mantenimiento programado.</div>
 
         <Field label="Nombre de la empresa">
           <input className={inputClass} style={inputStyle} value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Ej. Grupo Frío RD" />

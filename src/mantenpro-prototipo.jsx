@@ -84,13 +84,13 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
     orders: "tecnico", agenda: "tecnico", incidents: "tecnico", projects: "tecnico", equipment: "equipos",
     checklists: "checklists", technicians: "tecnico", tools: "inventario", materials: "tecnico", maintenanceSchedule: "preventivo",
     reports: "tecnico", equipmentAnalysis: "analisis", serviceContracts: "tecnico",
-    suppliers: "comercial", purchaseOrders: "comercial", deliveryNotes: "comercial", purchases: "comercial",
-    supplierReceipts: "comercial", otherExpenses: "comercial", purchaseLedger: "comercial", quotes: "comercial",
-    salesOrders: "comercial", invoices: "comercial", creditNotes: "comercial", debitNotes: "comercial", recurringContracts: "comercial", caja: "comercial",
+    suppliers: "comercial", purchaseOrders: "compras_avanzado", deliveryNotes: "compras_avanzado", purchases: "comercial",
+    supplierReceipts: "compras_avanzado", otherExpenses: "comercial", purchaseLedger: "compras_avanzado", quotes: "comercial",
+    salesOrders: "ventas_avanzado", invoices: "comercial", creditNotes: "comercial", debitNotes: "ventas_avanzado", recurringContracts: "recurrentes", caja: "comercial",
     salesReports: "comercial",
     chartOfAccounts: "contable", receivables: "contable", payables: "contable", taxRates: ["contable", "comercial"],
     bankReconciliation: "contable", ncf: ["contable", "comercial"], financialReports: "contable", fiscalReports: "contable",
-    activityLog: "administracion",
+    activityLog: "auditoria",
     payroll: "nomina",
   };
   // Un módulo puede ser una lista: basta con tener uno (NCF y Tasas: contable o comercial).
@@ -3277,6 +3277,9 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
       setErrorMsg(`No se pudo emitir la factura: ${error?.message || "respuesta vacía del servidor"}. No se consumió ningún NCF.`);
       return false;
     }
+    if (invoicePrefill?.sourceQuoteId) {
+      await supabase.from("quotes").update({ status: "convertida" }).eq("id", invoicePrefill.sourceQuoteId);
+    }
     setInvoicePrefill(null);
     setShowAddInvoice(false);
     loadAll();
@@ -3923,6 +3926,21 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
   const convertSalesOrderToWorkOrder = (order) => {
     setOrderFromSalesOrder({ salesOrderId: order.id, title: order.title || `Trabajo — ${order.order_number}`, branch_id: "", equipment_id: "", client_id: order.client_id || "" });
     setSalesOrderDetail(null);
+  };
+
+  // Edición Pyme (sin Órdenes de venta): cotización -> factura directo. Al emitirse la
+  // factura, la cotización queda "Convertida en factura".
+  const invoiceQuoteDirect = (quote, items) => {
+    setInvoicePrefill({
+      client_id: quote.client_id,
+      branch_id: quote.branch_id || "",
+      sourceQuoteId: quote.id,
+      title: quote.title,
+      notes: quote.notes || "",
+      items: items.map((it) => ({ product_id: it.product_id || "", description: it.description, quantity: it.quantity, unit_price: it.unit_price, is_taxable: it.is_taxable, chapter: it.chapter || "" })),
+    });
+    setQuoteDetail(null);
+    setShowAddInvoice(true);
   };
 
   const generateInvoiceFromOrder = (order, items) => {
@@ -5129,7 +5147,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
         />
       )}
       {contractForm && (
-        <ServiceContractFormModal initial={contractForm.initial} initialEquipmentIds={contractForm.equipmentIds} clients={clients} equipment={equipment} recurringContracts={recurringContracts} showIguala={companyHasModule("comercial")} onClose={() => setContractForm(null)} onSave={saveServiceContract} saving={saving} />
+        <ServiceContractFormModal initial={contractForm.initial} initialEquipmentIds={contractForm.equipmentIds} clients={clients} equipment={equipment} recurringContracts={recurringContracts} showIguala={companyHasModule("recurrentes")} onClose={() => setContractForm(null)} onSave={saveServiceContract} saving={saving} />
       )}
       {contractDetail && (
         <ServiceContractDetailModal contract={contractById.get(contractDetail.id) || contractDetail} contractEquipment={serviceContractEquipment} clients={clients} equipment={equipment} orders={orders} incidents={incidents} recurringContracts={recurringContracts} companyName={companyName} companyLogo={company?.logo_url} techName={techName} equipName={equipName} canEdit={canEdit("serviceContracts")} onEdit={openContractForm}
@@ -5401,6 +5419,7 @@ function Dashboard({ session, profile, company, onUpdateCompany, onSignOut }) {
           onClose={() => setQuoteDetail(null)}
           onMarkStatus={markQuoteStatus}
           onConvertToOrder={convertQuoteToOrder}
+          onInvoiceDirect={companyHasModule("ventas_avanzado") ? undefined : invoiceQuoteDirect}
           onEdit={openEditQuote}
           onDuplicate={duplicateQuote}
           onDelete={deleteQuote}

@@ -1661,7 +1661,7 @@ export function QuoteFormModal({ clients, products, branches, defaultBranchId, p
   );
 }
 
-export function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, orderInfo, canEdit, canDelete, onClose, onMarkStatus, onConvertToOrder, onEdit, onDuplicate, onDelete }) {
+export function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAddress, companyName, company, bankAccounts, orderInfo, canEdit, canDelete, onClose, onMarkStatus, onConvertToOrder, onInvoiceDirect, onEdit, onDuplicate, onDelete }) {
   const defaultBankAccount = (bankAccounts || []).find((a) => a.is_default) || null;
   const s = QUOTE_STATUS_CFG[quote.status] || QUOTE_STATUS_CFG.pendiente;
   const chapterGroups = groupItemsByChapter(items, (it) => Number(it.subtotal) || 0);
@@ -1754,7 +1754,13 @@ export function QuoteDetailModal({ quote, items, clientName, clientRnc, clientAd
             <button onClick={() => onMarkStatus(quote, "aprobada")} className="px-4 py-2 text-sm" style={{ color: C.green, border: `1px solid ${C.green}40` }}>Marcar aprobada</button>
           </>
         )}
-        {canEdit && quote.status === "aprobada" && (
+        {/* Sin Órdenes de venta (edición Pyme): la cotización se factura directo */}
+        {canEdit && onInvoiceDirect && (quote.status === "pendiente" || quote.status === "aprobada") && (
+          <button onClick={() => onInvoiceDirect(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.amber, color: "#1A1500" }}>
+            <Receipt size={14} /> Facturar
+          </button>
+        )}
+        {canEdit && !onInvoiceDirect && quote.status === "aprobada" && (
           <button onClick={() => onConvertToOrder(quote, items)} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold" style={{ background: C.blue, color: "#08202E" }}>
             <Layers size={14} /> Pasar a Orden de Venta
           </button>
